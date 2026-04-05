@@ -45,15 +45,21 @@ sing-box 内核
 - [x] 任务 1: EngineAdapter + SingBoxAdapter (Clash API HTTP) + CLI REPL
 - [x] 任务 2: Intent Router (中文关键词匹配) + Local Engine (7 个 Action)
 - [x] 任务 3: Tool Pipeline + Hook + Snapshot/Rollback + Telemetry
-- [x] 任务 4: LLM Agent 接入（DeepSeek tool-use 闭环）✅
-- [ ] 任务 5: Agent 角色分工 (Diagnose/Configure/Verify) ← **当前**
-- [ ] 任务 6: Config Overlay + 模板系统
+- [x] 任务 4: LLM Agent (DeepSeek via 硅基流动, tool-use 闭环)
+- [x] 任务 5: Config Overlay + 路由规则修改 + 模板系统 (4 个内置模板)
+- [ ] 任务 6: 修复 Agent 二轮调用 bug ← 正在修
+- [ ] 任务 7: Agent 角色分工 (Diagnose/Configure/Verify)
+- [ ] 任务 8: 对话历史 + 多轮上下文
+- [ ] 任务 9: 真实节点测试
+- [ ] 任务 10: 自动化测试
 
 验证里程碑:
 - [x] sing-box Clash API 端到端可控 ✅
 - [x] libbox iOS framework 编译成功 (gomobile bind) ✅
 - [x] 中文自然语言 → 本地执行 ✅
 - [x] 写操作自动快照 + 失败回滚 ✅
+- [x] LLM Agent tool-use 闭环 ✅ (二轮调用 bug 修复中)
+- [x] Config Overlay 路由规则增删 + 模板 ✅
 
 ## 详细设计文档
 

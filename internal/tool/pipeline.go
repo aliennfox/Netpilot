@@ -29,6 +29,13 @@ func NewPipeline(adapter engine.EngineAdapter, dataDir string) *ToolPipeline {
 	}
 }
 
+// RegisterExtraTools 注册额外的工具（如 overlay tools）
+func (p *ToolPipeline) RegisterExtraTools(extra map[string]*ToolDef) {
+	for name, def := range extra {
+		p.tools[name] = def
+	}
+}
+
 func (p *ToolPipeline) Snapshots() *SnapshotStore   { return p.snapshots }
 func (p *ToolPipeline) Telemetry() *TelemetryLogger { return p.telemetry }
 func (p *ToolPipeline) GetTools() map[string]*ToolDef { return p.tools }

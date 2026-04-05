@@ -33,7 +33,10 @@ const staticPrefix = `你是 NetPilot 的网络管理 Agent。你通过调用工
 - switch_node: 切换活跃节点（参数: group, node）
 - set_mode: 切换代理模式（参数: mode，可选值: global/direct/rule）
 - get_connections: 获取当前活跃连接
-- get_logs: 获取 sing-box 日志（参数: level，可选）`
+- get_logs: 获取 sing-box 日志（参数: level，可选）
+- patch_route_rule: 添加路由规则，将匹配的流量导向指定出站（参数: tag, outbound, domain_suffix/domain）
+- remove_route_rule: 删除 Agent 添加的路由规则（参数: tag）
+- list_route_rules: 列出所有 Agent 添加的路由规则`
 
 // Assemble 组装完整的 system prompt = 静态前缀 + 动态网络状态
 func (pa *PromptAssembler) Assemble(ctx context.Context) string {

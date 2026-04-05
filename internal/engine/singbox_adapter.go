@@ -12,6 +12,7 @@ import (
 
 type SingBoxAdapter struct {
 	baseURL    string
+	configPath string
 	httpClient *http.Client
 }
 
@@ -22,6 +23,16 @@ func NewSingBoxAdapter(baseURL string) *SingBoxAdapter {
 			Timeout: 5 * time.Second,
 		},
 	}
+}
+
+// GetConfigPath 返回当前使用的配置文件路径
+func (a *SingBoxAdapter) GetConfigPath() string {
+	return a.configPath
+}
+
+// SetConfigPath 设置当前使用的配置文件路径
+func (a *SingBoxAdapter) SetConfigPath(path string) {
+	a.configPath = path
 }
 
 // --- Implemented methods (Phase 1) ---
@@ -237,10 +248,40 @@ func (a *SingBoxAdapter) GetLogs(level string, lines int) ([]LogEntry, error) {
 
 // --- Not implemented in Phase 1 ---
 
-func (a *SingBoxAdapter) Start(configPath string) error    { panic("not implemented") }
-func (a *SingBoxAdapter) Stop() error                      { panic("not implemented") }
-func (a *SingBoxAdapter) Reload() error                    { panic("not implemented") }
-func (a *SingBoxAdapter) IsRunning() bool                  { panic("not implemented") }
+func (a *SingBoxAdapter) Start(configPath string) error { panic("not implemented") }
+func (a *SingBoxAdapter) Stop() error                   { panic("not implemented") }
+
+// Reload 通过 Clash API PUT /configs 重载配置
+func (a *SingBoxAdapter) Reload() error {
+	if a.configPath == "" {
+		return fmt.Errorf("未设置配置文件路径，无法重载")
+	}
+
+	body := fmt.Sprintf(`{"path":"%s"}`, a.configPath)
+	req, err := http.NewRequest(http.MethodPut, a.baseURL+"/configs?force=true", strings.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("创建 reload 请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("reload 请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		var errBody struct {
+			Message string `json:"message"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errBody)
+		return fmt.Errorf("reload 失败 (HTTP %d): %s", resp.StatusCode, errBody.Message)
+	}
+	return nil
+}
+
+func (a *SingBoxAdapter) IsRunning() bool { panic("not implemented") }
 func (a *SingBoxAdapter) GetCurrentConfig() ([]byte, error) { panic("not implemented") }
 func (a *SingBoxAdapter) PatchConfig(patch []byte) error   { panic("not implemented") }
 func (a *SingBoxAdapter) ReplaceConfig(config []byte) error { panic("not implemented") }

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 
 	"github.com/foxnetpilot/netpilot/internal/tool"
 )
@@ -31,14 +33,18 @@ func NewAgentLoop(llm *LLMClient, pipeline *tool.ToolPipeline, assembler *Prompt
 }
 
 // Run 执行 Agent 主循环：用户消息 → LLM → tool calls → 执行 → 反馈 → LLM → ...
+//
+// 硅基流动对 tool_calls 消息格式的校验不稳定（相同请求时而通过时而 400），
+// 因此不在消息历史中保留 tool_calls/tool 格式，而是将 tool 调用和结果
+// 转化为纯文本 assistant 消息，再以 user 角色喂回结果。
 func (a *AgentLoop) Run(ctx context.Context, userMessage string) (string, error) {
 	// 1. 组装 system prompt
 	systemPrompt := a.assembler.Assemble(ctx)
 
 	// 2. 初始化消息列表
 	messages := []Message{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userMessage},
+		{Role: "system", Content: StringPtr(systemPrompt)},
+		{Role: "user", Content: StringPtr(userMessage)},
 	}
 
 	// 3. 获取 tool schemas
@@ -71,21 +77,15 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string) (string, error)
 
 		// LLM 完成（不再调用工具），返回最终回复
 		if choice.FinishReason == "stop" || len(choice.Message.ToolCalls) == 0 {
-			return choice.Message.Content, nil
-		}
-
-		// LLM 要调用工具
-		// 把 assistant 消息加入历史（保留 tool_calls 信息）
-		assistantMsg := choice.Message
-		// 确保每个 tool_call 的 type 字段为 "function"（部分 API 响应可能省略）
-		for j := range assistantMsg.ToolCalls {
-			if assistantMsg.ToolCalls[j].Type == "" {
-				assistantMsg.ToolCalls[j].Type = "function"
+			if choice.Message.Content != nil {
+				return *choice.Message.Content, nil
 			}
+			return "", nil
 		}
-		messages = append(messages, assistantMsg)
 
-		// 执行每个 tool call
+		// LLM 要调用工具 → 执行所有 tool calls，将结果拼成纯文本
+		var summaryParts []string
+
 		for _, tc := range choice.Message.ToolCalls {
 			fmt.Printf("\033[36m🤖 [调用工具 %s]\033[0m\n", formatToolCall(tc))
 
@@ -93,12 +93,8 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string) (string, error)
 			var params map[string]interface{}
 			if tc.Function.Arguments != "" {
 				if err := json.Unmarshal([]byte(tc.Function.Arguments), &params); err != nil {
-					// 参数解析失败，返回错误给 LLM
-					messages = append(messages, Message{
-						Role:       "tool",
-						ToolCallID: tc.ID,
-						Content:    fmt.Sprintf(`{"success":false,"message":"参数解析失败: %s"}`, err.Error()),
-					})
+					summaryParts = append(summaryParts,
+						fmt.Sprintf("[%s] 参数解析失败: %s", tc.Function.Name, err.Error()))
 					continue
 				}
 			}
@@ -106,25 +102,42 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string) (string, error)
 			// 通过 Pipeline 执行（走完整的 hook/snapshot/telemetry 流程）
 			result := a.pipeline.Execute(ctx, tc.Function.Name, params)
 
-			// 构造结构化结果返回给 LLM
-			toolResult := map[string]interface{}{
-				"success": result.Success,
-				"message": result.Message,
+			cleanMsg := stripANSI(result.Message)
+			if result.Success {
+				summaryParts = append(summaryParts,
+					fmt.Sprintf("[%s] 成功: %s", tc.Function.Name, cleanMsg))
+			} else {
+				summaryParts = append(summaryParts,
+					fmt.Sprintf("[%s] 失败: %s", tc.Function.Name, cleanMsg))
 			}
-			if result.Data != nil {
-				toolResult["data"] = result.Data
-			}
-			resultJSON, _ := json.Marshal(toolResult)
-
-			messages = append(messages, Message{
-				Role:       "tool",
-				ToolCallID: tc.ID,
-				Content:    string(resultJSON),
-			})
 		}
+
+		// 将 tool 调用结果作为纯文本加入消息历史（避免 tool_calls 格式）
+		// assistant: "我调用了 xxx"
+		// user: "工具执行结果: ..."
+		var callDescs []string
+		for _, tc := range choice.Message.ToolCalls {
+			callDescs = append(callDescs, fmt.Sprintf("%s(%s)", tc.Function.Name, tc.Function.Arguments))
+		}
+		messages = append(messages, Message{
+			Role:    "assistant",
+			Content: StringPtr(fmt.Sprintf("我需要调用工具: %s", strings.Join(callDescs, ", "))),
+		})
+		messages = append(messages, Message{
+			Role:    "user",
+			Content: StringPtr(fmt.Sprintf("工具执行结果:\n%s\n\n请根据结果回复用户。", strings.Join(summaryParts, "\n"))),
+		})
 	}
 
 	return "已达到最大操作步数，停止自动操作。", nil
+}
+
+// ansiRegex 匹配 ANSI 转义序列（终端颜色等）
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// stripANSI 去除字符串中的 ANSI 转义码
+func stripANSI(s string) string {
+	return ansiRegex.ReplaceAllString(s, "")
 }
 
 // formatToolCall 格式化 tool call 用于终端显示

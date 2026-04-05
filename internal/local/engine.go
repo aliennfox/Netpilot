@@ -4,15 +4,19 @@ import (
 	"fmt"
 
 	"github.com/foxnetpilot/netpilot/internal/engine"
+	"github.com/foxnetpilot/netpilot/internal/overlay"
+	"github.com/foxnetpilot/netpilot/internal/template"
 	"github.com/foxnetpilot/netpilot/internal/tool"
 )
 
 // Engine dispatches action IDs to their handler functions.
 type Engine struct {
-	adapter  engine.EngineAdapter
-	pipeline *tool.ToolPipeline
-	actions  map[string]ActionFunc
-	groupTag string // the primary selector group tag
+	adapter   engine.EngineAdapter
+	pipeline  *tool.ToolPipeline
+	overlay   *overlay.ConfigOverlay
+	templates *template.TemplateStore
+	actions   map[string]ActionFunc
+	groupTag  string // the primary selector group tag
 }
 
 // ActionFunc executes an action and returns a human-readable result.
@@ -35,8 +39,22 @@ func NewEngine(adapter engine.EngineAdapter, pipeline *tool.ToolPipeline, primar
 		"show_snapshots":   e.showSnapshots,
 		"do_rollback":      e.doRollback,
 		"show_telemetry":   e.showTelemetry,
+		"apply_template":   e.applyTemplate,
+		"list_templates":   e.listTemplates,
+		"list_rules":       e.listRules,
+		"remove_rule":      e.removeRule,
 	}
 	return e
+}
+
+// SetOverlay 设置 overlay（在 main 中初始化后注入）
+func (e *Engine) SetOverlay(ov *overlay.ConfigOverlay) {
+	e.overlay = ov
+}
+
+// SetTemplates 设置模板仓库
+func (e *Engine) SetTemplates(ts *template.TemplateStore) {
+	e.templates = ts
 }
 
 func (e *Engine) Execute(actionID string, params map[string]string) (string, error) {

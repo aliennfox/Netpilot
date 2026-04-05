@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -220,4 +221,181 @@ func (e *Engine) doRollback(params map[string]string) (string, error) {
 
 func (e *Engine) showTelemetry(_ map[string]string) (string, error) {
 	return e.pipeline.Telemetry().FormatRecent(10), nil
+}
+
+func (e *Engine) applyTemplate(params map[string]string) (string, error) {
+	if e.templates == nil || e.overlay == nil {
+		return "", fmt.Errorf("模板系统未初始化")
+	}
+
+	// 从用户输入中搜索匹配的模板
+	input := params["_input"]
+	if input == "" {
+		// 尝试从所有 params 找一个值
+		for _, v := range params {
+			if v != "" {
+				input = v
+				break
+			}
+		}
+	}
+
+	results := e.templates.Search(input)
+	if len(results) == 0 {
+		// 列出所有可用模板
+		all := e.templates.List()
+		out := "未找到匹配的模板。可用模板:\n"
+		for _, t := range all {
+			out += fmt.Sprintf("  \033[36m%s\033[0m — %s\n", t.ID, t.Name)
+		}
+		return out, nil
+	}
+
+	tmpl := results[0]
+
+	// 确定出站节点：替换 __BEST_PROXY__ 占位符
+	proxyTarget := e.resolveBestProxy()
+
+	ruleCount := 0
+	for _, rule := range tmpl.Rules {
+		r := rule // copy
+		if r.Outbound == "__BEST_PROXY__" {
+			r.Outbound = proxyTarget
+		}
+		if err := e.overlay.AddRule(r); err != nil {
+			return "", fmt.Errorf("添加规则失败: %w", err)
+		}
+		ruleCount += len(r.DomainSuffix) + len(r.Domain) + len(r.IPCidr) + len(r.ProcessName)
+	}
+
+	// 应用（合并+重载）
+	if err := e.overlay.Apply(e.adapter); err != nil {
+		return "", fmt.Errorf("应用配置失败: %w", err)
+	}
+
+	return fmt.Sprintf("\033[32m已应用模板: %s\n已添加 %d 条匹配规则 → %s\n规则已生效。\033[0m",
+		tmpl.Name, ruleCount, proxyTarget), nil
+}
+
+func (e *Engine) listTemplates(_ map[string]string) (string, error) {
+	if e.templates == nil {
+		return "", fmt.Errorf("模板系统未初始化")
+	}
+	all := e.templates.List()
+	if len(all) == 0 {
+		return "没有可用模板。\n", nil
+	}
+	out := "可用分流模板:\n"
+	for _, t := range all {
+		ruleCount := 0
+		for _, r := range t.Rules {
+			ruleCount += len(r.DomainSuffix) + len(r.Domain) + len(r.IPCidr) + len(r.ProcessName)
+		}
+		out += fmt.Sprintf("  \033[36m%-14s\033[0m — %s (%d 条匹配规则)\n", t.ID, t.Name, ruleCount)
+	}
+	return out, nil
+}
+
+func (e *Engine) listRules(_ map[string]string) (string, error) {
+	if e.overlay == nil {
+		return "", fmt.Errorf("Overlay 未初始化")
+	}
+	result := e.pipeline.Execute(context.Background(), "list_route_rules", nil)
+	if !result.Success {
+		return "", fmt.Errorf("%s", result.Message)
+	}
+	return result.Message, nil
+}
+
+func (e *Engine) removeRule(params map[string]string) (string, error) {
+	if e.overlay == nil {
+		return "", fmt.Errorf("Overlay 未初始化")
+	}
+
+	// 尝试从参数获取 tag，或从原始输入中提取
+	tag := params["tag"]
+	if tag == "" {
+		// 从原始输入中提取: "删除规则 netflix" → "netflix"
+		input := params["_input"]
+		tag = extractTagFromInput(input)
+	}
+	if tag == "" {
+		// 列出现有规则让用户选择
+		rules := e.overlay.ListRules()
+		if len(rules) == 0 {
+			return "没有可删除的规则。\n", nil
+		}
+		out := "请指定要删除的规则 tag:\n"
+		for _, r := range rules {
+			out += fmt.Sprintf("  %s — %s\n", r.Tag, r.Description)
+		}
+		return out, nil
+	}
+
+	result := e.pipeline.Execute(context.Background(), "remove_route_rule", map[string]interface{}{
+		"tag": tag,
+	})
+	if !result.Success {
+		return "", fmt.Errorf("%s", result.Message)
+	}
+	return result.Message, nil
+}
+
+// resolveBestProxy 找到当前最快的代理节点，找不到就用 direct-out
+func (e *Engine) resolveBestProxy() string {
+	proxies, err := e.adapter.GetProxies()
+	if err != nil {
+		return "direct-out"
+	}
+	nodes := filterRealNodes(proxies)
+
+	// 过滤掉 direct/block 类型
+	var proxyNodes []engine.ProxyInfo
+	for _, n := range nodes {
+		switch n.Type {
+		case "Direct", "direct", "Reject", "reject", "Block", "block":
+			continue
+		default:
+			proxyNodes = append(proxyNodes, n)
+		}
+	}
+
+	if len(proxyNodes) == 0 {
+		// 没有代理节点，用 direct-out
+		return "direct-out"
+	}
+
+	// 测速找最快的
+	results := testAllLatency(e.adapter, proxyNodes)
+	best := "direct-out"
+	bestLatency := 0
+	for _, r := range results {
+		if r.Latency > 0 && (bestLatency == 0 || r.Latency < bestLatency) {
+			best = r.Tag
+			bestLatency = r.Latency
+		}
+	}
+	return best
+}
+
+// extractTagFromInput 从用户输入中提取 tag
+// "删除规则 netflix" → "netflix"
+// "remove rule google" → "google"
+func extractTagFromInput(input string) string {
+	// 去掉已知前缀
+	prefixes := []string{"删除规则", "移除规则", "remove rule", "delete rule"}
+	for _, p := range prefixes {
+		if strings.HasPrefix(input, p) {
+			tag := strings.TrimSpace(input[len(p):])
+			if tag != "" {
+				return tag
+			}
+		}
+	}
+	// 尝试取最后一个空格分隔的词
+	parts := strings.Fields(input)
+	if len(parts) > 1 {
+		return parts[len(parts)-1]
+	}
+	return ""
 }

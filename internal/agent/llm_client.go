@@ -33,9 +33,15 @@ func NewLLMClient(baseURL, apiKey, model string, timeout time.Duration) *LLMClie
 
 type Message struct {
 	Role       string     `json:"role"`
-	Content    string     `json:"content"`
+	Content    *string    `json:"content"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Name       string     `json:"name,omitempty"`
+}
+
+// StringPtr 返回字符串指针，用于构造 Message.Content
+func StringPtr(s string) *string {
+	return &s
 }
 
 type ToolCall struct {

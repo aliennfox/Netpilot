@@ -81,6 +81,47 @@ var toolParameterSchemas = map[string]json.RawMessage{
 		},
 		"required": ["mode"]
 	}`),
+	"patch_route_rule": json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"tag": {
+				"type": "string",
+				"description": "规则标识，如 netflix、google-custom。自动加 _agent: 前缀"
+			},
+			"domain_suffix": {
+				"type": "string",
+				"description": "域名后缀匹配，逗号分隔，如 .netflix.com,.nflxvideo.net"
+			},
+			"domain": {
+				"type": "string",
+				"description": "精确域名匹配，逗号分隔，如 google.com,github.com"
+			},
+			"outbound": {
+				"type": "string",
+				"description": "目标出站节点名，如 direct-out、block-out 或其他代理节点"
+			},
+			"description": {
+				"type": "string",
+				"description": "规则的人类可读描述"
+			}
+		},
+		"required": ["tag", "outbound"]
+	}`),
+	"remove_route_rule": json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"tag": {
+				"type": "string",
+				"description": "要删除的规则标识（不含 _agent: 前缀，自动补全）"
+			}
+		},
+		"required": ["tag"]
+	}`),
+	"list_route_rules": json.RawMessage(`{
+		"type": "object",
+		"properties": {},
+		"required": []
+	}`),
 }
 
 // ConvertToolsToSchema 将内部 ToolDef 转为 OpenAI API 的 tools 参数格式

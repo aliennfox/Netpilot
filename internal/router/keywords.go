@@ -44,4 +44,24 @@ var KeywordMap = map[string][]string{
 		"操作日志", "历史记录",
 		"telemetry", "history",
 	},
+	"apply_template": {
+		"配netflix", "netflix分流", "奈飞分流", "网飞分流",
+		"配google", "谷歌分流",
+		"社交分流", "twitter分流", "推特分流",
+		"ai分流", "chatgpt分流",
+		"流媒体分流", "配分流",
+		"apply template",
+	},
+	"list_templates": {
+		"有哪些模板", "模板列表", "分流模板",
+		"templates", "list templates",
+	},
+	"list_rules": {
+		"规则列表", "当前规则", "看看规则",
+		"rules", "list rules",
+	},
+	"remove_rule": {
+		"删除规则", "移除规则",
+		"remove rule", "delete rule",
+	},
 }

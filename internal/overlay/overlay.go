@@ -1,0 +1,198 @@
+package overlay
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+
+	"github.com/foxnetpilot/netpilot/internal/engine"
+)
+
+// RouteRule 是 overlay 中的一条路由规则
+type RouteRule struct {
+	Tag          string   `json:"tag"`
+	DomainSuffix []string `json:"domain_suffix,omitempty"`
+	Domain       []string `json:"domain,omitempty"`
+	IPCidr       []string `json:"ip_cidr,omitempty"`
+	ProcessName  []string `json:"process_name,omitempty"`
+	Outbound     string   `json:"outbound"`
+	Description  string   `json:"description"`
+	Source       string   `json:"source"` // "agent" | "template:xxx" | "user"
+}
+
+// Outbound 是 overlay 中的额外出站节点
+type Outbound struct {
+	Type      string   `json:"type"`
+	Tag       string   `json:"tag"`
+	Outbounds []string `json:"outbounds,omitempty"` // selector/urltest 才需要
+}
+
+// OverlayData 是持久化到文件的 overlay 数据
+type OverlayData struct {
+	RouteRules []RouteRule `json:"route_rules"`
+	Outbounds  []Outbound  `json:"outbounds,omitempty"`
+}
+
+// ConfigOverlay 管理增量配置叠加层
+type ConfigOverlay struct {
+	baseConfigPath   string // configs/minimal.json（只读）
+	overlayPath      string // data/overlay.json
+	mergedConfigPath string // data/merged.json（sing-box 实际用的）
+	data             OverlayData
+	mu               sync.RWMutex
+}
+
+func NewConfigOverlay(baseConfigPath, dataDir string) *ConfigOverlay {
+	return &ConfigOverlay{
+		baseConfigPath:   baseConfigPath,
+		overlayPath:      filepath.Join(dataDir, "overlay.json"),
+		mergedConfigPath: filepath.Join(dataDir, "merged.json"),
+	}
+}
+
+// MergedConfigPath 返回合并后的配置文件路径
+func (o *ConfigOverlay) MergedConfigPath() string {
+	return o.mergedConfigPath
+}
+
+// Load 从文件加载 overlay 数据
+func (o *ConfigOverlay) Load() error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	data, err := os.ReadFile(o.overlayPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			o.data = OverlayData{}
+			return nil
+		}
+		return fmt.Errorf("读取 overlay 文件失败: %w", err)
+	}
+	return json.Unmarshal(data, &o.data)
+}
+
+// Save 保存 overlay 数据到文件
+func (o *ConfigOverlay) Save() error {
+	dir := filepath.Dir(o.overlayPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("创建目录失败: %w", err)
+	}
+	data, err := json.MarshalIndent(o.data, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(o.overlayPath, data, 0644)
+}
+
+// AddRule 添加一条路由规则
+func (o *ConfigOverlay) AddRule(rule RouteRule) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	// 如果已存在同 tag 的规则，覆盖
+	for i, r := range o.data.RouteRules {
+		if r.Tag == rule.Tag {
+			o.data.RouteRules[i] = rule
+			return o.saveLocked()
+		}
+	}
+	o.data.RouteRules = append(o.data.RouteRules, rule)
+	return o.saveLocked()
+}
+
+// RemoveRule 按 tag 删除规��
+func (o *ConfigOverlay) RemoveRule(tag string) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	found := false
+	var kept []RouteRule
+	for _, r := range o.data.RouteRules {
+		if r.Tag == tag {
+			found = true
+			continue
+		}
+		kept = append(kept, r)
+	}
+	if !found {
+		return fmt.Errorf("规则 %q 不存在", tag)
+	}
+	o.data.RouteRules = kept
+	return o.saveLocked()
+}
+
+// ListRules 列出所有 overlay 规则
+func (o *ConfigOverlay) ListRules() []RouteRule {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	result := make([]RouteRule, len(o.data.RouteRules))
+	copy(result, o.data.RouteRules)
+	return result
+}
+
+// AddOutbound 添加额外��站节点
+func (o *ConfigOverlay) AddOutbound(ob Outbound) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	for i, existing := range o.data.Outbounds {
+		if existing.Tag == ob.Tag {
+			o.data.Outbounds[i] = ob
+			return o.saveLocked()
+		}
+	}
+	o.data.Outbounds = append(o.data.Outbounds, ob)
+	return o.saveLocked()
+}
+
+// Apply 合并 base + overlay → merged，然后重载 sing-box
+func (o *ConfigOverlay) Apply(adapter engine.EngineAdapter) error {
+	o.mu.RLock()
+	merged, err := MergeConfigs(o.baseConfigPath, &o.data)
+	o.mu.RUnlock()
+	if err != nil {
+		return fmt.Errorf("合并配置失败: %w", err)
+	}
+
+	// 写入 merged 配置
+	dir := filepath.Dir(o.mergedConfigPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("创建目录失败: %w", err)
+	}
+	if err := os.WriteFile(o.mergedConfigPath, merged, 0644); err != nil {
+		return fmt.Errorf("写入 merged 配置失败: %w", err)
+	}
+
+	// 重载 sing-box
+	if err := adapter.Reload(); err != nil {
+		return fmt.Errorf("重载 sing-box 失败: %w", err)
+	}
+	return nil
+}
+
+// GetData 返回当前 overlay 数据的副本
+func (o *ConfigOverlay) GetData() OverlayData {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	result := OverlayData{
+		RouteRules: make([]RouteRule, len(o.data.RouteRules)),
+		Outbounds:  make([]Outbound, len(o.data.Outbounds)),
+	}
+	copy(result.RouteRules, o.data.RouteRules)
+	copy(result.Outbounds, o.data.Outbounds)
+	return result
+}
+
+func (o *ConfigOverlay) saveLocked() error {
+	dir := filepath.Dir(o.overlayPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("创建目录失败: %w", err)
+	}
+	data, err := json.MarshalIndent(o.data, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(o.overlayPath, data, 0644)
+}
