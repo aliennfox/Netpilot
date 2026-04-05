@@ -1,0 +1,257 @@
+package engine
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+)
+
+type SingBoxAdapter struct {
+	baseURL    string
+	httpClient *http.Client
+}
+
+func NewSingBoxAdapter(baseURL string) *SingBoxAdapter {
+	return &SingBoxAdapter{
+		baseURL: strings.TrimRight(baseURL, "/"),
+		httpClient: &http.Client{
+			Timeout: 5 * time.Second,
+		},
+	}
+}
+
+// --- Implemented methods (Phase 1) ---
+
+func (a *SingBoxAdapter) GetProxies() ([]ProxyInfo, error) {
+	resp, err := a.httpClient.Get(a.baseURL + "/proxies")
+	if err != nil {
+		return nil, fmt.Errorf("clash API unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var raw struct {
+		Proxies map[string]json.RawMessage `json:"proxies"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("decode proxies response: %w", err)
+	}
+
+	var proxies []ProxyInfo
+	for tag, data := range raw.Proxies {
+		var p struct {
+			Type string `json:"type"`
+			Now  string `json:"now"`
+		}
+		json.Unmarshal(data, &p)
+		proxies = append(proxies, ProxyInfo{
+			Tag:  tag,
+			Type: p.Type,
+		})
+	}
+	return proxies, nil
+}
+
+func (a *SingBoxAdapter) GetProxyGroup(groupTag string) (*ProxyGroup, error) {
+	resp, err := a.httpClient.Get(a.baseURL + "/proxies/" + groupTag)
+	if err != nil {
+		return nil, fmt.Errorf("clash API unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("proxy group %q not found", groupTag)
+	}
+
+	var raw struct {
+		Type string   `json:"type"`
+		Now  string   `json:"now"`
+		All  []string `json:"all"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("decode proxy group response: %w", err)
+	}
+
+	group := &ProxyGroup{
+		Tag:  groupTag,
+		Type: raw.Type,
+		Now:  raw.Now,
+	}
+	for _, tag := range raw.All {
+		group.All = append(group.All, ProxyInfo{
+			Tag:      tag,
+			GroupTag: groupTag,
+		})
+	}
+	return group, nil
+}
+
+func (a *SingBoxAdapter) SetActiveProxy(groupTag, proxyTag string) error {
+	body := fmt.Sprintf(`{"name":"%s"}`, proxyTag)
+	req, err := http.NewRequest(http.MethodPut, a.baseURL+"/proxies/"+groupTag, strings.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("clash API unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		var errBody struct {
+			Message string `json:"message"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errBody)
+		return fmt.Errorf("switch proxy failed (HTTP %d): %s", resp.StatusCode, errBody.Message)
+	}
+	return nil
+}
+
+func (a *SingBoxAdapter) TestLatency(proxyTag string, url string, timeout time.Duration) (int, error) {
+	reqURL := fmt.Sprintf("%s/proxies/%s/delay?url=%s&timeout=%d",
+		a.baseURL, proxyTag, url, timeout.Milliseconds())
+
+	// Use a longer HTTP timeout for latency tests since the server needs time to probe
+	client := &http.Client{Timeout: timeout + 2*time.Second}
+	resp, err := client.Get(reqURL)
+	if err != nil {
+		return 0, fmt.Errorf("latency test request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errBody struct {
+			Message string `json:"message"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errBody)
+		return 0, fmt.Errorf("latency test failed (HTTP %d): %s", resp.StatusCode, errBody.Message)
+	}
+
+	var result struct {
+		Delay int `json:"delay"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("decode latency response: %w", err)
+	}
+	return result.Delay, nil
+}
+
+func (a *SingBoxAdapter) GetConnections() ([]ConnectionInfo, error) {
+	resp, err := a.httpClient.Get(a.baseURL + "/connections")
+	if err != nil {
+		return nil, fmt.Errorf("clash API unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var raw struct {
+		Connections []struct {
+			ID       string `json:"id"`
+			Metadata struct {
+				Host        string `json:"host"`
+				Destination string `json:"destinationIP"`
+				Process     string `json:"process"`
+				Network     string `json:"network"`
+			} `json:"metadata"`
+			Upload   int64    `json:"upload"`
+			Download int64    `json:"download"`
+			Start    string   `json:"start"`
+			Chains   []string `json:"chains"`
+			Rule     string   `json:"rule"`
+		} `json:"connections"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("decode connections response: %w", err)
+	}
+
+	var conns []ConnectionInfo
+	for _, c := range raw.Connections {
+		dest := c.Metadata.Host
+		if dest == "" {
+			dest = c.Metadata.Destination
+		}
+		chain := ""
+		if len(c.Chains) > 0 {
+			chain = strings.Join(c.Chains, " → ")
+		}
+		conns = append(conns, ConnectionInfo{
+			ID:          c.ID,
+			Destination: dest,
+			Protocol:    c.Metadata.Network,
+			ProcessName: c.Metadata.Process,
+			Upload:      c.Upload,
+			Download:    c.Download,
+			StartTime:   c.Start,
+			Chain:       chain,
+			Rule:        c.Rule,
+		})
+	}
+	return conns, nil
+}
+
+func (a *SingBoxAdapter) GetLogs(level string, lines int) ([]LogEntry, error) {
+	reqURL := a.baseURL + "/logs"
+	if level != "" {
+		reqURL += "?level=" + level
+	}
+
+	// The /logs endpoint is streaming (only delivers new entries, no backlog).
+	// We open it with a short context deadline to collect whatever arrives.
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create logs request: %w", err)
+	}
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		// Timeout is expected — the endpoint streams indefinitely.
+		// Return empty if we simply timed out with no data.
+		return nil, nil
+	}
+	defer resp.Body.Close()
+
+	var logs []LogEntry
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() && len(logs) < lines {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		var entry LogEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			logs = append(logs, LogEntry{Type: "info", Payload: line})
+			continue
+		}
+		logs = append(logs, entry)
+	}
+	return logs, nil
+}
+
+// --- Not implemented in Phase 1 ---
+
+func (a *SingBoxAdapter) Start(configPath string) error    { panic("not implemented") }
+func (a *SingBoxAdapter) Stop() error                      { panic("not implemented") }
+func (a *SingBoxAdapter) Reload() error                    { panic("not implemented") }
+func (a *SingBoxAdapter) IsRunning() bool                  { panic("not implemented") }
+func (a *SingBoxAdapter) GetCurrentConfig() ([]byte, error) { panic("not implemented") }
+func (a *SingBoxAdapter) PatchConfig(patch []byte) error   { panic("not implemented") }
+func (a *SingBoxAdapter) ReplaceConfig(config []byte) error { panic("not implemented") }
+func (a *SingBoxAdapter) ValidateConfig(config []byte) error { panic("not implemented") }
+func (a *SingBoxAdapter) TestLatencyBatch(tags []string, url string, timeout time.Duration) ([]LatencyResult, error) {
+	panic("not implemented")
+}
+func (a *SingBoxAdapter) CloseConnection(id string) error { panic("not implemented") }
+func (a *SingBoxAdapter) GetTrafficStats() (*TrafficStats, error) { panic("not implemented") }
+func (a *SingBoxAdapter) SubscribeLogs(level string) (<-chan LogEntry, func()) {
+	panic("not implemented")
+}
+func (a *SingBoxAdapter) QueryDNS(domain string) (*DNSResult, error) { panic("not implemented") }
+func (a *SingBoxAdapter) OnNetworkChanged()                          { panic("not implemented") }
