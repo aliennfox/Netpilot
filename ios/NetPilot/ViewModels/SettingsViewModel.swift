@@ -66,10 +66,10 @@ class SettingsViewModel: ObservableObject {
     private func showToast(_ message: String, isError: Bool) {
         toastMessage = message
         toastIsError = isError
-        Task {
+        Task { [weak self] in
             try? await Task.sleep(for: .seconds(3))
-            if toastMessage == message {
-                toastMessage = nil
+            if self?.toastMessage == message {
+                self?.toastMessage = nil
             }
         }
     }

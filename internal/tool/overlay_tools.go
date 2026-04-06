@@ -3,11 +3,33 @@ package tool
 import (
 	"context"
 	"fmt"
+	"net"
+	"regexp"
 	"strings"
 
 	"github.com/foxnetpilot/netpilot/internal/engine"
 	"github.com/foxnetpilot/netpilot/internal/overlay"
 )
+
+var domainRegex = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?$`)
+
+func validateDomains(domains []string) error {
+	for _, d := range domains {
+		if len(d) > 253 || !domainRegex.MatchString(d) {
+			return fmt.Errorf("无效的域名格式: %s", d)
+		}
+	}
+	return nil
+}
+
+func validateCIDRs(cidrs []string) error {
+	for _, c := range cidrs {
+		if _, _, err := net.ParseCIDR(c); err != nil {
+			return fmt.Errorf("无效的 CIDR 格式: %s", c)
+		}
+	}
+	return nil
+}
 
 // RegisterOverlayTools 注册需要 ConfigOverlay 的工具
 func RegisterOverlayTools(ov *overlay.ConfigOverlay) map[string]*ToolDef {
@@ -49,6 +71,18 @@ func toolPatchRouteRule(ov *overlay.ConfigOverlay) *ToolDef {
 			if len(rule.DomainSuffix) == 0 && len(rule.Domain) == 0 &&
 				len(rule.IPCidr) == 0 && len(rule.ProcessName) == 0 {
 				return nil, fmt.Errorf("至少需要一种匹配条件: domain_suffix, domain, ip_cidr, 或 process_name")
+			}
+
+			// 校验域名格式
+			if err := validateDomains(rule.Domain); err != nil {
+				return nil, err
+			}
+			if err := validateDomains(rule.DomainSuffix); err != nil {
+				return nil, err
+			}
+			// 校验 CIDR 格式
+			if err := validateCIDRs(rule.IPCidr); err != nil {
+				return nil, err
 			}
 
 			if err := ov.AddRule(rule); err != nil {

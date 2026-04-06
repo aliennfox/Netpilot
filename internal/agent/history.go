@@ -3,12 +3,14 @@ package agent
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
 // ConversationHistory 管理对话历史，支持摘要注入到 system prompt。
 // 不持久化——进程退出即清空。
 type ConversationHistory struct {
+	mu         sync.Mutex
 	messages   []HistoryEntry
 	maxEntries int // 最多保留的消息条数（一问一答 = 2 条）
 }
@@ -31,6 +33,8 @@ func NewConversationHistory(maxEntries int) *ConversationHistory {
 
 // Add 添加一条对话记录
 func (h *ConversationHistory) Add(role, content, source string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.messages = append(h.messages, HistoryEntry{
 		Role:      role,
 		Content:   content,
@@ -45,13 +49,18 @@ func (h *ConversationHistory) Add(role, content, source string) {
 
 // GetRecent 返回最近 n 条消息
 func (h *ConversationHistory) GetRecent(n int) []HistoryEntry {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if n <= 0 || len(h.messages) == 0 {
 		return nil
 	}
 	if n > len(h.messages) {
 		n = len(h.messages)
 	}
-	return h.messages[len(h.messages)-n:]
+	// 返回副本，避免外部持有引用导致竞态
+	result := make([]HistoryEntry, n)
+	copy(result, h.messages[len(h.messages)-n:])
+	return result
 }
 
 // ToMessagesContext 将最近对话压缩为摘要文本，用于注入 system prompt。
@@ -84,6 +93,8 @@ func (h *ConversationHistory) ToMessagesContext() string {
 
 // FormatDisplay 格式化对话历史用于终端显示（/history 命令）
 func (h *ConversationHistory) FormatDisplay() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if len(h.messages) == 0 {
 		return "暂无对话记录。"
 	}
@@ -108,11 +119,15 @@ func (h *ConversationHistory) FormatDisplay() string {
 
 // Clear 清空所有对话历史
 func (h *ConversationHistory) Clear() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.messages = h.messages[:0]
 }
 
 // Len 返回当前消息条数
 func (h *ConversationHistory) Len() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	return len(h.messages)
 }
 

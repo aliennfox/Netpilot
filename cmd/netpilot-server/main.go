@@ -7,8 +7,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/foxnetpilot/netpilot/internal/agent"
@@ -21,6 +24,64 @@ import (
 	"github.com/foxnetpilot/netpilot/internal/template"
 	"github.com/foxnetpilot/netpilot/internal/tool"
 )
+
+// rateLimiter 简单的 token bucket 限流器
+type rateLimiter struct {
+	mu       sync.Mutex
+	tokens   int
+	max      int
+	interval time.Duration
+	lastFill time.Time
+}
+
+func newRateLimiter(maxPerInterval int, interval time.Duration) *rateLimiter {
+	return &rateLimiter{
+		tokens:   maxPerInterval,
+		max:      maxPerInterval,
+		interval: interval,
+		lastFill: time.Now(),
+	}
+}
+
+func (rl *rateLimiter) allow() bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	now := time.Now()
+	if now.Sub(rl.lastFill) >= rl.interval {
+		rl.tokens = rl.max
+		rl.lastFill = now
+	}
+	if rl.tokens > 0 {
+		rl.tokens--
+		return true
+	}
+	return false
+}
+
+// authMiddleware Bearer token 认证中间件
+func authMiddleware(apiToken string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 开发模式：未设置 token 则跳过认证
+		if apiToken == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// GET 请求不需要认证
+		if r.Method == http.MethodGet {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// 写操作需要 Bearer token
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, "Bearer ") || auth[7:] != apiToken {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(APIResponse{Success: false, Error: "unauthorized"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 // APIResponse 统一 API 响应格式
 type APIResponse struct {
@@ -54,6 +115,7 @@ type Server struct {
 	orchestrator *agent.Orchestrator
 	history      *agent.ConversationHistory
 	intentRouter *router.IntentRouter
+	chatLimiter  *rateLimiter
 }
 
 func main() {
@@ -127,6 +189,7 @@ func main() {
 		orchestrator: orchestrator,
 		history:      history,
 		intentRouter: intentRouter,
+		chatLimiter:  newRateLimiter(10, time.Minute),
 	}
 
 	mux := http.NewServeMux()
@@ -163,17 +226,43 @@ func main() {
 	mux.HandleFunc("GET /api/connections", srv.handleGetConnections)
 	mux.HandleFunc("GET /api/logs", srv.handleGetLogs)
 
-	addr := ":8080"
+	// 认证中间件
+	apiToken := os.Getenv("NETPILOT_API_TOKEN")
+	handler := authMiddleware(apiToken, mux)
+
+	addr := "127.0.0.1:8080"
 	log.Printf("NetPilot HTTP Server starting on %s", addr)
 	log.Printf("Clash API: %s", cfg.ClashAPIAddr)
+	if apiToken != "" {
+		log.Printf("Auth: Bearer token 已启用")
+	} else {
+		log.Printf("Auth: 开发模式（无认证）")
+	}
 	if orchestrator != nil {
 		log.Printf("AI Agent: %s (%s)", config.DefaultLLMModel, config.DefaultLLMBaseURL)
 	} else {
 		log.Printf("AI Agent: 未启用 (设置 SILICONFLOW_API_KEY)")
 	}
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("Server failed: %v", err)
+
+	// 优雅关闭
+	httpServer := &http.Server{Addr: addr, Handler: handler}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	log.Println("正在关闭服务器...")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
 	}
+	log.Println("服务器已关闭")
 }
 
 // --- 响应辅助 ---
@@ -361,6 +450,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Message == "" {
 		errJSON(w, http.StatusBadRequest, "message is required")
+		return
+	}
+
+	// 速率限制
+	if !s.chatLimiter.allow() {
+		errJSON(w, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
 		return
 	}
 

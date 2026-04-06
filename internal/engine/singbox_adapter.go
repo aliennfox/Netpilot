@@ -2,10 +2,12 @@ package engine
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"strings"
 	"time"
@@ -68,7 +70,7 @@ func (a *SingBoxAdapter) GetProxies() ([]ProxyInfo, error) {
 }
 
 func (a *SingBoxAdapter) GetProxyGroup(groupTag string) (*ProxyGroup, error) {
-	resp, err := a.httpClient.Get(a.baseURL + "/proxies/" + groupTag)
+	resp, err := a.httpClient.Get(a.baseURL + "/proxies/" + url.PathEscape(groupTag))
 	if err != nil {
 		return nil, fmt.Errorf("clash API unreachable: %w", err)
 	}
@@ -102,8 +104,12 @@ func (a *SingBoxAdapter) GetProxyGroup(groupTag string) (*ProxyGroup, error) {
 }
 
 func (a *SingBoxAdapter) SetActiveProxy(groupTag, proxyTag string) error {
-	body := fmt.Sprintf(`{"name":"%s"}`, proxyTag)
-	req, err := http.NewRequest(http.MethodPut, a.baseURL+"/proxies/"+groupTag, strings.NewReader(body))
+	bodyMap := map[string]string{"name": proxyTag}
+	bodyBytes, err := json.Marshal(bodyMap)
+	if err != nil {
+		return fmt.Errorf("marshal request body: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPut, a.baseURL+"/proxies/"+url.PathEscape(groupTag), bytes.NewReader(bodyBytes))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
@@ -125,9 +131,9 @@ func (a *SingBoxAdapter) SetActiveProxy(groupTag, proxyTag string) error {
 	return nil
 }
 
-func (a *SingBoxAdapter) TestLatency(proxyTag string, url string, timeout time.Duration) (int, error) {
+func (a *SingBoxAdapter) TestLatency(proxyTag string, testURL string, timeout time.Duration) (int, error) {
 	reqURL := fmt.Sprintf("%s/proxies/%s/delay?url=%s&timeout=%d",
-		a.baseURL, proxyTag, url, timeout.Milliseconds())
+		a.baseURL, url.PathEscape(proxyTag), url.QueryEscape(testURL), timeout.Milliseconds())
 
 	// Use a longer HTTP timeout for latency tests since the server needs time to probe
 	client := &http.Client{Timeout: timeout + 2*time.Second}
@@ -249,8 +255,12 @@ func (a *SingBoxAdapter) GetLogs(level string, lines int) ([]LogEntry, error) {
 
 // --- Not implemented in Phase 1 ---
 
-func (a *SingBoxAdapter) Start(configPath string) error { panic("not implemented") }
-func (a *SingBoxAdapter) Stop() error                   { panic("not implemented") }
+func (a *SingBoxAdapter) Start(configPath string) error {
+	return fmt.Errorf("not implemented: Start")
+}
+func (a *SingBoxAdapter) Stop() error {
+	return fmt.Errorf("not implemented: Stop")
+}
 
 // Reload 通过重启 sing-box 进程重载配置
 // sing-box v1.13+ 的 Clash API PUT /configs 不支持切换到不同配置文件，
@@ -282,18 +292,34 @@ func (a *SingBoxAdapter) Reload() error {
 	return fmt.Errorf("sing-box 重启后 Clash API 未就绪 (超时 8s)")
 }
 
-func (a *SingBoxAdapter) IsRunning() bool { panic("not implemented") }
-func (a *SingBoxAdapter) GetCurrentConfig() ([]byte, error) { panic("not implemented") }
-func (a *SingBoxAdapter) PatchConfig(patch []byte) error   { panic("not implemented") }
-func (a *SingBoxAdapter) ReplaceConfig(config []byte) error { panic("not implemented") }
-func (a *SingBoxAdapter) ValidateConfig(config []byte) error { panic("not implemented") }
-func (a *SingBoxAdapter) TestLatencyBatch(tags []string, url string, timeout time.Duration) ([]LatencyResult, error) {
-	panic("not implemented")
+func (a *SingBoxAdapter) IsRunning() bool { return false }
+func (a *SingBoxAdapter) GetCurrentConfig() ([]byte, error) {
+	return nil, fmt.Errorf("not implemented: GetCurrentConfig")
 }
-func (a *SingBoxAdapter) CloseConnection(id string) error { panic("not implemented") }
-func (a *SingBoxAdapter) GetTrafficStats() (*TrafficStats, error) { panic("not implemented") }
+func (a *SingBoxAdapter) PatchConfig(patch []byte) error {
+	return fmt.Errorf("not implemented: PatchConfig")
+}
+func (a *SingBoxAdapter) ReplaceConfig(config []byte) error {
+	return fmt.Errorf("not implemented: ReplaceConfig")
+}
+func (a *SingBoxAdapter) ValidateConfig(config []byte) error {
+	return fmt.Errorf("not implemented: ValidateConfig")
+}
+func (a *SingBoxAdapter) TestLatencyBatch(tags []string, testURL string, timeout time.Duration) ([]LatencyResult, error) {
+	return nil, fmt.Errorf("not implemented: TestLatencyBatch")
+}
+func (a *SingBoxAdapter) CloseConnection(id string) error {
+	return fmt.Errorf("not implemented: CloseConnection")
+}
+func (a *SingBoxAdapter) GetTrafficStats() (*TrafficStats, error) {
+	return nil, fmt.Errorf("not implemented: GetTrafficStats")
+}
 func (a *SingBoxAdapter) SubscribeLogs(level string) (<-chan LogEntry, func()) {
-	panic("not implemented")
+	ch := make(chan LogEntry)
+	close(ch)
+	return ch, func() {}
 }
-func (a *SingBoxAdapter) QueryDNS(domain string) (*DNSResult, error) { panic("not implemented") }
-func (a *SingBoxAdapter) OnNetworkChanged()                          { panic("not implemented") }
+func (a *SingBoxAdapter) QueryDNS(domain string) (*DNSResult, error) {
+	return nil, fmt.Errorf("not implemented: QueryDNS")
+}
+func (a *SingBoxAdapter) OnNetworkChanged() {}

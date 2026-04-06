@@ -302,26 +302,43 @@ func concurrentLatencyTest(adapter engine.EngineAdapter, nodes []engine.ProxyInf
 	results := make([]latencyEntry, len(nodes))
 	var wg sync.WaitGroup
 
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
+	// 并发上限 10
+	sem := make(chan struct{}, 10)
+	// 全局超时
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 
 	for i, n := range nodes {
 		wg.Add(1)
 		go func(idx int, tag string) {
 			defer wg.Done()
-			ms, err := adapter.TestLatency(tag, "https://www.gstatic.com/generate_204", 3*time.Second)
-			results[idx] = latencyEntry{Tag: tag, Latency: ms, Err: err}
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				results[idx] = latencyEntry{Tag: tag, Latency: 0, Err: ctx.Err()}
+				return
+			}
+			// 单个节点超时 5 秒
+			nodeCtx, nodeCancel := context.WithTimeout(ctx, 5*time.Second)
+			defer nodeCancel()
+
+			done := make(chan struct{})
+			go func() {
+				ms, err := adapter.TestLatency(tag, "https://www.gstatic.com/generate_204", 3*time.Second)
+				results[idx] = latencyEntry{Tag: tag, Latency: ms, Err: err}
+				close(done)
+			}()
+
+			select {
+			case <-done:
+			case <-nodeCtx.Done():
+				results[idx] = latencyEntry{Tag: tag, Latency: 0, Err: nodeCtx.Err()}
+			}
 		}(i, n.Tag)
 	}
 
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-	}
-
+	wg.Wait()
 	return results
 }
 
