@@ -28,7 +28,7 @@ func RegisterSubscriptionTools(ov *overlay.ConfigOverlay) map[string]*ToolDef {
 					return &ToolResult{Success: false, Message: fmt.Sprintf("订阅解析失败: %v", err)}, nil
 				}
 
-				// 转换为 sing-box outbound 格式
+				// 转换为 sing-box outbound 格式（信息条目自动跳过）
 				var outbounds []map[string]interface{}
 				var skipped int
 				tagCount := map[string]int{}
@@ -38,6 +38,9 @@ func RegisterSubscriptionTools(ov *overlay.ConfigOverlay) map[string]*ToolDef {
 						fmt.Printf("  ⚠️  跳过节点 %s: %v\n", node.Name, err)
 						skipped++
 						continue
+					}
+					if ob == nil {
+						continue // 信息条目，已跳过
 					}
 					// 处理 tag 重复
 					tag, _ := ob["tag"].(string)
@@ -68,6 +71,9 @@ func RegisterSubscriptionTools(ov *overlay.ConfigOverlay) map[string]*ToolDef {
 					msg += fmt.Sprintf("，跳过 %d 个无效节点", skipped)
 				}
 				msg += "\n已合并配置，sing-box 已重载。"
+				if info := subscription.FormatInfoEntries(nodes); info != "" {
+					msg += fmt.Sprintf("\n📋 订阅信息: %s", info)
+				}
 
 				return &ToolResult{Success: true, Message: msg}, nil
 			},

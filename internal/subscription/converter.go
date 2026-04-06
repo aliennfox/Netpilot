@@ -7,7 +7,12 @@ import (
 )
 
 // ConvertToSingboxOutbound 将 NodeConfig 转为 sing-box outbound 配置
+// 信息条目（IsInfoEntry=true）不转换，返回 nil, nil
 func ConvertToSingboxOutbound(node NodeConfig) (map[string]interface{}, error) {
+	if node.IsInfoEntry {
+		return nil, nil
+	}
+
 	tag := SanitizeTag(node.Name)
 	if tag == "" {
 		tag = fmt.Sprintf("%s-%s-%d", node.Type, node.Server, node.Port)
@@ -214,13 +219,18 @@ func addTransport(ob map[string]interface{}, node NodeConfig) {
 	// tcp 不需要额外传输层配置
 }
 
-// tagCleanRegex 清理 tag 中不允许的字符
-var tagCleanRegex = regexp.MustCompile(`[^\w\-\.\p{Han}\p{Katakana}\p{Hiragana}\p{Hangul}]`)
+// protocolSuffixRegex 匹配节点名末尾的协议类型后缀，如 "(Hysteria2)", "(SS)", " [VMess]" 等
+var protocolSuffixRegex = regexp.MustCompile(`(?i)\s*[\(\[]\s*(hysteria2?|hy2|ss|shadowsocks|trojan|vmess|vless|wireguard|tuic)\s*[\)\]]\s*$`)
+
+// tagCleanRegex 清理 tag 中不允许的字符（只保留中日韩文字、英文字母、数字、连字符）
+var tagCleanRegex = regexp.MustCompile(`[^a-zA-Z0-9\-\p{Han}\p{Katakana}\p{Hiragana}\p{Hangul}]`)
 
 // SanitizeTag 清理节点名作为 sing-box tag（保留中日韩文字、字母数字和连字符）
 func SanitizeTag(name string) string {
 	// 去除前后空白
 	name = strings.TrimSpace(name)
+	// 去除协议类型后缀
+	name = protocolSuffixRegex.ReplaceAllString(name, "")
 	// 替换不允许的字符为连字符
 	name = tagCleanRegex.ReplaceAllString(name, "-")
 	// 合并连续连字符
@@ -235,11 +245,13 @@ func SanitizeTag(name string) string {
 	return name
 }
 
-// SummarizeNodes 统计节点类型
+// SummarizeNodes 统计真实节点类型（排除信息条目）
 func SummarizeNodes(nodes []NodeConfig) string {
 	counts := map[string]int{}
 	for _, n := range nodes {
-		counts[n.Type]++
+		if !n.IsInfoEntry {
+			counts[n.Type]++
+		}
 	}
 	var parts []string
 	order := []string{"shadowsocks", "trojan", "vmess", "vless", "hysteria2"}
@@ -250,6 +262,17 @@ func SummarizeNodes(nodes []NodeConfig) string {
 		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+// FormatInfoEntries 提取信息条目的名称，用 " | " 拼接
+func FormatInfoEntries(nodes []NodeConfig) string {
+	var names []string
+	for _, n := range nodes {
+		if n.IsInfoEntry {
+			names = append(names, n.Name)
+		}
+	}
+	return strings.Join(names, " | ")
 }
 
 // DeduplicateByTag 按 tag 去重，后出现的覆盖先出现的

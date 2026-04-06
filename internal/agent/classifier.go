@@ -58,6 +58,16 @@ func ClassifyTask(input string) TaskPlan {
 		}
 	}
 
+	// "找个/选个/切到/用" + 地区名 → 配置变更
+	if matchesRegionAction(lower) {
+		return TaskPlan{
+			NeedDiagnose:  false,
+			NeedConfigure: true,
+			NeedVerify:    true,
+			Reason:        "地区节点选择请求",
+		}
+	}
+
 	// 无法分类：走全部三个（保险）
 	return TaskPlan{
 		NeedDiagnose:  true,
@@ -79,6 +89,31 @@ func configKeywords() []string {
 func matchesAny(input string, keywords []string) bool {
 	for _, kw := range keywords {
 		if strings.Contains(input, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesRegionAction 检测"动作词+地区名"组合，如"帮我找个最快的日本节点"
+func matchesRegionAction(input string) bool {
+	actions := []string{"找个", "选个", "切到", "用", "换到", "帮我找", "帮我选"}
+	regions := []string{
+		"日本", "香港", "美国", "韩国", "新加坡", "英国", "德国",
+		"台湾", "法国", "巴西", "土耳其", "越南", "泰国", "俄罗斯", "马来西亚",
+	}
+	hasAction := false
+	for _, a := range actions {
+		if strings.Contains(input, a) {
+			hasAction = true
+			break
+		}
+	}
+	if !hasAction {
+		return false
+	}
+	for _, r := range regions {
+		if strings.Contains(input, r) {
 			return true
 		}
 	}

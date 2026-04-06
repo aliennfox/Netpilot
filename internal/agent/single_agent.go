@@ -55,9 +55,10 @@ func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMess
 	// 4. Tool-use 循环
 	for i := 0; i < a.maxIter; i++ {
 		req := CompletionRequest{
-			Model:    a.llm.Model,
-			Messages: messages,
-			Tools:    tools,
+			Model:      a.llm.Model,
+			Messages:   messages,
+			Tools:      tools,
+			ToolChoice: "auto",
 		}
 		if debugAgent {
 			dump, _ := json.MarshalIndent(req, "", "  ")
@@ -130,7 +131,7 @@ func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMess
 		})
 		messages = append(messages, Message{
 			Role:    "user",
-			Content: StringPtr(fmt.Sprintf("工具执行结果:\n%s\n\n请根据结果回复用户。", strings.Join(summaryParts, "\n"))),
+			Content: StringPtr(fmt.Sprintf("工具执行结果:\n%s\n\n如果还有后续步骤需要执行，继续调用工具；如果所有操作已完成，回复用户最终结果。", strings.Join(summaryParts, "\n"))),
 		})
 	}
 

@@ -66,8 +66,9 @@ func toolGetNodePool() *ToolDef {
 			}
 			if len(nodes) > 0 {
 				out += "\033[36m节点:\033[0m\n"
+				out += "  tag | type\n"
 				for _, n := range nodes {
-					out += fmt.Sprintf("  [%s] %s\n", n.Type, n.Tag)
+					out += fmt.Sprintf("  %s | %s\n", n.Tag, n.Type)
 				}
 			}
 			return &ToolResult{Success: true, Message: out}, nil

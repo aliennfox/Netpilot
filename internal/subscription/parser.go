@@ -14,20 +14,36 @@ import (
 
 // NodeConfig 是解析后的通用节点配置
 type NodeConfig struct {
-	Name     string
-	Type     string // "shadowsocks", "trojan", "vmess", "vless"
-	Server   string
-	Port     int
-	Password string            // ss, trojan
-	Method   string            // ss 加密方式
-	UUID     string            // vmess, vless
-	AlterId  int               // vmess
-	Network  string            // vmess/vless 传输层 (ws, tcp, grpc...)
-	TLS      bool
-	SNI      string
-	Path     string            // ws path
-	Host     string            // ws host
-	Extra    map[string]string // 其他未分类参数
+	Name        string
+	Type        string // "shadowsocks", "trojan", "vmess", "vless", "hysteria2"
+	Server      string
+	Port        int
+	Password    string            // ss, trojan, hysteria2
+	Method      string            // ss 加密方式
+	UUID        string            // vmess, vless
+	AlterId     int               // vmess
+	Network     string            // vmess/vless 传输层 (ws, tcp, grpc...)
+	TLS         bool
+	SNI         string
+	Path        string            // ws path
+	Host        string            // ws host
+	Extra       map[string]string // 其他未分类参数
+	IsInfoEntry bool              // 机场塞的信息条目（套餐到期、剩余流量等），非真实节点
+}
+
+// infoKeywords 机场在订阅中塞的信息条目关键词
+var infoKeywords = []string{
+	"套餐", "到期", "剩余流量", "官网", "重置", "过期", "距离", "连不上的时候",
+}
+
+// isInfoEntry 判断节点名是否为信息条目
+func isInfoEntry(name string) bool {
+	for _, kw := range infoKeywords {
+		if strings.Contains(name, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 // FetchAndParse 下载订阅链接并解析节点列表
@@ -78,6 +94,7 @@ func ParseSubscription(raw string) ([]NodeConfig, error) {
 			fmt.Printf("  ⚠️  跳过无法解析的行: %s (%v)\n", truncate(line, 60), err)
 			continue
 		}
+		node.IsInfoEntry = isInfoEntry(node.Name)
 		nodes = append(nodes, node)
 	}
 

@@ -56,9 +56,10 @@ type FunctionCall struct {
 }
 
 type CompletionRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-	Tools    []Tool    `json:"tools,omitempty"`
+	Model      string    `json:"model"`
+	Messages   []Message `json:"messages"`
+	Tools      []Tool    `json:"tools,omitempty"`
+	ToolChoice string    `json:"tool_choice,omitempty"` // "auto", "none", or "required"
 }
 
 type CompletionResponse struct {
