@@ -15,6 +15,7 @@ import (
 	"github.com/foxnetpilot/netpilot/internal/local"
 	"github.com/foxnetpilot/netpilot/internal/overlay"
 	"github.com/foxnetpilot/netpilot/internal/router"
+	"github.com/foxnetpilot/netpilot/internal/subscription"
 	"github.com/foxnetpilot/netpilot/internal/template"
 	"github.com/foxnetpilot/netpilot/internal/tool"
 )
@@ -39,9 +40,16 @@ func main() {
 		fmt.Printf("%s加载 overlay 失败: %v%s\n", colorRed, err, colorReset)
 	}
 
+	// 初始化订阅管理器
+	subStore := subscription.NewSubscriptionStore(cfg.DataDir)
+	if err := subStore.Load(); err != nil {
+		fmt.Printf("%s加载订阅数据失败: %v%s\n", colorRed, err, colorReset)
+	}
+	subMgr := subscription.NewSubscriptionManager(subStore, ov, adapter)
+
 	// 注册 overlay tools 和订阅 tools 到 pipeline
 	pipeline.RegisterExtraTools(tool.RegisterOverlayTools(ov))
-	pipeline.RegisterExtraTools(tool.RegisterSubscriptionTools(ov))
+	pipeline.RegisterExtraTools(tool.RegisterSubscriptionTools(subMgr))
 
 	// 设置 adapter 的配置路径（如果有 merged 配置就用它）
 	mergedPath := ov.MergedConfigPath()
@@ -55,6 +63,11 @@ func main() {
 	ts := template.NewTemplateStore()
 	localEngine.SetOverlay(ov)
 	localEngine.SetTemplates(ts)
+	localEngine.SetSubscriptionManager(subMgr)
+
+	// 启动订阅自动更新
+	subMgr.StartAutoUpdate()
+	defer subMgr.StopAutoUpdate()
 
 	// 初始化 Agent Orchestrator（如果 API Key 可用）
 	var orchestrator *agent.Orchestrator
@@ -199,17 +212,46 @@ func main() {
 			printResult(result)
 		case "import":
 			if len(parts) < 2 {
-				fmt.Println("Usage: import <subscription-url>")
+				fmt.Println("Usage: import <subscription-url> [name]")
 				continue
 			}
-			result, err := localEngine.Execute("import_subscription", map[string]string{
-				"url": parts[1],
-			})
+			params := map[string]string{
+				"url":    parts[1],
+				"_input": line,
+			}
+			result, err := localEngine.Execute("import_subscription", params)
 			if err != nil {
 				fmt.Printf("%s错误: %v%s\n", colorRed, err, colorReset)
 			} else {
 				history.Add("user", line, "local")
 				history.Add("assistant", stripANSIForHistory(result), "local")
+				printResult(result)
+			}
+		case "subs":
+			result, err := localEngine.Execute("list_subscriptions", nil)
+			if err != nil {
+				fmt.Printf("%s错误: %v%s\n", colorRed, err, colorReset)
+			} else {
+				printResult(result)
+			}
+		case "sub-update":
+			p := map[string]string{"_input": line}
+			result, err := localEngine.Execute("update_subscription", p)
+			if err != nil {
+				fmt.Printf("%s错误: %v%s\n", colorRed, err, colorReset)
+			} else {
+				printResult(result)
+			}
+		case "sub-remove":
+			if len(parts) < 2 {
+				fmt.Println("Usage: sub-remove <sub-id>")
+				continue
+			}
+			p := map[string]string{"_input": line}
+			result, err := localEngine.Execute("remove_subscription", p)
+			if err != nil {
+				fmt.Printf("%s错误: %v%s\n", colorRed, err, colorReset)
+			} else {
 				printResult(result)
 			}
 		default:
@@ -305,8 +347,11 @@ func printHelp(agentEnabled bool) {
   /clear                       清空对话历史
 
 %s订阅管理:%s
-  导入订阅 <URL>               从订阅链接导入节点
-  import <URL>                 从订阅链接导入节点
+  导入订阅 <URL> [名称]         从订阅链接导入节点
+  import <URL> [名称]          从订阅链接导入节点
+  订阅列表 / subs              列出所有订阅
+  更新订阅 / sub-update [id]   更新指定订阅或全部
+  删除订阅 / sub-remove <id>   删除订阅及其节点
 
 %s原始命令（向后兼容）:%s
   nodes                        列出节点

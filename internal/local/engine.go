@@ -5,6 +5,7 @@ import (
 
 	"github.com/foxnetpilot/netpilot/internal/engine"
 	"github.com/foxnetpilot/netpilot/internal/overlay"
+	"github.com/foxnetpilot/netpilot/internal/subscription"
 	"github.com/foxnetpilot/netpilot/internal/template"
 	"github.com/foxnetpilot/netpilot/internal/tool"
 )
@@ -15,6 +16,7 @@ type Engine struct {
 	pipeline  *tool.ToolPipeline
 	overlay   *overlay.ConfigOverlay
 	templates *template.TemplateStore
+	subMgr    *subscription.SubscriptionManager
 	actions   map[string]ActionFunc
 	groupTag  string // the primary selector group tag
 }
@@ -44,6 +46,9 @@ func NewEngine(adapter engine.EngineAdapter, pipeline *tool.ToolPipeline, primar
 		"list_rules":       e.listRules,
 		"remove_rule":          e.removeRule,
 		"import_subscription":  e.importSubscription,
+		"list_subscriptions":   e.listSubscriptions,
+		"update_subscription":  e.updateSubscription,
+		"remove_subscription":  e.removeSubscription,
 	}
 	return e
 }
@@ -56,6 +61,11 @@ func (e *Engine) SetOverlay(ov *overlay.ConfigOverlay) {
 // SetTemplates 设置模板仓库
 func (e *Engine) SetTemplates(ts *template.TemplateStore) {
 	e.templates = ts
+}
+
+// SetSubscriptionManager 设置订阅管理器
+func (e *Engine) SetSubscriptionManager(mgr *subscription.SubscriptionManager) {
+	e.subMgr = mgr
 }
 
 func (e *Engine) Execute(actionID string, params map[string]string) (string, error) {

@@ -68,6 +68,18 @@ var KeywordMap = map[string][]string{
 		"导入订阅", "添加订阅", "订阅链接",
 		"import subscription", "add subscription",
 	},
+	"list_subscriptions": {
+		"订阅列表", "我的订阅", "有哪些订阅", "所有订阅",
+		"subs", "list subscriptions",
+	},
+	"update_subscription": {
+		"更新订阅", "刷新订阅",
+		"update subscription", "refresh subscription",
+	},
+	"remove_subscription": {
+		"删除订阅", "移除订阅",
+		"remove subscription", "delete subscription",
+	},
 	"clear_history": {
 		"清空对话", "新对话", "重新开始", "/clear",
 	},

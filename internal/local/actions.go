@@ -342,27 +342,106 @@ func (e *Engine) removeRule(params map[string]string) (string, error) {
 }
 
 func (e *Engine) importSubscription(params map[string]string) (string, error) {
-	if e.overlay == nil {
-		return "", fmt.Errorf("Overlay 未初始化")
+	if e.subMgr == nil {
+		return "", fmt.Errorf("订阅管理器未初始化")
 	}
 
+	input := params["_input"]
 	url := params["url"]
 	if url == "" {
-		// 从原始输入中提取 URL
-		input := params["_input"]
 		url = extractURL(input)
 	}
 	if url == "" {
-		return "请提供订阅链接。用法: import <URL> 或 导入订阅 <URL>\n", nil
+		return "请提供订阅链接。用法: import <URL> [名称]\n", nil
 	}
 
+	// 尝试提取名称：import <url> <name> 或 导入订阅 <url> <name>
+	name := extractNameAfterURL(input, url)
+
 	result := e.pipeline.Execute(context.Background(), "import_subscription", map[string]interface{}{
-		"url": url,
+		"url":  url,
+		"name": name,
 	})
 	if !result.Success {
 		return "", fmt.Errorf("%s", result.Message)
 	}
 	return result.Message, nil
+}
+
+func (e *Engine) listSubscriptions(_ map[string]string) (string, error) {
+	if e.subMgr == nil {
+		return "", fmt.Errorf("订阅管理器未初始化")
+	}
+	result := e.pipeline.Execute(context.Background(), "list_subscriptions", nil)
+	if !result.Success {
+		return "", fmt.Errorf("%s", result.Message)
+	}
+	return result.Message, nil
+}
+
+func (e *Engine) updateSubscription(params map[string]string) (string, error) {
+	if e.subMgr == nil {
+		return "", fmt.Errorf("订阅管理器未初始化")
+	}
+	p := map[string]interface{}{}
+	// 尝试从输入中提取 ID
+	if id := extractSubID(params["_input"]); id != "" {
+		p["id"] = id
+	}
+	result := e.pipeline.Execute(context.Background(), "update_subscription", p)
+	if !result.Success {
+		return "", fmt.Errorf("%s", result.Message)
+	}
+	return result.Message, nil
+}
+
+func (e *Engine) removeSubscription(params map[string]string) (string, error) {
+	if e.subMgr == nil {
+		return "", fmt.Errorf("订阅管理器未初始化")
+	}
+	p := map[string]interface{}{}
+	if id := extractSubID(params["_input"]); id != "" {
+		p["id"] = id
+	}
+	result := e.pipeline.Execute(context.Background(), "remove_subscription", p)
+	if !result.Success {
+		return "", fmt.Errorf("%s", result.Message)
+	}
+	return result.Message, nil
+}
+
+// extractNameAfterURL 提取 URL 后面的名称参数
+func extractNameAfterURL(input, url string) string {
+	idx := strings.Index(input, url)
+	if idx < 0 {
+		return ""
+	}
+	after := strings.TrimSpace(input[idx+len(url):])
+	if after != "" {
+		return after
+	}
+	return ""
+}
+
+// extractSubID 从输入中提取 sub-XX 格式的 ID（sub- 后面跟数字）
+func extractSubID(input string) string {
+	for _, word := range strings.Fields(input) {
+		if len(word) >= 5 && word[:4] == "sub-" {
+			// 确保 sub- 后面是数字
+			rest := word[4:]
+			allDigits := true
+			for _, c := range rest {
+				if c < '0' || c > '9' {
+					allDigits = false
+					break
+				}
+			}
+			if allDigits && len(rest) > 0 {
+				return word
+			}
+		}
+	}
+	return ""
 }
 
 // extractURL 从文本中提取 URL

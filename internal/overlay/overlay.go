@@ -165,6 +165,25 @@ func (o *ConfigOverlay) AddOutboundsBatch(obs []map[string]interface{}) error {
 	return o.saveLocked()
 }
 
+// RemoveOutboundsByTags 按 tag 列表批量删除出站节点
+func (o *ConfigOverlay) RemoveOutboundsByTags(tags []string) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	remove := map[string]bool{}
+	for _, t := range tags {
+		remove[t] = true
+	}
+	var kept []map[string]interface{}
+	for _, ob := range o.data.Outbounds {
+		if tag, _ := ob["tag"].(string); !remove[tag] {
+			kept = append(kept, ob)
+		}
+	}
+	o.data.Outbounds = kept
+	return o.saveLocked()
+}
+
 // OutboundTags 返回所有 overlay 出站节点的 tag
 func (o *ConfigOverlay) OutboundTags() []string {
 	o.mu.RLock()
