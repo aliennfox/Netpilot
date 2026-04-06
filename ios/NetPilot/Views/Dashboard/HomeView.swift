@@ -23,12 +23,7 @@ struct HomeView: View {
 
                 switch mode {
                 case .dashboard:
-                    DashboardView(onQuickAction: { command in
-                        Task {
-                            await chatVM.sendQuickAction(command)
-                            mode = .chat
-                        }
-                    })
+                    DashboardView()
                 case .chat:
                     ChatView(viewModel: chatVM)
                 }

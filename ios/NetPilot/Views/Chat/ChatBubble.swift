@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ChatBubble: View {
     let message: ChatMessage
+    var isProcessing: Bool = false
     let onAction: (String) -> Void
 
     private var isUser: Bool { message.role == .user }
@@ -27,12 +28,15 @@ struct ChatBubble: View {
                             Button(action: { onAction(action.command) }) {
                                 Text(action.label)
                                     .font(.system(size: 13))
-                                    .foregroundStyle(Theme.textPrimary)
+                                    .foregroundStyle(
+                                        isProcessing ? Theme.textTertiary : Theme.textPrimary
+                                    )
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 6)
                                     .background(Theme.backgroundTertiary)
                                     .clipShape(Capsule())
                             }
+                            .disabled(isProcessing)
                         }
                     }
                 }

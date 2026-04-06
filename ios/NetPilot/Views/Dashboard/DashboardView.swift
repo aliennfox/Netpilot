@@ -2,7 +2,6 @@ import SwiftUI
 
 struct DashboardView: View {
     @StateObject private var vm = DashboardViewModel()
-    var onQuickAction: ((String) -> Void)?
 
     var body: some View {
         ScrollView {
@@ -14,9 +13,6 @@ struct DashboardView: View {
                 )
                 TrafficCard(status: vm.status)
                 SubscriptionCard()
-                QuickActionsCard(onAction: { command in
-                    onQuickAction?(command)
-                })
             }
             .padding(16)
         }

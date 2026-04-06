@@ -10,12 +10,17 @@ class APIClient {
     static let shared = APIClient()
     private let baseURL = "http://localhost:8080"
     private let session: URLSession
+    private let chatSession: URLSession  // Agent/LLM 请求用长超时
     private let decoder: JSONDecoder
 
     private init() {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
         session = URLSession(configuration: config)
+
+        let chatConfig = URLSessionConfiguration.default
+        chatConfig.timeoutIntervalForRequest = 120
+        chatSession = URLSession(configuration: chatConfig)
 
         decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -55,7 +60,7 @@ class APIClient {
     // MARK: - Chat
 
     func sendChat(message: String) async throws -> ChatResponseData {
-        return try await post("/api/chat", body: ["message": message])
+        return try await post("/api/chat", body: ["message": message], using: chatSession)
     }
 
     // MARK: - Rules
@@ -103,13 +108,13 @@ class APIClient {
         return result
     }
 
-    private func post<T: Decodable, B: Encodable>(_ path: String, body: B) async throws -> T {
+    private func post<T: Decodable, B: Encodable>(_ path: String, body: B, using overrideSession: URLSession? = nil) async throws -> T {
         var request = URLRequest(url: URL(string: baseURL + path)!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(body)
 
-        let (data, _) = try await session.data(for: request)
+        let (data, _) = try await (overrideSession ?? session).data(for: request)
         let response = try decoder.decode(APIResponse<T>.self, from: data)
         if !response.success {
             throw APIError.serverError(response.error ?? "unknown error")
