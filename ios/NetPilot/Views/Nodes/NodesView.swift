@@ -29,20 +29,54 @@ struct NodesView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
 
-                    // 节点列表
+                    // 分组节点列表
                     ScrollView {
-                        LazyVStack(spacing: 1) {
-                            ForEach(vm.filteredNodes) { node in
-                                NodeRow(
-                                    node: node,
-                                    isSwitching: vm.switchingTag == node.tag,
-                                    isTesting: vm.isTesting
-                                ) {
-                                    Task { await vm.switchNode(node.tag) }
+                        LazyVStack(spacing: 12) {
+                            ForEach(vm.filteredGroups) { group in
+                                VStack(spacing: 0) {
+                                    // 分组标题（可折叠）
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            vm.toggleGroup(group.id)
+                                        }
+                                    } label: {
+                                        HStack(spacing: 8) {
+                                            Image(systemName: vm.collapsedGroups.contains(group.id) ? "chevron.right" : "chevron.down")
+                                                .font(.system(size: 12, weight: .semibold))
+                                                .foregroundStyle(Theme.textTertiary)
+                                                .frame(width: 16)
+                                            Text(group.name)
+                                                .font(.system(size: 15, weight: .semibold))
+                                                .foregroundStyle(Theme.textSecondary)
+                                            Text("(\(group.nodeCount) 个节点)")
+                                                .font(.system(size: 13))
+                                                .foregroundStyle(Theme.textTertiary)
+                                            Spacer()
+                                        }
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 8)
+                                    }
+
+                                    // 节点行
+                                    if !vm.collapsedGroups.contains(group.id) {
+                                        VStack(spacing: 1) {
+                                            ForEach(group.nodes) { node in
+                                                NodeRow(
+                                                    node: node,
+                                                    isSwitching: vm.switchingTag == node.tag,
+                                                    isTesting: vm.isTesting
+                                                ) {
+                                                    Task { await vm.switchNode(node.tag) }
+                                                }
+                                            }
+                                        }
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        .padding(.horizontal, 16)
+                                    }
                                 }
                             }
                         }
-                        .padding(.horizontal, 16)
+                        .padding(.bottom, 16)
                     }
                 }
 

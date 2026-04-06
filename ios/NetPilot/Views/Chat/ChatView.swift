@@ -13,42 +13,46 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 消息列表 — 反转 ScrollView 技巧，新消息自动出现在底部
-            ScrollView {
-                VStack(spacing: 12) {
-                    // 反转后 VStack 第一个元素在视觉最底部
-                    // 所以 loading 放最前，消息倒序排列
-
-                    if viewModel.isLoading {
-                        HStack {
-                            ProgressView()
-                                .tint(Theme.accentPurple)
-                            Text("AI 处理中...")
-                                .font(.system(size: 13))
-                                .foregroundStyle(Theme.textSecondary)
-                            Spacer()
+            // 消息列表
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(viewModel.messages) { message in
+                            ChatBubble(
+                                message: message,
+                                isProcessing: viewModel.isProcessing
+                            ) { command in
+                                Task { await viewModel.sendQuickAction(command) }
+                            }
                         }
-                        .padding(.horizontal, 16)
-                        .rotationEffect(.degrees(180))
-                        .scaleEffect(x: -1, y: 1, anchor: .center)
+
+                        // Typing indicator
+                        if viewModel.isLoading {
+                            TypingIndicator()
+                        }
+
+                        // 底部锚点
+                        Color.clear
+                            .frame(height: 1)
+                            .id("bottom")
                     }
-
-                    ForEach(viewModel.messages.reversed()) { message in
-                        ChatBubble(
-                            message: message,
-                            isProcessing: viewModel.isProcessing
-                        ) { command in
-                            Task { await viewModel.sendQuickAction(command) }
+                    .padding(16)
+                }
+                .onChange(of: viewModel.messages.count) { _, _ in
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
                         }
-                        .rotationEffect(.degrees(180))
-                        .scaleEffect(x: -1, y: 1, anchor: .center)
                     }
                 }
-                .padding(16)
+                .onChange(of: viewModel.isLoading) { _, _ in
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
+                    }
+                }
             }
-            // 反转整个 ScrollView：顶部变底部，新消息自然出现在可视区域底部
-            .rotationEffect(.degrees(180))
-            .scaleEffect(x: -1, y: 1, anchor: .center)
 
             // 建议按钮栏
             suggestionsBar
@@ -122,6 +126,38 @@ struct ChatView: View {
             .padding(.vertical, 8)
         }
         .background(Theme.backgroundSecondary)
+    }
+}
+
+// MARK: - Typing Indicator (三点跳动动画)
+
+struct TypingIndicator: View {
+    @State private var animating = false
+
+    var body: some View {
+        HStack {
+            HStack(spacing: 4) {
+                ForEach(0..<3) { index in
+                    Circle()
+                        .fill(Theme.accentPurple)
+                        .frame(width: 8, height: 8)
+                        .offset(y: animating ? -4 : 4)
+                        .animation(
+                            .easeInOut(duration: 0.5)
+                                .repeatForever(autoreverses: true)
+                                .delay(Double(index) * 0.15),
+                            value: animating
+                        )
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Theme.backgroundTertiary)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+
+            Spacer(minLength: 40)
+        }
+        .onAppear { animating = true }
     }
 }
 

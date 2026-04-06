@@ -2,6 +2,8 @@ import SwiftUI
 
 struct RulesView: View {
     @StateObject private var vm = RulesViewModel()
+    @State private var ruleToDelete: RuleModel?
+    @State private var templateToApply: TemplateModel?
 
     var body: some View {
         NavigationStack {
@@ -17,7 +19,7 @@ struct RulesView: View {
                                         rule: rule,
                                         isDeleting: vm.deletingRuleTag == rule.tag
                                     ) {
-                                        Task { await vm.deleteRule(tag: rule.tag) }
+                                        ruleToDelete = rule
                                     }
                                 }
                             }
@@ -32,7 +34,7 @@ struct RulesView: View {
                                     template: tpl,
                                     isApplying: vm.applyingTemplateId == tpl.id
                                 ) {
-                                    Task { await vm.applyTemplate(id: tpl.id) }
+                                    templateToApply = tpl
                                 }
                             }
                         }
@@ -64,6 +66,40 @@ struct RulesView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .refreshable { await vm.loadAll() }
             .task { await vm.loadAll() }
+            // 删除确认弹窗
+            .alert("删除规则", isPresented: Binding(
+                get: { ruleToDelete != nil },
+                set: { if !$0 { ruleToDelete = nil } }
+            )) {
+                Button("取消", role: .cancel) { ruleToDelete = nil }
+                Button("删除", role: .destructive) {
+                    if let rule = ruleToDelete {
+                        Task { await vm.deleteRule(tag: rule.tag) }
+                        ruleToDelete = nil
+                    }
+                }
+            } message: {
+                if let rule = ruleToDelete {
+                    Text("确定要删除规则「\(rule.tag)」吗？此操作不可撤销。")
+                }
+            }
+            // 应用模板确认弹窗
+            .alert("应用模板", isPresented: Binding(
+                get: { templateToApply != nil },
+                set: { if !$0 { templateToApply = nil } }
+            )) {
+                Button("取消", role: .cancel) { templateToApply = nil }
+                Button("应用") {
+                    if let tpl = templateToApply {
+                        Task { await vm.applyTemplate(id: tpl.id) }
+                        templateToApply = nil
+                    }
+                }
+            } message: {
+                if let tpl = templateToApply {
+                    Text("确定要应用模板「\(tpl.name)」吗？将添加对应的路由规则。")
+                }
+            }
         }
     }
 }
@@ -111,9 +147,19 @@ struct RuleRow: View {
             Text(rule.description)
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textSecondary)
-            Text("\(rule.summary) → \(rule.outbound)")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textTertiary)
+            HStack(spacing: 8) {
+                if rule.domainCount > 0 {
+                    Label("\(rule.domainCount) 域名", systemImage: "globe")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.textTertiary)
+                Text(rule.outbound)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.accentBlue)
+            }
         }
         .padding(12)
         .background(Theme.backgroundSecondary)
