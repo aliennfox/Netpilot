@@ -47,8 +47,8 @@ sing-box 内核
 - [x] 任务 3: Tool Pipeline + Hook + Snapshot/Rollback + Telemetry
 - [x] 任务 4: LLM Agent (DeepSeek via 硅基流动, tool-use 闭环)
 - [x] 任务 5: Config Overlay + 路由规则修改 + 模板系统 (4 个内置模板)
-- [ ] 任务 6: 修复 Agent 二轮调用 bug ← 正在修
-- [ ] 任务 7: Agent 角色分工 (Diagnose/Configure/Verify)
+- [x] 任务 6: 修复 Agent 二轮调用 bug (纯文本消息格式绕过硅基流动校验)
+- [x] 任务 7: Agent 角色分工 (Diagnose/Configure/Verify Orchestrator)
 - [ ] 任务 8: 对话历史 + 多轮上下文
 - [ ] 任务 9: 真实节点测试
 - [ ] 任务 10: 自动化测试
@@ -58,7 +58,8 @@ sing-box 内核
 - [x] libbox iOS framework 编译成功 (gomobile bind) ✅
 - [x] 中文自然语言 → 本地执行 ✅
 - [x] 写操作自动快照 + 失败回滚 ✅
-- [x] LLM Agent tool-use 闭环 ✅ (二轮调用 bug 修复中)
+- [x] LLM Agent tool-use 闭环 ✅
+- [x] Agent 三角色分工 + Orchestrator 编排 ✅
 - [x] Config Overlay 路由规则增删 + 模板 ✅
 
 ## 详细设计文档

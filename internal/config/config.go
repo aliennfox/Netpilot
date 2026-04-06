@@ -9,7 +9,7 @@ const (
 	// LLM
 	DefaultLLMBaseURL = "https://api.siliconflow.cn/v1"
 	DefaultLLMModel   = "deepseek-ai/DeepSeek-V3"
-	DefaultLLMTimeout = 30 // seconds
+	DefaultLLMTimeout = 60 // seconds
 	DefaultMaxIter    = 10
 )
 

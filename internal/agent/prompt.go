@@ -38,12 +38,25 @@ const staticPrefix = `你是 NetPilot 的网络管理 Agent。你通过调用工
 - remove_route_rule: 删除 Agent 添加的路由规则（参数: tag）
 - list_route_rules: 列出所有 Agent 添加的路由规则`
 
-// Assemble 组装完整的 system prompt = 静态前缀 + 动态网络状态
+// Assemble 组装完整的 system prompt = 静态前缀 + 动态网络状态（向后兼容）
 func (pa *PromptAssembler) Assemble(ctx context.Context) string {
 	var b strings.Builder
 	b.WriteString(staticPrefix)
 
-	// 尝试获取动态网络状态，失败则跳过（sing-box 可能未运行）
+	dynamic := pa.buildDynamicSuffix()
+	if dynamic != "" {
+		b.WriteString("\n\n")
+		b.WriteString(dynamic)
+	}
+
+	return b.String()
+}
+
+// AssembleForRole 按角色组装 system prompt = 角色专用 prompt + 动态网络状态
+func (pa *PromptAssembler) AssembleForRole(ctx context.Context, role *AgentRole) string {
+	var b strings.Builder
+	b.WriteString(role.SystemPrompt)
+
 	dynamic := pa.buildDynamicSuffix()
 	if dynamic != "" {
 		b.WriteString("\n\n")

@@ -1,4 +1,4 @@
 data/
 .singbox.pid
 .DS_Store
-netpilot
+/netpilot

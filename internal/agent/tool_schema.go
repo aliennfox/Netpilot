@@ -124,12 +124,40 @@ var toolParameterSchemas = map[string]json.RawMessage{
 	}`),
 }
 
-// ConvertToolsToSchema 将内部 ToolDef 转为 OpenAI API 的 tools 参数格式
+// ConvertToolsToSchema 将内部 ToolDef 转为 OpenAI API 的 tools 参数格式（全量，向后兼容）
 func ConvertToolsToSchema(tools map[string]*tool.ToolDef) []Tool {
 	var result []Tool
 	for name, td := range tools {
 		// 不暴露 snapshot 和 rollback
 		if name == "snapshot" || name == "rollback" {
+			continue
+		}
+		schema, ok := toolParameterSchemas[name]
+		if !ok {
+			continue
+		}
+		result = append(result, Tool{
+			Type: "function",
+			Function: ToolFunction{
+				Name:        name,
+				Description: td.Description,
+				Parameters:  schema,
+			},
+		})
+	}
+	return result
+}
+
+// ConvertToolsForRole 按角色白名单过滤，只返回该角色允许使用的 tool schema
+func ConvertToolsForRole(tools map[string]*tool.ToolDef, allowedTools []string) []Tool {
+	allowed := make(map[string]bool, len(allowedTools))
+	for _, name := range allowedTools {
+		allowed[name] = true
+	}
+
+	var result []Tool
+	for name, td := range tools {
+		if !allowed[name] {
 			continue
 		}
 		schema, ok := toolParameterSchemas[name]

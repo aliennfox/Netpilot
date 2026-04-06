@@ -1,0 +1,261 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/foxnetpilot/netpilot/internal/agent"
+	"github.com/foxnetpilot/netpilot/internal/config"
+	"github.com/foxnetpilot/netpilot/internal/engine"
+	"github.com/foxnetpilot/netpilot/internal/local"
+	"github.com/foxnetpilot/netpilot/internal/overlay"
+	"github.com/foxnetpilot/netpilot/internal/router"
+	"github.com/foxnetpilot/netpilot/internal/template"
+	"github.com/foxnetpilot/netpilot/internal/tool"
+)
+
+const (
+	colorReset = "\033[0m"
+	colorRed   = "\033[31m"
+	colorCyan  = "\033[36m"
+)
+
+func main() {
+	cfg := config.Default()
+	adapter := engine.NewSingBoxAdapter(cfg.ClashAPIAddr)
+	pipeline := tool.NewPipeline(adapter, cfg.DataDir)
+	intentRouter := router.NewIntentRouter()
+	localEngine := local.NewEngine(adapter, pipeline, "proxy-group")
+
+	// 初始化 Config Overlay + 模板系统
+	baseConfig := "configs/minimal.json"
+	ov := overlay.NewConfigOverlay(baseConfig, cfg.DataDir)
+	if err := ov.Load(); err != nil {
+		fmt.Printf("%s加载 overlay 失败: %v%s\n", colorRed, err, colorReset)
+	}
+
+	// 注册 overlay tools 到 pipeline
+	pipeline.RegisterExtraTools(tool.RegisterOverlayTools(ov))
+
+	// 设置 adapter 的配置路径（如果有 merged 配置就用它）
+	mergedPath := ov.MergedConfigPath()
+	if _, err := os.Stat(mergedPath); err == nil {
+		adapter.SetConfigPath(absPath(mergedPath))
+	} else {
+		adapter.SetConfigPath(absPath(baseConfig))
+	}
+
+	// 初始化模板
+	ts := template.NewTemplateStore()
+	localEngine.SetOverlay(ov)
+	localEngine.SetTemplates(ts)
+
+	// 初始化 Agent Orchestrator（如果 API Key 可用）
+	var orchestrator *agent.Orchestrator
+	apiKey := os.Getenv("SILICONFLOW_API_KEY")
+	if apiKey != "" {
+		llmClient := agent.NewLLMClient(
+			config.DefaultLLMBaseURL,
+			apiKey,
+			config.DefaultLLMModel,
+			time.Duration(config.DefaultLLMTimeout)*time.Second,
+		)
+		assembler := agent.NewPromptAssembler(adapter)
+		orchestrator = agent.NewOrchestrator(llmClient, pipeline, assembler, pipeline.GetTools())
+	}
+
+	fmt.Printf("%sNetPilot CLI v0.6 (Phase 1 — Agent Role Orchestrator)%s\n", colorCyan, colorReset)
+	fmt.Printf("Clash API: %s\n", cfg.ClashAPIAddr)
+	if orchestrator != nil {
+		fmt.Printf("AI Agent: %s (%s)\n", config.DefaultLLMModel, config.DefaultLLMBaseURL)
+	} else {
+		fmt.Printf("AI Agent: 未启用 (设置 SILICONFLOW_API_KEY 环境变量以启用)\n")
+	}
+	fmt.Printf("输入自然语言指令（如 换个节点、测速），或输入 help 查看帮助\n\n")
+
+	scanner := bufio.NewScanner(os.Stdin)
+	for {
+		fmt.Print("netpilot> ")
+		if !scanner.Scan() {
+			break
+		}
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		if line == "quit" || line == "exit" || line == "q" {
+			fmt.Println("Bye.")
+			return
+		}
+
+		if line == "help" {
+			printHelp(orchestrator != nil)
+			continue
+		}
+
+		// 1. Try Intent Router first
+		routing := intentRouter.Route(line)
+		if routing.Matched {
+			// 把原始输入��给 action，模板搜索等需要用
+			routing.Params["_input"] = line
+			result, err := localEngine.Execute(routing.ActionID, routing.Params)
+			if err != nil {
+				fmt.Printf("%s错误: %v%s\n", colorRed, err, colorReset)
+			} else {
+				printResult(result)
+			}
+			continue
+		}
+
+		// 2. Fall back to raw commands (backward compatibility)
+		parts := strings.Fields(line)
+		cmd := parts[0]
+		handled := true
+
+		switch cmd {
+		case "nodes":
+			r := pipeline.Execute(context.Background(), "get_node_pool", nil)
+			printToolResult(r)
+		case "switch":
+			if len(parts) < 3 {
+				fmt.Println("Usage: switch <group> <node>")
+				continue
+			}
+			r := pipeline.Execute(context.Background(), "switch_node", map[string]interface{}{
+				"group": parts[1],
+				"node":  parts[2],
+			})
+			printToolResult(r)
+		case "delay":
+			if len(parts) < 2 {
+				fmt.Println("Usage: delay <node>")
+				continue
+			}
+			r := pipeline.Execute(context.Background(), "test_latency", map[string]interface{}{
+				"tag": parts[1],
+			})
+			printToolResult(r)
+		case "connections", "conns":
+			r := pipeline.Execute(context.Background(), "get_connections", nil)
+			printToolResult(r)
+		case "logs":
+			params := map[string]interface{}{}
+			if len(parts) >= 2 {
+				params["level"] = parts[1]
+			}
+			r := pipeline.Execute(context.Background(), "get_logs", params)
+			printToolResult(r)
+		case "snapshots":
+			result, _ := localEngine.Execute("show_snapshots", nil)
+			printResult(result)
+		case "rollback":
+			params := map[string]string{}
+			if len(parts) >= 2 {
+				params["id"] = parts[1]
+			}
+			result, err := localEngine.Execute("do_rollback", params)
+			if err != nil {
+				fmt.Printf("%s错误: %v%s\n", colorRed, err, colorReset)
+			} else {
+				printResult(result)
+			}
+		case "telemetry":
+			result, _ := localEngine.Execute("show_telemetry", nil)
+			printResult(result)
+		default:
+			handled = false
+		}
+
+		if handled {
+			continue
+		}
+
+		// 3. Try Agent (LLM)
+		if orchestrator != nil {
+			reply, err := orchestrator.Run(context.Background(), line)
+			if err != nil {
+				fmt.Printf("%s🤖 Agent 错误: %v%s\n", colorRed, err, colorReset)
+			} else {
+				fmt.Printf("\033[36m🤖 %s\033[0m\n", reply)
+			}
+			continue
+		}
+
+		// 4. No agent available
+		fmt.Printf("%sAI Agent 未启用。请设置环境变量: export SILICONFLOW_API_KEY=\"你的key\"%s\n", colorRed, colorReset)
+		fmt.Printf("提示: 你仍然可以使用本地指令，如\"测速\"、\"换节点\"、\"状态\"等。\n")
+	}
+}
+
+func printResult(s string) {
+	fmt.Print(s)
+	if len(s) > 0 && s[len(s)-1] != '\n' {
+		fmt.Println()
+	}
+}
+
+func printToolResult(r *tool.ToolResult) {
+	if !r.Success {
+		fmt.Printf("%s错误: %s%s\n", colorRed, r.Message, colorReset)
+	} else {
+		printResult(r.Message)
+	}
+}
+
+func absPath(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return p
+	}
+	return abs
+}
+
+func printHelp(agentEnabled bool) {
+	fmt.Printf(`%s自然语言指令:%s
+  换节点 / 换个节点 / 太慢了     自动测速并切换到最快节点
+  测速 / 哪个快                 测试所有节点延迟
+  全局模式 / 全局代理            切换到全局代理
+  直连模式 / 直连               切换到直连
+  状态 / 当前状态               查看当前状态
+  节点列表 / 有哪些节点          列出所有节点
+  快照                          列出所有快照
+  回滚 / 撤销                   回滚到最新快照
+  操作日志                      查看操作历史
+
+%s分流与模板:%s
+  配netflix / netflix分流       应用 Netflix 分流模板
+  有哪些模板 / 模板列表          列出所有分流模��
+  规则列表 / 当前规则            查看当前路由规则
+  删除规则 <tag>                删除指定路由规则
+
+%s原始命令（向后兼容）:%s
+  nodes                        列出节点
+  switch <group> <node>        手动切换（经过 Pipeline）
+  delay <node>                 测单个延迟
+  connections                  查看连接
+  logs [level]                 查看日志
+  snapshots                    列出快照
+  rollback [snap-id]           回滚到指定快照
+  telemetry                    查看操作日志
+  quit                         退出
+`, colorCyan, colorReset, colorCyan, colorReset, colorCyan, colorReset)
+
+	if agentEnabled {
+		fmt.Printf(`
+%sAI Agent (已启用):%s
+  输入任何未被上述匹配的自然语言，将自动交给 AI Agent 处理。
+  例如: "帮我找个延迟最低的日本节点"、"分析一下当前网络状态"
+`, colorCyan, colorReset)
+	} else {
+		fmt.Printf(`
+%sAI Agent (未启用):%s
+  设置 SILICONFLOW_API_KEY 环境变量以启用 AI Agent。
+`, colorRed, colorReset)
+	}
+}
