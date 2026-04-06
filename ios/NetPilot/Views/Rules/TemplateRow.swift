@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TemplateRow: View {
     let template: TemplateModel
+    var isApplying: Bool = false
     let onApply: () -> Void
 
     private var icon: String {
@@ -32,13 +33,20 @@ struct TemplateRow: View {
 
             Spacer()
 
-            Button("应用", action: onApply)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Theme.accentBlue)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Theme.accentBlue.opacity(0.15))
-                .clipShape(Capsule())
+            if isApplying {
+                ProgressView()
+                    .scaleEffect(0.8)
+                    .tint(Theme.accentBlue)
+                    .frame(width: 50)
+            } else {
+                Button("应用", action: onApply)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.accentBlue)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Theme.accentBlue.opacity(0.15))
+                    .clipShape(Capsule())
+            }
         }
         .padding(12)
         .background(Theme.backgroundSecondary)

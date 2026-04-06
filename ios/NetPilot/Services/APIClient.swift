@@ -89,6 +89,17 @@ class APIClient {
         return try await get("/api/subscriptions")
     }
 
+    func addSubscription(url: String, name: String) async throws {
+        let _: [String: String] = try await post("/api/subscriptions", body: [
+            "url": url,
+            "name": name,
+        ])
+    }
+
+    func deleteSubscription(id: String) async throws {
+        let _: [String: String] = try await delete("/api/subscriptions/\(id)")
+    }
+
     func updateSubscriptions() async throws {
         let _: [String: String] = try await post("/api/subscriptions/update", body: [String: String]())
     }

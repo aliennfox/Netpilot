@@ -5,7 +5,10 @@ class RulesViewModel: ObservableObject {
     @Published var rules: [RuleModel] = []
     @Published var templates: [TemplateModel] = []
     @Published var isLoading = false
-    @Published var errorMessage: String?
+    @Published var applyingTemplateId: String?
+    @Published var deletingRuleTag: String?
+    @Published var toastMessage: String?
+    @Published var toastIsError = true
 
     private let api = APIClient.shared
 
@@ -17,27 +20,43 @@ class RulesViewModel: ObservableObject {
             async let t = api.getTemplates()
             rules = try await r
             templates = try await t
-            errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            showToast(error.localizedDescription, isError: true)
         }
     }
 
     func deleteRule(tag: String) async {
+        deletingRuleTag = tag
+        defer { deletingRuleTag = nil }
         do {
             try await api.deleteRule(tag: tag)
-            await loadAll()
+            rules.removeAll { $0.tag == tag }
+            showToast("规则已删除", isError: false)
         } catch {
-            errorMessage = error.localizedDescription
+            showToast("删除失败: \(error.localizedDescription)", isError: true)
         }
     }
 
     func applyTemplate(id: String) async {
+        applyingTemplateId = id
+        defer { applyingTemplateId = nil }
         do {
             try await api.applyTemplate(id: id)
             await loadAll()
+            showToast("模板已应用", isError: false)
         } catch {
-            errorMessage = error.localizedDescription
+            showToast("应用失败: \(error.localizedDescription)", isError: true)
+        }
+    }
+
+    private func showToast(_ message: String, isError: Bool) {
+        toastMessage = message
+        toastIsError = isError
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            if toastMessage == message {
+                toastMessage = nil
+            }
         }
     }
 }
