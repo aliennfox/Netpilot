@@ -42,7 +42,8 @@ func NewEngine(adapter engine.EngineAdapter, pipeline *tool.ToolPipeline, primar
 		"apply_template":   e.applyTemplate,
 		"list_templates":   e.listTemplates,
 		"list_rules":       e.listRules,
-		"remove_rule":      e.removeRule,
+		"remove_rule":          e.removeRule,
+		"import_subscription":  e.importSubscription,
 	}
 	return e
 }

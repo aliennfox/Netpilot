@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -251,34 +252,34 @@ func (a *SingBoxAdapter) GetLogs(level string, lines int) ([]LogEntry, error) {
 func (a *SingBoxAdapter) Start(configPath string) error { panic("not implemented") }
 func (a *SingBoxAdapter) Stop() error                   { panic("not implemented") }
 
-// Reload 通过 Clash API PUT /configs 重载配置
+// Reload 通过重启 sing-box 进程重载配置
+// sing-box v1.13+ 的 Clash API PUT /configs 不支持切换到不同配置文件，
+// 因此使用 pkill + 重新启动的方式
 func (a *SingBoxAdapter) Reload() error {
 	if a.configPath == "" {
 		return fmt.Errorf("未设置配置文件路径，无法重载")
 	}
 
-	body := fmt.Sprintf(`{"path":"%s"}`, a.configPath)
-	req, err := http.NewRequest(http.MethodPut, a.baseURL+"/configs?force=true", strings.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("创建 reload 请求失败: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
+	// 停止现有 sing-box 进程
+	_ = exec.Command("pkill", "-x", "sing-box").Run()
+	time.Sleep(500 * time.Millisecond)
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("reload 请求失败: %w", err)
+	// 启动新 sing-box 进程
+	cmd := exec.Command("sing-box", "run", "-c", a.configPath)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("启动 sing-box 失败: %w", err)
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		var errBody struct {
-			Message string `json:"message"`
+	// 等待 Clash API 就绪
+	for i := 0; i < 20; i++ {
+		time.Sleep(200 * time.Millisecond)
+		resp, err := http.Get(a.baseURL + "/proxies")
+		if err == nil {
+			resp.Body.Close()
+			return nil
 		}
-		json.NewDecoder(resp.Body).Decode(&errBody)
-		return fmt.Errorf("reload 失败 (HTTP %d): %s", resp.StatusCode, errBody.Message)
 	}
-	return nil
+	return fmt.Errorf("sing-box 重启后 Clash API 未就绪 (超时 4s)")
 }
 
 func (a *SingBoxAdapter) IsRunning() bool { panic("not implemented") }

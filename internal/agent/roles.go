@@ -74,6 +74,7 @@ var (
 			"remove_route_rule",
 			"get_node_pool",
 			"test_latency",
+			"import_subscription",
 		},
 	}
 

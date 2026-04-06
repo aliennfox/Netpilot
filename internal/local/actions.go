@@ -341,6 +341,40 @@ func (e *Engine) removeRule(params map[string]string) (string, error) {
 	return result.Message, nil
 }
 
+func (e *Engine) importSubscription(params map[string]string) (string, error) {
+	if e.overlay == nil {
+		return "", fmt.Errorf("Overlay 未初始化")
+	}
+
+	url := params["url"]
+	if url == "" {
+		// 从原始输入中提取 URL
+		input := params["_input"]
+		url = extractURL(input)
+	}
+	if url == "" {
+		return "请提供订阅链接。用法: import <URL> 或 导入订阅 <URL>\n", nil
+	}
+
+	result := e.pipeline.Execute(context.Background(), "import_subscription", map[string]interface{}{
+		"url": url,
+	})
+	if !result.Success {
+		return "", fmt.Errorf("%s", result.Message)
+	}
+	return result.Message, nil
+}
+
+// extractURL 从文本中提取 URL
+func extractURL(s string) string {
+	for _, word := range strings.Fields(s) {
+		if strings.HasPrefix(word, "http://") || strings.HasPrefix(word, "https://") {
+			return word
+		}
+	}
+	return ""
+}
+
 // resolveBestProxy 找到当前最快的代理节点，找不到就用 direct-out
 func (e *Engine) resolveBestProxy() string {
 	proxies, err := e.adapter.GetProxies()

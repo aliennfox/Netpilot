@@ -84,8 +84,9 @@ func mergeRouteRules(config map[string]interface{}, rules []RouteRule) {
 	route["rules"] = merged
 }
 
-// mergeOutbounds 将 overlay 出站追加到 outbounds 末尾（跳过重复 tag）
-func mergeOutbounds(config map[string]interface{}, outbounds []Outbound) {
+// mergeOutbounds 将 overlay 出站追加到 outbounds 末尾（跳过重复 tag），
+// 并将新节点 tag 添加到 selector group 的 outbounds 列表中
+func mergeOutbounds(config map[string]interface{}, outbounds []map[string]interface{}) {
 	var existingOutbounds []interface{}
 	if raw, ok := config["outbounds"]; ok {
 		if arr, ok := raw.([]interface{}); ok {
@@ -103,22 +104,58 @@ func mergeOutbounds(config map[string]interface{}, outbounds []Outbound) {
 		}
 	}
 
-	// 追加不重复的 overlay 出站
+	// 追加不重复的 overlay 出站，并收集新增 tag
+	var newTags []string
 	for _, ob := range outbounds {
-		if existingTags[ob.Tag] {
+		tag, _ := ob["tag"].(string)
+		if existingTags[tag] {
 			continue
 		}
-		entry := map[string]interface{}{
-			"type": ob.Type,
-			"tag":  ob.Tag,
-		}
-		if len(ob.Outbounds) > 0 {
-			entry["outbounds"] = toInterfaceSlice(ob.Outbounds)
-		}
-		existingOutbounds = append(existingOutbounds, entry)
+		existingOutbounds = append(existingOutbounds, ob)
+		existingTags[tag] = true
+		newTags = append(newTags, tag)
 	}
 
 	config["outbounds"] = existingOutbounds
+
+	// 将新增节点 tag 添加到第一个 selector group 的 outbounds 中
+	if len(newTags) > 0 {
+		addTagsToSelector(existingOutbounds, newTags)
+	}
+}
+
+// addTagsToSelector 将新 tag 添加到第一个 selector 类型 outbound 的 outbounds 列表中
+func addTagsToSelector(outbounds []interface{}, tags []string) {
+	for _, ob := range outbounds {
+		m, ok := ob.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		t, _ := m["type"].(string)
+		if t != "selector" {
+			continue
+		}
+		// 找到 selector，添加 tag
+		var existing []interface{}
+		if raw, ok := m["outbounds"]; ok {
+			if arr, ok := raw.([]interface{}); ok {
+				existing = arr
+			}
+		}
+		existingSet := map[string]bool{}
+		for _, e := range existing {
+			if s, ok := e.(string); ok {
+				existingSet[s] = true
+			}
+		}
+		for _, tag := range tags {
+			if !existingSet[tag] {
+				existing = append(existing, tag)
+			}
+		}
+		m["outbounds"] = existing
+		return // 只处理第一个 selector
+	}
 }
 
 func toInterfaceSlice(ss []string) []interface{} {

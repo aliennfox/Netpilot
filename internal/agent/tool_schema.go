@@ -122,6 +122,16 @@ var toolParameterSchemas = map[string]json.RawMessage{
 		"properties": {},
 		"required": []
 	}`),
+	"import_subscription": json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"url": {
+				"type": "string",
+				"description": "订阅链接 URL"
+			}
+		},
+		"required": ["url"]
+	}`),
 }
 
 // ConvertToolsToSchema 将内部 ToolDef 转为 OpenAI API 的 tools 参数格式（全量，向后兼容）

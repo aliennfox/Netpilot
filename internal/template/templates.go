@@ -12,7 +12,7 @@ type Template struct {
 	Description string             `json:"description"`
 	Keywords    []string           `json:"keywords"`
 	Rules       []overlay.RouteRule `json:"rules"`
-	Outbounds   []overlay.Outbound  `json:"outbounds,omitempty"`
+	Outbounds   []map[string]interface{} `json:"outbounds,omitempty"`
 }
 
 var builtinTemplates = []*Template{

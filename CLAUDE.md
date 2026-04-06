@@ -50,7 +50,7 @@ sing-box 内核
 - [x] 任务 6: 修复 Agent 二轮调用 bug (纯文本消息格式绕过硅基流动校验)
 - [x] 任务 7: Agent 角色分工 (Diagnose/Configure/Verify Orchestrator)
 - [x] 任务 8: 对话历史 + 多轮上下文 (摘要注入 system prompt)
-- [ ] 任务 9: 真实节点测试
+- [x] 任务 9: 真实节点接入 (订阅解析 SS/Trojan/VMess/VLess + overlay 集成)
 - [ ] 任务 10: 自动化测试
 
 验证里程碑:
@@ -62,6 +62,7 @@ sing-box 内核
 - [x] Agent 三角色分工 + Orchestrator 编排 ✅
 - [x] Config Overlay 路由规则增删 + 模板 ✅
 - [x] 多轮对话上下文 + /clear /history 命令 ✅
+- [x] 订阅解析 + 节点导入 + selector 自动注册 ✅
 
 ## 详细设计文档
 

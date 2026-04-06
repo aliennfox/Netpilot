@@ -39,8 +39,9 @@ func main() {
 		fmt.Printf("%s加载 overlay 失败: %v%s\n", colorRed, err, colorReset)
 	}
 
-	// 注册 overlay tools 到 pipeline
+	// 注册 overlay tools 和订阅 tools 到 pipeline
 	pipeline.RegisterExtraTools(tool.RegisterOverlayTools(ov))
+	pipeline.RegisterExtraTools(tool.RegisterSubscriptionTools(ov))
 
 	// 设置 adapter 的配置路径（如果有 merged 配置就用它）
 	mergedPath := ov.MergedConfigPath()
@@ -196,6 +197,21 @@ func main() {
 		case "telemetry":
 			result, _ := localEngine.Execute("show_telemetry", nil)
 			printResult(result)
+		case "import":
+			if len(parts) < 2 {
+				fmt.Println("Usage: import <subscription-url>")
+				continue
+			}
+			result, err := localEngine.Execute("import_subscription", map[string]string{
+				"url": parts[1],
+			})
+			if err != nil {
+				fmt.Printf("%s错误: %v%s\n", colorRed, err, colorReset)
+			} else {
+				history.Add("user", line, "local")
+				history.Add("assistant", stripANSIForHistory(result), "local")
+				printResult(result)
+			}
 		default:
 			handled = false
 		}
@@ -288,6 +304,10 @@ func printHelp(agentEnabled bool) {
   /history                     查看对话记录
   /clear                       清空对话历史
 
+%s订阅管理:%s
+  导入订阅 <URL>               从订阅链接导入节点
+  import <URL>                 从订阅链接导入节点
+
 %s原始命令（向后兼容）:%s
   nodes                        列出节点
   switch <group> <node>        手动切换（经过 Pipeline）
@@ -298,7 +318,7 @@ func printHelp(agentEnabled bool) {
   rollback [snap-id]           回滚到指定快照
   telemetry                    查看操作日志
   quit                         退出
-`, colorCyan, colorReset, colorCyan, colorReset, colorCyan, colorReset, colorCyan, colorReset)
+`, colorCyan, colorReset, colorCyan, colorReset, colorCyan, colorReset, colorCyan, colorReset, colorCyan, colorReset)
 
 	if agentEnabled {
 		fmt.Printf(`

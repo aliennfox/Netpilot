@@ -22,17 +22,10 @@ type RouteRule struct {
 	Source       string   `json:"source"` // "agent" | "template:xxx" | "user"
 }
 
-// Outbound 是 overlay 中的额外出站节点
-type Outbound struct {
-	Type      string   `json:"type"`
-	Tag       string   `json:"tag"`
-	Outbounds []string `json:"outbounds,omitempty"` // selector/urltest 才需要
-}
-
 // OverlayData 是持久化到文件的 overlay 数据
 type OverlayData struct {
-	RouteRules []RouteRule `json:"route_rules"`
-	Outbounds  []Outbound  `json:"outbounds,omitempty"`
+	RouteRules []RouteRule              `json:"route_rules"`
+	Outbounds  []map[string]interface{} `json:"outbounds,omitempty"`
 }
 
 // ConfigOverlay 管理增量配置叠加层
@@ -132,19 +125,57 @@ func (o *ConfigOverlay) ListRules() []RouteRule {
 	return result
 }
 
-// AddOutbound 添加额外��站节点
-func (o *ConfigOverlay) AddOutbound(ob Outbound) error {
+// AddOutbound 添加额外出站节点（完整 outbound 配置）
+func (o *ConfigOverlay) AddOutbound(ob map[string]interface{}) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
+	tag, _ := ob["tag"].(string)
 	for i, existing := range o.data.Outbounds {
-		if existing.Tag == ob.Tag {
+		if t, _ := existing["tag"].(string); t == tag {
 			o.data.Outbounds[i] = ob
 			return o.saveLocked()
 		}
 	}
 	o.data.Outbounds = append(o.data.Outbounds, ob)
 	return o.saveLocked()
+}
+
+// AddOutboundsBatch 批量添加出站节点（统一保存一次）
+func (o *ConfigOverlay) AddOutboundsBatch(obs []map[string]interface{}) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	tagIdx := map[string]int{}
+	for i, existing := range o.data.Outbounds {
+		if t, _ := existing["tag"].(string); t != "" {
+			tagIdx[t] = i
+		}
+	}
+
+	for _, ob := range obs {
+		tag, _ := ob["tag"].(string)
+		if idx, exists := tagIdx[tag]; exists {
+			o.data.Outbounds[idx] = ob
+		} else {
+			tagIdx[tag] = len(o.data.Outbounds)
+			o.data.Outbounds = append(o.data.Outbounds, ob)
+		}
+	}
+	return o.saveLocked()
+}
+
+// OutboundTags 返回所有 overlay 出站节点的 tag
+func (o *ConfigOverlay) OutboundTags() []string {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	var tags []string
+	for _, ob := range o.data.Outbounds {
+		if tag, _ := ob["tag"].(string); tag != "" {
+			tags = append(tags, tag)
+		}
+	}
+	return tags
 }
 
 // Apply 合并 base + overlay → merged，然后重载 sing-box
@@ -165,6 +196,15 @@ func (o *ConfigOverlay) Apply(adapter engine.EngineAdapter) error {
 		return fmt.Errorf("写入 merged 配置失败: %w", err)
 	}
 
+	// 确保 adapter 使用 merged 配置路径
+	absPath, _ := filepath.Abs(o.mergedConfigPath)
+	type configPathSetter interface {
+		SetConfigPath(string)
+	}
+	if setter, ok := adapter.(configPathSetter); ok {
+		setter.SetConfigPath(absPath)
+	}
+
 	// 重载 sing-box
 	if err := adapter.Reload(); err != nil {
 		return fmt.Errorf("重载 sing-box 失败: %w", err)
@@ -178,7 +218,7 @@ func (o *ConfigOverlay) GetData() OverlayData {
 	defer o.mu.RUnlock()
 	result := OverlayData{
 		RouteRules: make([]RouteRule, len(o.data.RouteRules)),
-		Outbounds:  make([]Outbound, len(o.data.Outbounds)),
+		Outbounds:  make([]map[string]interface{}, len(o.data.Outbounds)),
 	}
 	copy(result.RouteRules, o.data.RouteRules)
 	copy(result.Outbounds, o.data.Outbounds)
