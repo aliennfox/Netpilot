@@ -14,12 +14,15 @@ type TaskPlan struct {
 func ClassifyTask(input string) TaskPlan {
 	lower := strings.ToLower(input)
 
-	// 诊断类：只走 Diagnose
+	// 诊断/查询类：只走 Diagnose
 	diagnoseKeywords := []string{
 		"正常吗", "有没有问题", "检查", "诊断", "分析",
 		"怎么回事", "什么情况", "什么状态",
 		"有哪些节点", "当前状态", "延迟多少", "看看",
 		"连接数", "日志", "状态",
+		// 查询类关键词
+		"可用", "代理节点", "列出", "显示",
+		"看看有什么", "有什么", "有哪些",
 	}
 	if matchesAny(lower, diagnoseKeywords) && !matchesAny(lower, configKeywords()) {
 		return TaskPlan{

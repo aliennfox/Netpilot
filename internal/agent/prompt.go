@@ -52,8 +52,8 @@ func (pa *PromptAssembler) Assemble(ctx context.Context) string {
 	return b.String()
 }
 
-// AssembleForRole 按角色组装 system prompt = 角色专用 prompt + 动态网络状态
-func (pa *PromptAssembler) AssembleForRole(ctx context.Context, role *AgentRole) string {
+// AssembleForRole 按角色组装 system prompt = 角色专用 prompt + 动态网络状态 + 对话历史摘要
+func (pa *PromptAssembler) AssembleForRole(ctx context.Context, role *AgentRole, history *ConversationHistory) string {
 	var b strings.Builder
 	b.WriteString(role.SystemPrompt)
 
@@ -61,6 +61,16 @@ func (pa *PromptAssembler) AssembleForRole(ctx context.Context, role *AgentRole)
 	if dynamic != "" {
 		b.WriteString("\n\n")
 		b.WriteString(dynamic)
+	}
+
+	// 注入对话历史摘要（如果有）
+	if history != nil && history.Len() > 0 {
+		historyCtx := history.ToMessagesContext()
+		if historyCtx != "" {
+			b.WriteString("\n\n")
+			b.WriteString(historyCtx)
+			b.WriteString("\n请结合上述对话记录理解用户的指代和上下文。")
+		}
 	}
 
 	return b.String()

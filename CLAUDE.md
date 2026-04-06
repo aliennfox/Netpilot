@@ -49,7 +49,7 @@ sing-box 内核
 - [x] 任务 5: Config Overlay + 路由规则修改 + 模板系统 (4 个内置模板)
 - [x] 任务 6: 修复 Agent 二轮调用 bug (纯文本消息格式绕过硅基流动校验)
 - [x] 任务 7: Agent 角色分工 (Diagnose/Configure/Verify Orchestrator)
-- [ ] 任务 8: 对话历史 + 多轮上下文
+- [x] 任务 8: 对话历史 + 多轮上下文 (摘要注入 system prompt)
 - [ ] 任务 9: 真实节点测试
 - [ ] 任务 10: 自动化测试
 
@@ -61,6 +61,7 @@ sing-box 内核
 - [x] LLM Agent tool-use 闭环 ✅
 - [x] Agent 三角色分工 + Orchestrator 编排 ✅
 - [x] Config Overlay 路由规则增删 + 模板 ✅
+- [x] 多轮对话上下文 + /clear /history 命令 ✅
 
 ## 详细设计文档
 

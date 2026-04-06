@@ -24,18 +24,18 @@ func NewOrchestrator(llm *LLMClient, pipeline *tool.ToolPipeline, assembler *Pro
 	}
 }
 
-// Run 执行编排：分类 → 按需走角色流水线
-func (o *Orchestrator) Run(ctx context.Context, userMessage string) (string, error) {
+// Run 执行编排：分类 → 按需走角色流水线。history 可为 nil（无上下文）。
+func (o *Orchestrator) Run(ctx context.Context, userMessage string, history *ConversationHistory) (string, error) {
 	plan := ClassifyTask(userMessage)
 
 	fmt.Printf("\033[90m[分类: %s]\033[0m\n", plan.Reason)
 
 	// 快速路径：只需要一个角色
 	if plan.NeedDiagnose && !plan.NeedConfigure && !plan.NeedVerify {
-		return o.runDiagnoseOnly(ctx, userMessage)
+		return o.runDiagnoseOnly(ctx, userMessage, history)
 	}
 	if plan.NeedConfigure && !plan.NeedDiagnose && !plan.NeedVerify {
-		return o.runConfigureOnly(ctx, userMessage)
+		return o.runConfigureOnly(ctx, userMessage, history)
 	}
 
 	// 多角色流水线
@@ -45,7 +45,7 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string) (string, err
 	// Diagnose 阶段
 	if plan.NeedDiagnose {
 		fmt.Print("\033[36m🔍 [诊断中...]\033[0m\n")
-		diagnosis, err = o.agent.RunWithRole(ctx, RoleDiagnose, userMessage)
+		diagnosis, err = o.agent.RunWithRole(ctx, RoleDiagnose, userMessage, history)
 		if err != nil {
 			return "", fmt.Errorf("诊断阶段失败: %w", err)
 		}
@@ -61,7 +61,7 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string) (string, err
 			configInput = fmt.Sprintf("用户请求: %s\n\n诊断报告:\n%s", userMessage, diagnosis)
 		}
 
-		configResult, err = o.agent.RunWithRole(ctx, RoleConfigure, configInput)
+		configResult, err = o.agent.RunWithRole(ctx, RoleConfigure, configInput, history)
 		if err != nil {
 			return "", fmt.Errorf("配置阶段失败: %w", err)
 		}
@@ -76,7 +76,7 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string) (string, err
 		if configResult != "" {
 			verifyInput = fmt.Sprintf("请验证以下配置操作是否成功:\n%s", configResult)
 		}
-		verification, err = o.agent.RunWithRole(ctx, RoleVerify, verifyInput)
+		verification, err = o.agent.RunWithRole(ctx, RoleVerify, verifyInput, history)
 		if err != nil {
 			return "", fmt.Errorf("验证阶段失败: %w", err)
 		}
@@ -95,9 +95,9 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string) (string, err
 }
 
 // runDiagnoseOnly 快速路径：只跑诊断
-func (o *Orchestrator) runDiagnoseOnly(ctx context.Context, userMessage string) (string, error) {
+func (o *Orchestrator) runDiagnoseOnly(ctx context.Context, userMessage string, history *ConversationHistory) (string, error) {
 	fmt.Print("\033[36m🔍 [诊断中...]\033[0m\n")
-	result, err := o.agent.RunWithRole(ctx, RoleDiagnose, userMessage)
+	result, err := o.agent.RunWithRole(ctx, RoleDiagnose, userMessage, history)
 	if err != nil {
 		return "", err
 	}
@@ -105,9 +105,9 @@ func (o *Orchestrator) runDiagnoseOnly(ctx context.Context, userMessage string) 
 }
 
 // runConfigureOnly 快速路径：只跑配置（无验证）
-func (o *Orchestrator) runConfigureOnly(ctx context.Context, userMessage string) (string, error) {
+func (o *Orchestrator) runConfigureOnly(ctx context.Context, userMessage string, history *ConversationHistory) (string, error) {
 	fmt.Print("\033[36m🔧 [配置中...]\033[0m\n")
-	result, err := o.agent.RunWithRole(ctx, RoleConfigure, userMessage)
+	result, err := o.agent.RunWithRole(ctx, RoleConfigure, userMessage, history)
 	if err != nil {
 		return "", err
 	}

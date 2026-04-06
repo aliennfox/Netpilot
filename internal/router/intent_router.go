@@ -57,12 +57,35 @@ func (r *IntentRouter) Route(input string) RoutingResult {
 		return RoutingResult{Matched: false}
 	}
 
+	// 如果输入含指代词，说明用户在引用上下文，Local Engine 无法处理，交给 Agent
+	if containsReferenceWord(normalized) {
+		return RoutingResult{Matched: false}
+	}
+
 	return RoutingResult{
 		Matched:    true,
 		ActionID:   best.actionID,
 		Params:     map[string]string{},
 		Confidence: 1.0,
 	}
+}
+
+// referenceWords 是上下文指代词，出现时说明用户在引用之前的对话内容，
+// Local Engine 没有上下文能力，应交给 Agent 处理。
+var referenceWords = []string{
+	"第一个", "第二个", "第三个",
+	"那个", "这个", "它",
+	"上面的", "刚才的", "之前的",
+	"你推荐的", "你说的",
+}
+
+func containsReferenceWord(input string) bool {
+	for _, w := range referenceWords {
+		if strings.Contains(input, w) {
+			return true
+		}
+	}
+	return false
 }
 
 // normalize lowercases the input and strips punctuation.

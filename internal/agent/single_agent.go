@@ -39,9 +39,9 @@ func NewSingleAgent(llm *LLMClient, pipeline *tool.ToolPipeline, assembler *Prom
 // 硅基流动对 tool_calls 消息格式的校验不稳定（相同请求时而通过时而 400），
 // 因此不在消息历史中保留 tool_calls/tool 格式，而是将 tool 调用和结果
 // 转化为纯文本 assistant 消息，再以 user 角色喂回结果。
-func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMessage string) (string, error) {
-	// 1. 组装角色专用 system prompt
-	systemPrompt := a.assembler.AssembleForRole(ctx, role)
+func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMessage string, history *ConversationHistory) (string, error) {
+	// 1. 组装角色专用 system prompt（含对话历史摘要）
+	systemPrompt := a.assembler.AssembleForRole(ctx, role, history)
 
 	// 2. 初始化消息列表
 	messages := []Message{

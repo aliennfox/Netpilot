@@ -64,4 +64,10 @@ var KeywordMap = map[string][]string{
 		"删除规则", "移除规则",
 		"remove rule", "delete rule",
 	},
+	"clear_history": {
+		"清空对话", "新对话", "重新开始", "/clear",
+	},
+	"show_history": {
+		"对话记录", "聊天记录", "/history",
+	},
 }

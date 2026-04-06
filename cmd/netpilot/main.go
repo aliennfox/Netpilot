@@ -69,7 +69,10 @@ func main() {
 		orchestrator = agent.NewOrchestrator(llmClient, pipeline, assembler, pipeline.GetTools())
 	}
 
-	fmt.Printf("%sNetPilot CLI v0.6 (Phase 1 — Agent Role Orchestrator)%s\n", colorCyan, colorReset)
+	// 初始化对话历史（最多保留 40 条消息 = 20 轮对话）
+	history := agent.NewConversationHistory(40)
+
+	fmt.Printf("%sNetPilot CLI v0.7 (Phase 1 — Multi-turn Context)%s\n", colorCyan, colorReset)
 	fmt.Printf("Clash API: %s\n", cfg.ClashAPIAddr)
 	if orchestrator != nil {
 		fmt.Printf("AI Agent: %s (%s)\n", config.DefaultLLMModel, config.DefaultLLMBaseURL)
@@ -99,15 +102,40 @@ func main() {
 			continue
 		}
 
+		// 会话管理命令
+		if line == "/clear" {
+			history.Clear()
+			fmt.Println("对话历史已清空。")
+			continue
+		}
+		if line == "/history" {
+			fmt.Print(history.FormatDisplay())
+			continue
+		}
+
 		// 1. Try Intent Router first
 		routing := intentRouter.Route(line)
 		if routing.Matched {
-			// 把原始输入��给 action，模板搜索等需要用
+			// 会话管理命令（不记入历史）
+			if routing.ActionID == "clear_history" {
+				history.Clear()
+				fmt.Println("对话历史已清空。")
+				continue
+			}
+			if routing.ActionID == "show_history" {
+				fmt.Print(history.FormatDisplay())
+				continue
+			}
+
+			// 把原始输入传给 action，模板搜索等需要用
 			routing.Params["_input"] = line
 			result, err := localEngine.Execute(routing.ActionID, routing.Params)
 			if err != nil {
 				fmt.Printf("%s错误: %v%s\n", colorRed, err, colorReset)
 			} else {
+				// 记录 Local Engine 对话到历史
+				history.Add("user", line, "local")
+				history.Add("assistant", stripANSIForHistory(result), "local")
 				printResult(result)
 			}
 			continue
@@ -178,10 +206,13 @@ func main() {
 
 		// 3. Try Agent (LLM)
 		if orchestrator != nil {
-			reply, err := orchestrator.Run(context.Background(), line)
+			reply, err := orchestrator.Run(context.Background(), line, history)
 			if err != nil {
 				fmt.Printf("%s🤖 Agent 错误: %v%s\n", colorRed, err, colorReset)
 			} else {
+				// 记录 Agent 对话到历史
+				history.Add("user", line, "agent")
+				history.Add("assistant", reply, "agent")
 				fmt.Printf("\033[36m🤖 %s\033[0m\n", reply)
 			}
 			continue
@@ -206,6 +237,25 @@ func printToolResult(r *tool.ToolResult) {
 	} else {
 		printResult(r.Message)
 	}
+}
+
+// stripANSIForHistory 去除 ANSI 转义码，避免历史记录中包含颜色代码
+func stripANSIForHistory(s string) string {
+	// 简单去除常见 ANSI 转义序列
+	result := s
+	for strings.Contains(result, "\033[") {
+		start := strings.Index(result, "\033[")
+		end := start + 2
+		for end < len(result) && result[end] != 'm' {
+			end++
+		}
+		if end < len(result) {
+			result = result[:start] + result[end+1:]
+		} else {
+			break
+		}
+	}
+	return result
 }
 
 func absPath(p string) string {
@@ -234,6 +284,10 @@ func printHelp(agentEnabled bool) {
   规则列表 / 当前规则            查看当前路由规则
   删除规则 <tag>                删除指定路由规则
 
+%s会话管理:%s
+  /history                     查看对话记录
+  /clear                       清空对话历史
+
 %s原始命令（向后兼容）:%s
   nodes                        列出节点
   switch <group> <node>        手动切换（经过 Pipeline）
@@ -244,7 +298,7 @@ func printHelp(agentEnabled bool) {
   rollback [snap-id]           回滚到指定快照
   telemetry                    查看操作日志
   quit                         退出
-`, colorCyan, colorReset, colorCyan, colorReset, colorCyan, colorReset)
+`, colorCyan, colorReset, colorCyan, colorReset, colorCyan, colorReset, colorCyan, colorReset)
 
 	if agentEnabled {
 		fmt.Printf(`
