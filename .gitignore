@@ -2,3 +2,8 @@ data/
 .singbox.pid
 .DS_Store
 /netpilot
+/netpilot-server
+
+# Xcode user data
+ios/**/*.xcuserstate
+ios/**/xcuserdata/
