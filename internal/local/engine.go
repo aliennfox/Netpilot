@@ -49,6 +49,10 @@ func NewEngine(adapter engine.EngineAdapter, pipeline *tool.ToolPipeline, primar
 		"list_subscriptions":   e.listSubscriptions,
 		"update_subscription":  e.updateSubscription,
 		"remove_subscription":  e.removeSubscription,
+		"show_dns":             e.showDNS,
+		"set_dns_mode":         e.setDNSMode,
+		"live_connections":     e.liveConnections,
+		"show_connections":     e.showConnections,
 	}
 	return e
 }

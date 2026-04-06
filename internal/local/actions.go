@@ -1,14 +1,18 @@
 package local
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/foxnetpilot/netpilot/internal/engine"
+	"github.com/foxnetpilot/netpilot/internal/monitor"
+	"github.com/foxnetpilot/netpilot/internal/overlay"
 )
 
 // groupTypes are proxy group types (not real nodes).
@@ -442,6 +446,135 @@ func extractSubID(input string) string {
 		}
 	}
 	return ""
+}
+
+// --- DNS Actions ---
+
+func (e *Engine) showDNS(_ map[string]string) (string, error) {
+	result := e.pipeline.Execute(context.Background(), "get_dns_config", nil)
+	if !result.Success {
+		return "", fmt.Errorf("%s", result.Message)
+	}
+	return result.Message, nil
+}
+
+func (e *Engine) setDNSMode(params map[string]string) (string, error) {
+	if e.overlay == nil {
+		return "", fmt.Errorf("Overlay 未初始化")
+	}
+
+	input := strings.ToLower(params["_input"])
+
+	// 尝试从输入中提取模式
+	mode := ""
+	for _, m := range []string{"secure", "split", "local"} {
+		if strings.Contains(input, m) {
+			mode = m
+			break
+		}
+	}
+
+	if mode == "" {
+		// 显示当前状态和可选模式，提示用户输入
+		dns := e.overlay.GetDNS()
+		if dns == nil {
+			dns = overlay.DefaultDNSConfig("secure")
+		}
+		currentMode := inferDNSModeLocal(dns)
+
+		out := fmt.Sprintf("当前: \033[36m%s\033[0m\n", currentMode)
+		out += "可选:\n"
+		out += "  \033[36msecure\033[0m — 全部走代理 DNS（最安全）\n"
+		out += "  \033[36msplit\033[0m  — 代理/直连分开查询（平衡）\n"
+		out += "  \033[36mlocal\033[0m  — 全部走本地 DNS（最快，有泄露风险）\n"
+		out += "输入模式名切换: "
+		fmt.Print(out)
+
+		// 读取用户输入
+		scanner := bufio.NewScanner(os.Stdin)
+		if !scanner.Scan() {
+			return "已取消。", nil
+		}
+		mode = strings.TrimSpace(strings.ToLower(scanner.Text()))
+	}
+
+	switch mode {
+	case "secure", "split", "local":
+	default:
+		return fmt.Sprintf("无效的 DNS 模式: %s（可选: secure, split, local）", mode), nil
+	}
+
+	dns := overlay.DefaultDNSConfig(mode)
+	if err := e.overlay.SetDNS(dns); err != nil {
+		return "", fmt.Errorf("保存 DNS 配置失败: %v", err)
+	}
+	if err := e.overlay.Apply(e.adapter); err != nil {
+		return "", fmt.Errorf("应用配置失败: %v", err)
+	}
+
+	return fmt.Sprintf("\033[32m已切换到 %s DNS 模式，配置已重载。\033[0m", mode), nil
+}
+
+func inferDNSModeLocal(dns *overlay.DNSConfig) string {
+	if dns.Final == "direct-dns" {
+		return "local"
+	}
+	for _, r := range dns.Rules {
+		if r.Server == "direct-dns" && r.Outbound == "direct-out" {
+			return "split"
+		}
+	}
+	return "secure"
+}
+
+// --- Connection Actions ---
+
+func (e *Engine) showConnections(_ map[string]string) (string, error) {
+	conns, err := e.adapter.GetConnections()
+	if err != nil {
+		return "", fmt.Errorf("获取连接失败: %v", err)
+	}
+	if len(conns) == 0 {
+		return "当前没有活跃连接。\n", nil
+	}
+
+	sort.Slice(conns, func(i, j int) bool {
+		return conns[i].Download > conns[j].Download
+	})
+
+	out := fmt.Sprintf("活跃连接: \033[36m%d\033[0m\n", len(conns))
+	out += fmt.Sprintf("  %-30s %-6s %-14s %8s %8s\n", "目标", "协议", "节点", "↑", "↓")
+	for _, c := range conns {
+		dest := c.Destination
+		if len(dest) > 30 {
+			dest = dest[:27] + "..."
+		}
+		node := extractChainNode(c.Chain)
+		if len(node) > 14 {
+			node = node[:11] + "..."
+		}
+		out += fmt.Sprintf("  %-30s %-6s %-14s %8s %8s\n",
+			dest, strings.ToUpper(c.Protocol), node,
+			monitor.FormatBytes(c.Upload), monitor.FormatBytes(c.Download))
+	}
+	return out, nil
+}
+
+func (e *Engine) liveConnections(_ map[string]string) (string, error) {
+	mon := monitor.NewConnectionMonitor(e.adapter, 2*time.Second)
+	mon.RunLive()
+	return "", nil
+}
+
+func extractChainNode(chain string) string {
+	if chain == "" {
+		return "-"
+	}
+	parts := strings.Split(chain, " → ")
+	if len(parts) > 0 {
+		return strings.TrimSpace(parts[0])
+	}
+	return chain
 }
 
 // extractURL 从文本中提取 URL

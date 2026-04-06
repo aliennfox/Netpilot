@@ -271,7 +271,7 @@ func (a *SingBoxAdapter) Reload() error {
 	}
 
 	// 等待 Clash API 就绪
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 40; i++ {
 		time.Sleep(200 * time.Millisecond)
 		resp, err := http.Get(a.baseURL + "/proxies")
 		if err == nil {
@@ -279,7 +279,7 @@ func (a *SingBoxAdapter) Reload() error {
 			return nil
 		}
 	}
-	return fmt.Errorf("sing-box 重启后 Clash API 未就绪 (超时 4s)")
+	return fmt.Errorf("sing-box 重启后 Clash API 未就绪 (超时 8s)")
 }
 
 func (a *SingBoxAdapter) IsRunning() bool { panic("not implemented") }

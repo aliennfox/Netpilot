@@ -22,10 +22,37 @@ type RouteRule struct {
 	Source       string   `json:"source"` // "agent" | "template:xxx" | "user"
 }
 
+// DNSServer 是 overlay 中的 DNS 服务器配置（sing-box 1.12+ 新格式）
+type DNSServer struct {
+	Type       string `json:"type"`                  // "tls", "udp", "local"
+	Tag        string `json:"tag"`
+	Server     string `json:"server,omitempty"`       // IP 或域名
+	ServerPort int    `json:"server_port,omitempty"`
+	Detour     string `json:"detour,omitempty"`
+}
+
+// DNSRule 是 overlay 中的 DNS 路由规则（sing-box 1.12+ 新格式）
+type DNSRule struct {
+	Action       string   `json:"action"`                      // "route" | "reject"
+	Server       string   `json:"server,omitempty"`
+	Outbound     string   `json:"outbound,omitempty"`
+	Domain       []string `json:"domain,omitempty"`
+	DomainSuffix []string `json:"domain_suffix,omitempty"`
+}
+
+// DNSConfig 是 overlay 中的 DNS 配置
+type DNSConfig struct {
+	Servers  []DNSServer `json:"servers"`
+	Rules    []DNSRule   `json:"rules,omitempty"`
+	Final    string      `json:"final"`                // 默认 DNS 服务器 tag
+	Strategy string      `json:"strategy"`
+}
+
 // OverlayData 是持久化到文件的 overlay 数据
 type OverlayData struct {
 	RouteRules []RouteRule              `json:"route_rules"`
 	Outbounds  []map[string]interface{} `json:"outbounds,omitempty"`
+	DNS        *DNSConfig               `json:"dns,omitempty"`
 }
 
 // ConfigOverlay 管理增量配置叠加层
@@ -229,6 +256,29 @@ func (o *ConfigOverlay) Apply(adapter engine.EngineAdapter) error {
 		return fmt.Errorf("重载 sing-box 失败: %w", err)
 	}
 	return nil
+}
+
+// SetDNS 设置 DNS 配置
+func (o *ConfigOverlay) SetDNS(dns *DNSConfig) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.data.DNS = dns
+	return o.saveLocked()
+}
+
+// GetDNS 获取当前 DNS 配置
+func (o *ConfigOverlay) GetDNS() *DNSConfig {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.data.DNS == nil {
+		return nil
+	}
+	cp := *o.data.DNS
+	cp.Servers = make([]DNSServer, len(o.data.DNS.Servers))
+	copy(cp.Servers, o.data.DNS.Servers)
+	cp.Rules = make([]DNSRule, len(o.data.DNS.Rules))
+	copy(cp.Rules, o.data.DNS.Rules)
+	return &cp
 }
 
 // GetData 返回当前 overlay 数据的副本

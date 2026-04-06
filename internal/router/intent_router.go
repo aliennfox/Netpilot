@@ -37,10 +37,11 @@ func (r *IntentRouter) Route(input string) RoutingResult {
 		hits := 0
 		longest := 0
 		for _, kw := range keywords {
-			if strings.Contains(normalized, kw) {
+			kwLower := strings.ToLower(kw)
+			if strings.Contains(normalized, kwLower) {
 				hits++
-				if len(kw) > longest {
-					longest = len(kw)
+				if len(kwLower) > longest {
+					longest = len(kwLower)
 				}
 			}
 		}

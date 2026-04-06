@@ -80,6 +80,22 @@ var KeywordMap = map[string][]string{
 		"删除订阅", "移除订阅",
 		"remove subscription", "delete subscription",
 	},
+	"show_dns": {
+		"DNS状态", "DNS配置", "当前DNS",
+		"dns status", "dns config",
+	},
+	"set_dns_mode": {
+		"DNS防泄露", "DNS模式", "DNS安全", "切换DNS",
+		"dns leak", "dns protect", "dns mode",
+	},
+	"live_connections": {
+		"实时连接", "连接监控", "实时流量",
+		"live", "live connections",
+	},
+	"show_connections": {
+		"当前连接", "连接列表", "活跃连接",
+		"connections", "active connections",
+	},
 	"clear_history": {
 		"清空对话", "新对话", "重新开始", "/clear",
 	},

@@ -47,9 +47,10 @@ func main() {
 	}
 	subMgr := subscription.NewSubscriptionManager(subStore, ov, adapter)
 
-	// 注册 overlay tools 和订阅 tools 到 pipeline
+	// 注册 overlay tools、订阅 tools、DNS tools 到 pipeline
 	pipeline.RegisterExtraTools(tool.RegisterOverlayTools(ov))
 	pipeline.RegisterExtraTools(tool.RegisterSubscriptionTools(subMgr))
+	pipeline.RegisterExtraTools(tool.RegisterDNSTools(ov))
 
 	// 设置 adapter 的配置路径（如果有 merged 配置就用它）
 	mergedPath := ov.MergedConfigPath()
@@ -254,6 +255,15 @@ func main() {
 			} else {
 				printResult(result)
 			}
+		case "live":
+			localEngine.Execute("live_connections", nil) //nolint:errcheck
+		case "dns":
+			result, err := localEngine.Execute("show_dns", nil)
+			if err != nil {
+				fmt.Printf("%s错误: %v%s\n", colorRed, err, colorReset)
+			} else {
+				printResult(result)
+			}
 		default:
 			handled = false
 		}
@@ -353,6 +363,14 @@ func printHelp(agentEnabled bool) {
   更新订阅 / sub-update [id]   更新指定订阅或全部
   删除订阅 / sub-remove <id>   删除订阅及其节点
 
+%sDNS 管理:%s
+  DNS状态 / dns              查看当前 DNS 配置
+  DNS模式 / DNS防泄露         切换 DNS 模式 (secure/split/local)
+
+%s连接监控:%s
+  当前连接 / connections      一次性查看活跃连接
+  实时连接 / live             进入实时连接监控（按 q 退出）
+
 %s原始命令（向后兼容）:%s
   nodes                        列出节点
   switch <group> <node>        手动切换（经过 Pipeline）
@@ -363,7 +381,7 @@ func printHelp(agentEnabled bool) {
   rollback [snap-id]           回滚到指定快照
   telemetry                    查看操作日志
   quit                         退出
-`, colorCyan, colorReset, colorCyan, colorReset, colorCyan, colorReset, colorCyan, colorReset, colorCyan, colorReset)
+`, colorCyan, colorReset, colorCyan, colorReset, colorCyan, colorReset, colorCyan, colorReset, colorCyan, colorReset, colorCyan, colorReset, colorCyan, colorReset)
 
 	if agentEnabled {
 		fmt.Printf(`

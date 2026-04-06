@@ -19,7 +19,11 @@ func MergeConfigs(basePath string, overlay *OverlayData) ([]byte, error) {
 		return nil, fmt.Errorf("解析 base config 失败: %w", err)
 	}
 
-	if overlay == nil || (len(overlay.RouteRules) == 0 && len(overlay.Outbounds) == 0) {
+	if overlay == nil || (len(overlay.RouteRules) == 0 && len(overlay.Outbounds) == 0 && overlay.DNS == nil) {
+		// 即使没有 overlay 数据，也注入默认 DNS
+		if _, hasDNS := config["dns"]; !hasDNS {
+			injectDefaultDNS(config)
+		}
 		return json.MarshalIndent(config, "", "  ")
 	}
 
@@ -32,6 +36,9 @@ func MergeConfigs(basePath string, overlay *OverlayData) ([]byte, error) {
 	if len(overlay.Outbounds) > 0 {
 		mergeOutbounds(config, overlay.Outbounds)
 	}
+
+	// 合并 DNS 配置
+	mergeDNS(config, overlay.DNS)
 
 	return json.MarshalIndent(config, "", "  ")
 }
@@ -162,6 +169,129 @@ func toInterfaceSlice(ss []string) []interface{} {
 	result := make([]interface{}, len(ss))
 	for i, s := range ss {
 		result[i] = s
+	}
+	return result
+}
+
+// mergeDNS 将 overlay DNS 配置写入最终配置；如果 overlay 没有 DNS 且 base 也没有，注入默认配置
+func mergeDNS(config map[string]interface{}, dns *DNSConfig) {
+	if dns != nil {
+		config["dns"] = dnsConfigToMap(dns)
+		ensureDefaultDomainResolver(config)
+		return
+	}
+	// overlay 没有 DNS 配置，检查 base 是否已有
+	if _, hasDNS := config["dns"]; !hasDNS {
+		injectDefaultDNS(config)
+	}
+}
+
+// injectDefaultDNS 注入默认的安全 DNS 配置（secure 模式：全部走代理 DNS）
+func injectDefaultDNS(config map[string]interface{}) {
+	config["dns"] = dnsConfigToMap(DefaultDNSConfig("secure"))
+	ensureDefaultDomainResolver(config)
+}
+
+// ensureDefaultDomainResolver 确保 route.default_domain_resolver 存在（sing-box 1.12+ 必需）
+func ensureDefaultDomainResolver(config map[string]interface{}) {
+	routeRaw, ok := config["route"]
+	if !ok {
+		routeRaw = map[string]interface{}{}
+		config["route"] = routeRaw
+	}
+	route, ok := routeRaw.(map[string]interface{})
+	if !ok {
+		route = map[string]interface{}{}
+		config["route"] = route
+	}
+	if _, has := route["default_domain_resolver"]; !has {
+		route["default_domain_resolver"] = "local-dns"
+	}
+}
+
+// DefaultDNSConfig 根据模式生成默认 DNS 配置（sing-box 1.12+ 格式）
+func DefaultDNSConfig(mode string) *DNSConfig {
+	servers := []DNSServer{
+		{Type: "tls", Tag: "proxy-dns", Server: "8.8.8.8", ServerPort: 853, Detour: "proxy-group"},
+		{Type: "udp", Tag: "direct-dns", Server: "223.5.5.5", ServerPort: 53},
+		{Type: "local", Tag: "local-dns"},
+	}
+
+	var rules []DNSRule
+	finalServer := "proxy-dns"
+
+	switch mode {
+	case "split":
+		// 直连流量走本地 DNS，其余走代理 DNS
+		rules = []DNSRule{
+			{Action: "route", Server: "direct-dns", Outbound: "direct-out"},
+		}
+		finalServer = "proxy-dns"
+	case "local":
+		finalServer = "direct-dns"
+	default: // "secure"
+		finalServer = "proxy-dns"
+	}
+
+	return &DNSConfig{
+		Servers:  servers,
+		Rules:    rules,
+		Final:    finalServer,
+		Strategy: "prefer_ipv4",
+	}
+}
+
+// dnsConfigToMap 将 DNSConfig 转为 sing-box 1.12+ dns 配置的 map
+func dnsConfigToMap(dns *DNSConfig) map[string]interface{} {
+	var servers []interface{}
+	for _, s := range dns.Servers {
+		srv := map[string]interface{}{
+			"type": s.Type,
+			"tag":  s.Tag,
+		}
+		if s.Server != "" {
+			srv["server"] = s.Server
+		}
+		if s.ServerPort > 0 {
+			srv["server_port"] = s.ServerPort
+		}
+		if s.Detour != "" {
+			srv["detour"] = s.Detour
+		}
+		servers = append(servers, srv)
+	}
+
+	var rules []interface{}
+	for _, r := range dns.Rules {
+		rule := map[string]interface{}{
+			"action": r.Action,
+		}
+		if r.Server != "" {
+			rule["server"] = r.Server
+		}
+		if r.Outbound != "" {
+			rule["outbound"] = r.Outbound
+		}
+		if len(r.Domain) > 0 {
+			rule["domain"] = toInterfaceSlice(r.Domain)
+		}
+		if len(r.DomainSuffix) > 0 {
+			rule["domain_suffix"] = toInterfaceSlice(r.DomainSuffix)
+		}
+		rules = append(rules, rule)
+	}
+
+	result := map[string]interface{}{
+		"servers": servers,
+	}
+	if len(rules) > 0 {
+		result["rules"] = rules
+	}
+	if dns.Final != "" {
+		result["final"] = dns.Final
+	}
+	if dns.Strategy != "" {
+		result["strategy"] = dns.Strategy
 	}
 	return result
 }
