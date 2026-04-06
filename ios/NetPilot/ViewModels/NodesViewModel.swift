@@ -5,8 +5,9 @@ class NodesViewModel: ObservableObject {
     @Published var nodes: [NodeModel] = []
     @Published var isLoading = false
     @Published var isTesting = false
-    @Published var errorMessage: String?
+    @Published var switchingTag: String?  // 正在切换的节点 tag
     @Published var searchText = ""
+    @Published var toastMessage: String?
 
     private let api = APIClient.shared
 
@@ -20,18 +21,33 @@ class NodesViewModel: ObservableObject {
         defer { isLoading = false }
         do {
             nodes = try await api.getNodes()
-            errorMessage = nil
+            // 用 status 同步当前活跃节点
+            let status = try await api.getStatus()
+            if !status.currentNode.isEmpty {
+                nodes = nodes.map { node in
+                    var n = node
+                    n.active = (node.tag == status.currentNode)
+                    return n
+                }
+            }
         } catch {
-            errorMessage = error.localizedDescription
+            showToast(error.localizedDescription)
         }
     }
 
     func switchNode(_ tag: String) async {
+        switchingTag = tag
+        defer { switchingTag = nil }
         do {
             try await api.switchNode(node: tag)
-            await loadNodes()
+            // 本地更新 active 状态，避免重新拉取
+            nodes = nodes.map { node in
+                var n = node
+                n.active = (node.tag == tag)
+                return n
+            }
         } catch {
-            errorMessage = error.localizedDescription
+            showToast("切换失败: \(error.localizedDescription)")
         }
     }
 
@@ -40,11 +56,27 @@ class NodesViewModel: ObservableObject {
         defer { isTesting = false }
         do {
             try await api.testLatencyAll()
-            // 延迟后刷新节点列表以获取新延迟
             try? await Task.sleep(for: .seconds(1))
-            await loadNodes()
+            // 只刷新节点数据，保留 active 状态
+            let freshNodes = try await api.getNodes()
+            let activeTag = nodes.first(where: { $0.active })?.tag
+            nodes = freshNodes.map { node in
+                var n = node
+                n.active = (node.tag == activeTag)
+                return n
+            }
         } catch {
-            errorMessage = error.localizedDescription
+            showToast("测速失败: \(error.localizedDescription)")
+        }
+    }
+
+    private func showToast(_ message: String) {
+        toastMessage = message
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            if toastMessage == message {
+                toastMessage = nil
+            }
         }
     }
 }

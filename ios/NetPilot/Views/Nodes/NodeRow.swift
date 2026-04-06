@@ -2,20 +2,28 @@ import SwiftUI
 
 struct NodeRow: View {
     let node: NodeModel
+    var isSwitching: Bool = false
+    var isTesting: Bool = false
     let onTap: () -> Void
 
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
-                // 活跃指示器
-                Circle()
-                    .fill(node.active ? Theme.accentBlue : .clear)
-                    .frame(width: 6, height: 6)
+                // 活跃指示器 / 切换中
+                if isSwitching {
+                    ProgressView()
+                        .frame(width: 6, height: 6)
+                        .scaleEffect(0.5)
+                } else {
+                    Circle()
+                        .fill(node.active ? Theme.accentBlue : .clear)
+                        .frame(width: 6, height: 6)
+                }
 
                 // 节点名
                 Text(node.tag)
                     .font(.system(size: 15))
-                    .foregroundStyle(Theme.textPrimary)
+                    .foregroundStyle(node.active ? Theme.accentBlue : Theme.textPrimary)
                     .lineLimit(1)
 
                 // 协议标签
@@ -30,18 +38,25 @@ struct NodeRow: View {
                 Spacer()
 
                 // 延迟
-                Text(node.latencyText)
-                    .font(.system(size: 15, weight: .medium, design: .monospaced))
-                    .foregroundStyle(
-                        node.latency > 0
-                            ? Theme.latencyColor(node.latency)
-                            : Theme.textTertiary
-                    )
+                if isTesting {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .tint(Theme.textTertiary)
+                } else {
+                    Text(node.latencyText)
+                        .font(.system(size: 15, weight: .medium, design: .monospaced))
+                        .foregroundStyle(
+                            node.latency > 0
+                                ? Theme.latencyColor(node.latency)
+                                : Theme.textTertiary
+                        )
+                }
             }
             .padding(.vertical, 12)
             .padding(.horizontal, 12)
-            .background(Theme.backgroundSecondary)
+            .background(node.active ? Theme.accentBlue.opacity(0.1) : Theme.backgroundSecondary)
         }
+        .disabled(isSwitching)
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
@@ -55,7 +70,7 @@ struct NodeRow: View {
         NodeRow(node: NodeModel(
             tag: "日本-1", type: "shadowsocks", server: "5.6.7.8", port: 443,
             alive: true, latency: 2388, groupTag: "proxy-group", active: false
-        ), onTap: {})
+        ), isTesting: true, onTap: {})
     }
     .padding()
     .background(Theme.backgroundPrimary)

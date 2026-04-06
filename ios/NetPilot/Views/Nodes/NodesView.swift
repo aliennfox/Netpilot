@@ -5,31 +5,59 @@ struct NodesView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // 搜索栏
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(Theme.textTertiary)
-                    TextField("搜索节点...", text: $vm.searchText)
-                        .font(.system(size: 15))
-                        .foregroundStyle(Theme.textPrimary)
-                }
-                .padding(10)
-                .background(Theme.backgroundTertiary)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-
-                // 节点列表
-                ScrollView {
-                    LazyVStack(spacing: 1) {
-                        ForEach(vm.filteredNodes) { node in
-                            NodeRow(node: node) {
-                                Task { await vm.switchNode(node.tag) }
+            ZStack(alignment: .bottom) {
+                VStack(spacing: 0) {
+                    // 搜索栏
+                    HStack {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(Theme.textTertiary)
+                        TextField("搜索节点...", text: $vm.searchText)
+                            .font(.system(size: 15))
+                            .foregroundStyle(Theme.textPrimary)
+                        if !vm.searchText.isEmpty {
+                            Button {
+                                vm.searchText = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(Theme.textTertiary)
                             }
                         }
                     }
+                    .padding(10)
+                    .background(Theme.backgroundTertiary)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                     .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+
+                    // 节点列表
+                    ScrollView {
+                        LazyVStack(spacing: 1) {
+                            ForEach(vm.filteredNodes) { node in
+                                NodeRow(
+                                    node: node,
+                                    isSwitching: vm.switchingTag == node.tag,
+                                    isTesting: vm.isTesting
+                                ) {
+                                    Task { await vm.switchNode(node.tag) }
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                    }
+                }
+
+                // Toast
+                if let toast = vm.toastMessage {
+                    Text(toast)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Theme.accentRed.opacity(0.9))
+                        .clipShape(Capsule())
+                        .padding(.bottom, 20)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .animation(.easeInOut, value: vm.toastMessage)
                 }
             }
             .background(Theme.backgroundPrimary)
@@ -55,7 +83,10 @@ struct NodesView: View {
                 }
             }
             .refreshable { await vm.loadNodes() }
-            .task { await vm.loadNodes() }
+            .task {
+                await vm.loadNodes()
+                await vm.testAllLatency()
+            }
         }
     }
 }

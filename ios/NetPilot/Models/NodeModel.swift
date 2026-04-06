@@ -9,7 +9,7 @@ struct NodeModel: Codable, Identifiable {
     let alive: Bool
     let latency: Int
     let groupTag: String
-    let active: Bool
+    var active: Bool
 
     enum CodingKeys: String, CodingKey {
         case tag, type, server, port, alive, latency
