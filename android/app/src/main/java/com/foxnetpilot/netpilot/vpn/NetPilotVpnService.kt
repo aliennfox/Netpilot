@@ -98,7 +98,9 @@ class NetPilotVpnService : VpnService() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("NetPilot")
             .setContentText("VPN 已连接")
-            .setSmallIcon(android.R.drawable.stat_sys_vpn_ic)
+            // android.R.drawable.stat_sys_vpn_ic 是 @hide API,改用公开的锁图标占位;
+            // 正式发版前应在 res/drawable/ 自备 vector 图标(见 C1)。
+            .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setContentIntent(tapIntent)
             .setOngoing(true)
             .build()
