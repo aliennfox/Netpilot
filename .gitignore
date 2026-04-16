@@ -1,4 +1,4 @@
-data/
+/data/
 .singbox.pid
 .DS_Store
 /netpilot
@@ -7,3 +7,10 @@ data/
 # Xcode user data
 ios/**/*.xcuserstate
 ios/**/xcuserdata/
+
+# Android build artifacts
+android/build/
+android/.gradle/
+android/app/build/
+android/app/libs/*.aar
+android/local.properties
