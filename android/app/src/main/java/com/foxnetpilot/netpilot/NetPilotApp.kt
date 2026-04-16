@@ -7,13 +7,13 @@ import android.net.ConnectivityManager
 import android.util.Log
 import libbox.Libbox
 import libbox.SetupOptions
+import java.io.File
 
 class NetPilotApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        instance = this
 
-        // sing-box libbox 全局状态初始化 —— 必须在任何 Libbox.newCommandServer / VpnService 之前调用一次
-        // 抄自 sing-box-for-android 的 Application.kt:72-82 (2026-04-17)
         try {
             val baseDir = filesDir.apply { mkdirs() }
             val workingDir = (getExternalFilesDir(null) ?: filesDir).apply { mkdirs() }
@@ -29,8 +29,26 @@ class NetPilotApp : Application() {
             Log.e(TAG, "Libbox.setup failed", t)
         }
 
-        // API key 通过 BuildConfig 或加密存储注入；先留空让 Agent fallback 到本地路由
+        bootstrapConfigAssets()
+
         NetPilotCore.init(this, clashAPIAddr = "127.0.0.1:9090", apiKey = "")
+    }
+
+    /**
+     * 把 assets/android_tun_base.json 拷到 filesDir/configs/, 首次启动或 asset 更新后生效。
+     * merged.json 由 Go overlay.Apply() 生成; 当其不存在时, VpnService 回退到这份基础 tun config。
+     */
+    private fun bootstrapConfigAssets() {
+        val configsDir = File(filesDir, "configs").apply { mkdirs() }
+        val dst = File(configsDir, TUN_BASE_NAME)
+        runCatching {
+            assets.open(TUN_BASE_NAME).use { input ->
+                dst.outputStream().use { input.copyTo(it) }
+            }
+            Log.i(TAG, "asset copied: ${dst.path} (${dst.length()} bytes)")
+        }.onFailure {
+            Log.e(TAG, "asset copy failed: $TUN_BASE_NAME", it)
+        }
     }
 
     override fun onTerminate() {
@@ -40,8 +58,8 @@ class NetPilotApp : Application() {
 
     companion object {
         private const val TAG = "NetPilotApp"
+        const val TUN_BASE_NAME = "android_tun_base.json"
 
-        // 供 NetPilotPlatformInterface 静态访问 (findConnectionOwner 要用)
         @Volatile private var instance: NetPilotApp? = null
 
         val connectivity: ConnectivityManager?
@@ -49,10 +67,5 @@ class NetPilotApp : Application() {
 
         val packageManager: PackageManager?
             get() = instance?.packageManager
-    }
-
-    init {
-        @Suppress("LeakingThis")
-        instance = this
     }
 }

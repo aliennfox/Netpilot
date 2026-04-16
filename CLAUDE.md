@@ -224,8 +224,8 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 
 里程碑拆解:
 - [x] **3B-1** 引入 sing-box + 编出含 libbox 的 aar ✅ (2026-04-17 完成, 实际 0.5 天含两轮阻塞预研)
-- [ ] **3B-2** 改造 SingBoxAdapter,新增"嵌入式模式"(2-3 天)
-- [ ] **3B-3** Android VpnService 接入 libbox,真机走代理(2-3 天)
+- [x] **3B-2** ~~改造 SingBoxAdapter,新增"嵌入式模式"~~ → **显式接受双轨**,见 Known Issue #M12 (2026-04-17)
+- [~] **3B-3** Android VpnService 接入 libbox — 代码硬化完成 (2026-04-17), 真机验证待用户明天做
 - [ ] **3B-4** iOS NEPacketTunnelProviderExtension 从零实现(3-5 天)
 - [ ] **3B-5** 双端真机联调 + 稳定性修复(2-3 天)
 
@@ -265,11 +265,29 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 
 ### 🔴 高优先级
 
-**#H1 — libbox 数据面未集成** → 🟡 **3B-1 部分完成(编译链路打通, 真启停待 3B-3)**
-- 位置: `libcore/box.go` Start/Close 是 stub;`mobile/netpilot.go` StartTun/StopTun 已对上新契约
-- 进展 (2026-04-17): aar 里已含 sing-box v1.13.8 + libbox 完整代码(libgojni.so 4 架构每个 26-30MB), Go 侧 `libbox.Setup` / `Version` 已能调用, Android 工程编译通过
-- 剩余: `libcore.BoxInstance.Start` 需要 3B-3 真正接入 `libbox.NewCommandServer` + Kotlin 侧 `NetPilotNativeInterface`(实现 `libcore.PlatformInterface`), 然后 openTun 回调里 establish TUN
-- 计划: Phase 3B-3 真机跑
+**#H1 — libbox 数据面未集成** → 🟡 **3B-3 代码完成 (2026-04-17), 真机验证待用户**
+- 状态变更: Kotlin 侧直接驱动 libbox (见 #M12 双轨决策); Go 侧 `libcore.BoxInstance` 保留占位但不调用
+- 进展 (2026-04-17): 
+  - Kotlin `NetPilotVpnService` 完整实现 libbox CommandServer 生命周期 + PlatformInterface.openTun
+  - 路由 / DNS / per-app VPN / HTTP proxy / configureIntent 全量处理
+  - `Libbox.checkConfig` 预校验, 早失败
+  - `assets/android_tun_base.json` 首次启动拷到 `filesDir/configs/`, fallback 链: `merged.json` → `android_tun_base.json`
+  - `./gradlew :app:assembleDebug` 成功, APK 85MB
+- 剩余 (硬依赖真机):
+  - loadLibrary + VPN 权限对话框 + 实跑流量验证
+  - `InterfaceUpdateListener` 接真 `ConnectivityManager.NetworkCallback` (网络切换事件)
+  - `getInterfaces()` 返回真接口列表 (当前空迭代器)
+- 计划: 用户明天插机验证 → 3B-5 阶段补稳定性
+
+**#H4 — overlay merged.json 在 Android 上缺 tun inbound** (3B-3 代码 review 发现)
+- 位置: `mobile/netpilot.go:79` NewClient 用 `configs/minimal.json` 作 base; `internal/overlay/overlay.go:268` Apply() 合并出的 `merged.json` 继承 base 的 `mixed` inbound, 没有 tun inbound
+- 影响: 用户导入订阅 / 应用模板 → overlay.Apply 生成 merged.json → VpnService 加载 merged.json → sing-box libbox 看到没有 tun inbound, **永不会回调 openTun**, TUN 数据面不动
+- 当前缓解: 3B-3 VpnService.loadConfigJson 优先 merged.json, 不存在时回退 android_tun_base.json —— 但用户一旦动 overlay, merged.json 就被写入, 问题触发
+- 修复方向 (候选):
+  - (a) Go NewClient 接受 platform hint, Android 进程传 "android" → base 改指 `android_tun_base.json`
+  - (b) overlay.Apply 检查 merged 结果, 若无 tun inbound 且 platform=android, 自动注入
+  - (c) Kotlin 侧加载 merged.json 后二次合并 tun inbound (Kotlin 持有 tun 配置权威)
+- ROI: 12 (阻塞真机第一次导订阅测试), **3B-3 真机测试前必须修**
 
 **#H2 — Orchestrator 自动回滚路径名存实亡**
 - 位置: `internal/agent/orchestrator.go:86` 调用 `pipeline.Execute(ctx, "rollback", nil)`,但 `internal/tool/tools.go:282-291` 中 rollback tool 是占位实现
@@ -326,6 +344,15 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - 根因: sing-box `experimental/libbox/pidfd_android.go:12` 用 `//go:linkname` 单向访问 Go 标准库 unexported 符号 `os.checkPidfdOnce`; Go 1.23+ 收紧 linkname 规则, 要求双向声明才通过
 - 修复: 构建时必须加 `-ldflags='-s -w -checklinkname=0'` 绕过新 linker 检查 (Go 官方提供的逃生舱)
 - 关联: sing-box issue #3233, golang issue #70508
+
+**#M12 — 3B-2 显式接受双轨,Go adapter 不做嵌入式改造**(Phase 3B-2 决策, 2026-04-17)
+- 背景: 原计划 3B-2 让 `SingBoxAdapter` 在 CLI/Server 模式下走外部 sing-box 二进制, 在移动端走嵌入式 libbox。3B-3 实现过程中发现 Kotlin 直接操作 `libbox.CommandServer` 更自然, Go 侧 `libcore.BoxInstance` 包 libbox 反而是多余中间层。
+- 决策: **接受双轨为显式设计** — CLI/Server 继续 Clash API HTTP 外部进程模式; Android/iOS 由平台语言 (Kotlin/Swift) 直接持有 libbox CommandServer 生命周期。Go `libcore.BoxInstance` 保留为占位但不调用, `mobile.Client.StartTun/StopTun` 签名保留但移动端不再使用。
+- 影响: 
+  - CLI 和移动端代码路径不共享 sing-box 启停逻辑 —— 可接受, 因为语义本来就不同 (CLI 面对开发者/服务器; 移动端面对 VpnService/NE Extension 生命周期)
+  - 无需维护 Go 侧嵌入式 adapter 代码, 减 2-3 天工作量
+  - 风险: CLI 路径与移动端在 sing-box 行为上可能漂移, 需用一致的 `configs/*.json` + `merged.json` 作为"配置层契约"兜底
+- 位置: `internal/engine/singbox_adapter.go` (保持原样); `mobile/netpilot.go:197-252` StartTun/StopTun/TunRunning 空壳; `libcore/box.go` BoxInstance stub; `android/.../NetPilotVpnService.kt` Kotlin 直接驱动 libbox
 
 ### 🟢 轻微
 

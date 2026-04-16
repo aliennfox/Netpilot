@@ -1,0 +1,59 @@
+{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "experimental": {
+    "clash_api": {
+      "external_controller": "127.0.0.1:9090",
+      "default_mode": "rule"
+    },
+    "cache_file": {
+      "enabled": true,
+      "path": "cache.db"
+    }
+  },
+  "dns": {
+    "servers": [
+      { "tag": "cf-doh", "address": "https://1.1.1.1/dns-query", "detour": "proxy-group" },
+      { "tag": "local-dns", "address": "223.5.5.5", "detour": "direct-out" }
+    ],
+    "rules": [
+      { "outbound": "any", "server": "local-dns" }
+    ],
+    "final": "cf-doh",
+    "strategy": "prefer_ipv4"
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
+      "mtu": 9000,
+      "auto_route": true,
+      "strict_route": false,
+      "endpoint_independent_nat": false,
+      "stack": "gvisor",
+      "sniff": true
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "selector",
+      "tag": "proxy-group",
+      "outbounds": ["direct-out", "block-out"],
+      "default": "direct-out"
+    },
+    { "type": "direct", "tag": "direct-out" },
+    { "type": "block", "tag": "block-out" },
+    { "type": "dns", "tag": "dns-out" }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "rules": [
+      { "protocol": "dns", "outbound": "dns-out" },
+      { "ip_is_private": true, "outbound": "direct-out" }
+    ],
+    "final": "proxy-group"
+  }
+}
