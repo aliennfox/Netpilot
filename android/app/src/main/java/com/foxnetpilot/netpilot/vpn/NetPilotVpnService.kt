@@ -16,9 +16,11 @@ import com.foxnetpilot.netpilot.NetPilotCore
 
 /**
  * Android VpnService 实现：
- *  1. 通过 VpnService.Builder 申请 TUN 接口（IPv4/IPv6 + DNS + 路由）
- *  2. 把 fd detach 后传给 Go core ([NetPilotCore.startTun])
- *  3. 作为前台服务运行，避免被系统回收
+ *  1. 启动前台服务, 保证系统不回收
+ *  2. (3B-3 将来) 实现 libcore.PlatformInterface, 让 Go 侧 sing-box 通过 openTun 回调
+ *     反向请求 TUN fd —— 那时再在 openTun 里 builder.establish().detachFd() 并返回
+ *  3. 3B-1 当前版本: 保留 builder.establish() 骨架但 fd 不传给 Go, Go 侧 Start/Close 是 stub
+ *     这样 APK 可以编译 + 安装, 真跑流量要等 3B-3。
  *
  * 真正的数据面（sing-box libbox）由 Go 侧 StartTun 内部启动；本类只负责 fd 与生命周期。
  */
@@ -60,9 +62,11 @@ class NetPilotVpnService : VpnService() {
             }
             pfd = tun
             val fd = tun.detachFd()
+            // TODO(3B-3): 实现 libcore.PlatformInterface, 把 fd 在 openTun 回调里返回。
+            //             当前 Go 侧 BoxInstance.Start 是 stub, fd 暂不传递, 只记入日志。
             // configJSON 留空：让 Go 侧使用 overlay 合并后的当前配置
-            NetPilotCore.startTun(fd, "")
-            Log.i(TAG, "TUN started fd=$fd")
+            NetPilotCore.startTun("")
+            Log.i(TAG, "TUN started (3B-1 stub) fd=$fd")
         } catch (t: Throwable) {
             Log.e(TAG, "startTun failed", t)
             stopSelf()

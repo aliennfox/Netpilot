@@ -46,8 +46,11 @@ object NetPilotCore {
     fun agentReady(): Boolean                     = require().agentReady()
     fun version(): String                         = require().version()
 
-    // VPN data plane (TUN fd handover)
-    fun startTun(fd: Int, configJSON: String)     = require().startTun(fd, configJSON)
+    // VPN 数据面。3B-1 阶段 Go 侧 Start() 是 stub, 真跑要到 3B-3 接 libbox CommandServer。
+    // sing-box libbox 通过 PlatformInterface.openTun 回调反向取 fd, 因此:
+    //   3B-3 Kotlin 需实现一个 libcore.PlatformInterface, 在 openTun() 里才 establish TUN。
+    fun setPlatformInterface(iface: libcore.PlatformInterface) = require().setPlatformInterface(iface)
+    fun startTun(configJSON: String = "")         = require().startTun(configJSON)
     fun stopTun()                                 = require().stopTun()
     fun tunRunning(): Boolean                     = require().tunRunning()
 
