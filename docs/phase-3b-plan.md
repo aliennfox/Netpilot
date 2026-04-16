@@ -102,7 +102,7 @@ gomobile-matsuri bind \
 
 CI 入口: `./run lib core` (`.github/workflows/preview.yml:30`, `release.yml:39`) — 底层调用 `libcore/build.sh`。
 
-### 5.2 NetPilot 目标命令 (3B-1 采纳版, 已实证)
+### 5.2 NetPilot 目标命令 (3B-1 终版, 已实证)
 
 ```bash
 # 前置环境 (见第 11 节详版)
@@ -119,8 +119,15 @@ gomobile bind \
   -ldflags='-s -w -checklinkname=0' \
   -tags='with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' \
   -o android/app/libs/netpilot.aar \
-  ./libcore ./mobile
+  ./libcore ./mobile \
+  github.com/sagernet/sing-box/experimental/libbox
 ```
+
+**为什么 bind 三个包而不是两个** (2026-04-17 第三轮实证发现):
+- 若只 bind `./libcore ./mobile`, aar 里只有我们自定义的 `libcore.*` / `mobile.*` 类, **Kotlin 侧看不到 `libbox.CommandServer`/`libbox.PlatformInterface` 等类**
+- sing-box-for-android (sfa) 官方客户端直接使用 `libbox.Libbox.setup(...)` + `libbox.CommandServer(handler, pi)` + `server.startOrReloadService(config, opts)` 的 API(见 docs/phase-3b-plan.md §5 补注)
+- 把 `github.com/sagernet/sing-box/experimental/libbox` 加为 bind 的第 3 个 package,aar 体积 40MB → 57MB, 但 classes.jar 新增 109 个 `libbox.*` Java 类,Kotlin 侧可直接照抄 sfa 代码
+- **libcore 职能退化**: 原计划 libcore.BoxInstance 包 libbox.CommandServer, 现在 Kotlin 可直接操作 libbox,libcore 降级为 convenience 层 (3B-3 会进一步精简)
 
 每个 flag 的来源说明:
 

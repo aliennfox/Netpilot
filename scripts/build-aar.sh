@@ -77,7 +77,7 @@ echo "  Go:         $(go version)"
 echo "  JDK:        $(javac -version 2>&1)"
 echo "  NDK:        $ANDROID_NDK_HOME"
 echo "  GOPROXY:    $GOPROXY"
-echo "  源包:       ./libcore ./mobile"
+echo "  源包:       ./libcore ./mobile + sing-box/experimental/libbox (直接暴露给 Kotlin)"
 echo "  minSdk:     $ANDROID_API"
 
 gomobile bind \
@@ -87,7 +87,8 @@ gomobile bind \
     -ldflags='-s -w -checklinkname=0' \
     -tags='with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' \
     -o "$OUT" \
-    ./libcore ./mobile
+    ./libcore ./mobile \
+    github.com/sagernet/sing-box/experimental/libbox
 
 SIZE=$(du -h "$OUT" | awk '{print $1}')
 echo "✓ 已生成: $OUT ($SIZE)"
