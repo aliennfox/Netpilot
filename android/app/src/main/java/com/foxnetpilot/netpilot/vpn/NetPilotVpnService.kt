@@ -13,80 +13,176 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.foxnetpilot.netpilot.MainActivity
 import com.foxnetpilot.netpilot.NetPilotCore
+import libbox.CommandServer
+import libbox.CommandServerHandler
+import libbox.Libbox
+import libbox.OverrideOptions
+import libbox.TunOptions
+import java.io.File
 
 /**
- * Android VpnService 实现：
- *  1. 启动前台服务, 保证系统不回收
- *  2. (3B-3 将来) 实现 libcore.PlatformInterface, 让 Go 侧 sing-box 通过 openTun 回调
- *     反向请求 TUN fd —— 那时再在 openTun 里 builder.establish().detachFd() 并返回
- *  3. 3B-1 当前版本: 保留 builder.establish() 骨架但 fd 不传给 Go, Go 侧 Start/Close 是 stub
- *     这样 APK 可以编译 + 安装, 真跑流量要等 3B-3。
+ * Android VpnService 数据面实现。
  *
- * 真正的数据面（sing-box libbox）由 Go 侧 StartTun 内部启动；本类只负责 fd 与生命周期。
+ * 架构:
+ *   VpnService(framework) + NetPilotPlatformInterface(libbox.PlatformInterface 默认实现)
+ *   -> 同时满足 Android 框架 (TUN 建立权限) + sing-box libbox 回调契约 (openTun/protect)
+ *
+ * 启动流程 (3B-3 初版, 抄 sing-box-for-android bg/BoxService.kt:96-151):
+ *   1. startForeground(前台通知)
+ *   2. commandServer = Libbox.newCommandServer(this, this) —— handler=this, platformInterface=this
+ *   3. commandServer.start()
+ *   4. configJSON = NetPilotCore 合并后的 overlay config
+ *   5. commandServer.startOrReloadService(configJSON, OverrideOptions())
+ *      此时 sing-box 内部会反向调 openTun() 拿 fd, 我们在 openTun() 里 builder.establish()
+ *
+ * 停止:
+ *   commandServer.closeService() -> commandServer.close() -> pfd.close() -> stopForeground
  */
-class NetPilotVpnService : VpnService() {
+class NetPilotVpnService : VpnService(), NetPilotPlatformInterface, CommandServerHandler {
 
     private var pfd: ParcelFileDescriptor? = null
+    private var commandServer: CommandServer? = null
+
+    // ──────────────── VpnService / NetPilotPlatformInterface ─────────────────
+
+    /** libbox 启动 TUN inbound 时反向调用;此时 builder.establish() 并返回 fd。 */
+    override fun openTun(options: TunOptions): Int {
+        if (prepare(this) != null) error("VPN permission not granted")
+
+        val builder = Builder()
+            .setSession("NetPilot")
+            .setMtu(options.mtu)
+
+        // IPv4 地址
+        runCatching {
+            val inet4 = options.inet4Address
+            while (inet4.hasNext()) {
+                val addr = inet4.next()
+                builder.addAddress(addr.address(), addr.prefix())
+            }
+        }.onFailure { Log.w(TAG, "inet4Address iterate", it) }
+
+        // IPv6 地址
+        runCatching {
+            val inet6 = options.inet6Address
+            while (inet6.hasNext()) {
+                val addr = inet6.next()
+                builder.addAddress(addr.address(), addr.prefix())
+            }
+        }.onFailure { Log.w(TAG, "inet6Address iterate", it) }
+
+        // DNS + 默认路由 (autoRoute)
+        if (options.autoRoute) {
+            runCatching { builder.addDnsServer(options.dnsServerAddress.value) }
+                .onFailure { builder.addDnsServer("1.1.1.1") }
+            builder.addRoute("0.0.0.0", 0)
+            builder.addRoute("::", 0)
+        }
+
+        // 排除 NetPilot 自身防止回环
+        runCatching { builder.addDisallowedApplication(packageName) }
+
+        val tun = builder.establish() ?: error("VpnService.Builder.establish() returned null")
+        pfd = tun
+        val fd = tun.detachFd()
+        Log.i(TAG, "openTun established fd=$fd mtu=${options.mtu}")
+        return fd
+    }
+
+    /** 对 outbound socket fd 调 VpnService.protect 防止回环;VpnService 独有能力。 */
+    override fun autoDetectInterfaceControl(fd: Int) {
+        protect(fd)
+    }
+
+    // ──────────────── CommandServerHandler (sing-box 回调业务侧, 5 个方法) ─────────────────
+
+    override fun serviceReload() {
+        Log.i(TAG, "CommandServer: serviceReload requested")
+        // 3B-5 接入真 reload 流程
+    }
+
+    override fun serviceStop() {
+        Log.i(TAG, "CommandServer: serviceStop requested")
+        stopService()
+    }
+
+    override fun getSystemProxyStatus(): libbox.SystemProxyStatus = libbox.SystemProxyStatus()
+
+    override fun setSystemProxyEnabled(enabled: Boolean) {}
+
+    override fun writeDebugMessage(msg: String?) {
+        msg?.let { Log.d(TAG, "libbox: $it") }
+    }
+
+    // ──────────────── Service 生命周期 ─────────────────
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                stopTun()
+                stopService()
                 stopSelf()
                 return START_NOT_STICKY
             }
-            else -> startTun()
+            else -> startService()
         }
         return START_STICKY
     }
 
-    private fun startTun() {
+    private fun startService() {
         startForeground(NOTIF_ID, buildNotification())
         try {
-            val builder = Builder()
-                .setSession("NetPilot")
-                .setMtu(1500)
-                .addAddress("172.19.0.1", 30)
-                .addAddress("fdfe:dcba:9876::1", 126)
-                .addRoute("0.0.0.0", 0)
-                .addRoute("::", 0)
-                .addDnsServer("1.1.1.1")
-                .addDnsServer("8.8.8.8")
-                .setBlocking(false)
-            // 排除 NetPilot 自己的流量，避免回环
-            try { builder.addDisallowedApplication(packageName) } catch (_: Throwable) {}
+            // 读 overlay 合并后的 sing-box config JSON
+            val configJson = loadConfigJson()
+            Log.i(TAG, "config loaded ${configJson.length} bytes")
 
-            val tun = builder.establish() ?: run {
-                Log.e(TAG, "VpnService.Builder.establish() returned null")
-                stopSelf(); return
-            }
-            pfd = tun
-            val fd = tun.detachFd()
-            // TODO(3B-3): 实现 libcore.PlatformInterface, 把 fd 在 openTun 回调里返回。
-            //             当前 Go 侧 BoxInstance.Start 是 stub, fd 暂不传递, 只记入日志。
-            // configJSON 留空：让 Go 侧使用 overlay 合并后的当前配置
-            NetPilotCore.startTun("")
-            Log.i(TAG, "TUN started (3B-1 stub) fd=$fd")
+            // 启 CommandServer
+            val server = Libbox.newCommandServer(this, this)
+            server.start()
+            commandServer = server
+            Log.i(TAG, "CommandServer started")
+
+            // 加载配置, 触发 openTun 回调建 TUN
+            server.startOrReloadService(configJson, OverrideOptions())
+            Log.i(TAG, "sing-box service started via libbox")
+            NetPilotCore.markTunRunning(true)
         } catch (t: Throwable) {
-            Log.e(TAG, "startTun failed", t)
+            Log.e(TAG, "startService failed", t)
+            stopService()
             stopSelf()
         }
     }
 
-    private fun stopTun() {
-        runCatching { NetPilotCore.stopTun() }
+    private fun stopService() {
+        runCatching { commandServer?.closeService() }.onFailure { Log.w(TAG, "closeService", it) }
+        runCatching { commandServer?.close() }.onFailure { Log.w(TAG, "commandServer.close", it) }
+        commandServer = null
         runCatching { pfd?.close() }
         pfd = null
+        NetPilotCore.markTunRunning(false)
     }
 
     override fun onDestroy() {
-        stopTun()
+        stopService()
         super.onDestroy()
     }
 
     override fun onRevoke() {
-        stopTun()
+        stopService()
         super.onRevoke()
+    }
+
+    /**
+     * 从 NetPilot 的 overlay 合并配置文件加载 JSON。
+     * filesDir/configs/merged.json 或其他约定路径。3B-3 当前用简单 fallback 到 minimal.json。
+     */
+    private fun loadConfigJson(): String {
+        val candidates = listOf(
+            File(filesDir, "configs/merged.json"),
+            File(filesDir, "configs/minimal.json"),
+        )
+        val f = candidates.firstOrNull { it.exists() }
+            ?: error("no sing-box config found; expected ${candidates.joinToString()}")
+        return f.readText()
     }
 
     private fun buildNotification(): Notification {
@@ -102,8 +198,6 @@ class NetPilotVpnService : VpnService() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("NetPilot")
             .setContentText("VPN 已连接")
-            // android.R.drawable.stat_sys_vpn_ic 是 @hide API,改用公开的锁图标占位;
-            // 正式发版前应在 res/drawable/ 自备 vector 图标(见 C1)。
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setContentIntent(tapIntent)
             .setOngoing(true)

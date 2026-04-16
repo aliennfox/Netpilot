@@ -46,13 +46,12 @@ object NetPilotCore {
     fun agentReady(): Boolean                     = require().agentReady()
     fun version(): String                         = require().version()
 
-    // VPN 数据面。3B-1 阶段 Go 侧 Start() 是 stub, 真跑要到 3B-3 接 libbox CommandServer。
-    // sing-box libbox 通过 PlatformInterface.openTun 回调反向取 fd, 因此:
-    //   3B-3 Kotlin 需实现一个 libcore.PlatformInterface, 在 openTun() 里才 establish TUN。
-    fun setPlatformInterface(iface: libcore.PlatformInterface) = require().setPlatformInterface(iface)
-    fun startTun(configJSON: String = "")         = require().startTun(configJSON)
-    fun stopTun()                                 = require().stopTun()
-    fun tunRunning(): Boolean                     = require().tunRunning()
+    // VPN 数据面 (3B-3 改为 Kotlin 直接调 libbox.CommandServer, 详见 NetPilotVpnService.kt)。
+    // Go 侧 libcore.BoxInstance 当前保留作为占位, 待 3B-5 精简时移除。
+    // mobile/netpilot.go 的 StartTun / StopTun / SetPlatformInterface 保留签名但 Android 不再调用。
+    @Volatile private var tunRunningFlag: Boolean = false
+    fun markTunRunning(running: Boolean) { tunRunningFlag = running }
+    fun tunRunning(): Boolean = tunRunningFlag
 
     // 故障自动切换
     fun startFailover(configJSON: String = ""): String = require().startFailover(configJSON)
