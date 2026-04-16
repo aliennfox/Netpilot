@@ -6,6 +6,7 @@ Jetpack Compose + Material3 客户端。底部 5 tab(首页 / 对话 / 节点 / 
 
 ```bash
 # 1. 生成 netpilot.aar(gomobile 产物,已被 .gitignore,必须本机构建)
+#    注意:修改 mobile/*.go 后必须重跑本脚本,否则 Kotlin 侧会报 Unresolved reference
 ./scripts/build-aar.sh
 
 # 2. 需要 JDK 17 —— 当前 Gradle 8.7 / AGP 8.5.2 不兼容 JDK 22+
