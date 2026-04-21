@@ -26,6 +26,8 @@ Pilotty 是一个能听懂用户意图、实时感知流量状态、自动编排
 
 **原则**: 用户面 (App 标签、通知、UI 字符串、商店 listing) 必须是 Pilotty;开发者面 (文件路径、Go module、CLI 名) 保留 netpilot 以避免 churn。Go 侧 rename 留到未来用户有需求或准备 1.x 大重构时再做。
 
+**历史档保留**: `docs/phase-3b-plan.md` 和 `docs/phase-3b-4-plan.md` 里剩余的 "NetPilot" 字样**故意保留**,因为它们是 Phase 3B 调研 / 执行的历史凭证(且 phase-3b-4 整本已 DEFERRED)。后续做仓库 grep+replace 时若看到这两份文档里还有 NetPilot,**不要"修正"**,那是刻意留下的时间戳。
+
 ---
 
 ## 技术栈
