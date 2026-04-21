@@ -480,6 +480,12 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - 影响: "加一条公司内网直连" 这种诉求, Agent 固然能做, 但要求用户先懂 Agent 存在
 - 修复: `docs/android-mvp-gap.md` M18(feat) (~6-8h)。参考 NekoBox RouteSettingsActivity
 
+**#M25 — WireGuard 在 sing-box 1.13.8+ 从 outbound 迁到 endpoint, convertWireGuard 过时**(2026-04-22 M13 --deep 真机 validate 捕获)
+- 现象: `internal/subscription/converter.go:convertWireGuard` 产出 `{"type":"wireguard", "local_address":[...], "peer_public_key":"..."}` 形态的 outbound 对象。 sing-box 1.13.8+ 把 WireGuard 搬去 endpoints registry (`protocol/wireguard/endpoint.go:33` 用 `option.WireGuardEndpointOptions` 注册),schema 改成 `{"address":[...], "peers":[{"address":...,"public_key":...,"reserved":[...]}]}` 且顶层没有 server/server_port。 当前 converter 产物被 1.13.9 binary `sing-box check` 直接拒 `json: unknown field "local_address"`
+- 影响: 订阅里含 WG 节点 → 生成的 merged.json 在 sing-box 1.13.8+ 启动时拒绝加载 → 整份配置挂掉,不光 WG 节点,所有节点都不工作。 严重度中等因为用户订阅里 WG 节点本就稀少
+- 修复方向: `convertWireGuard` 改为产出 endpoint 对象而非 outbound;overlay/merger 需要区分 outbounds 和 endpoints 两段,新增 endpoint 写入路径。 范围影响到 `internal/overlay/` 的 merger 层,不只是 subscription。 预估 4-6h。 暂定 Phase 3B-4 M10 增量修复,本轮 fixture 先把 WG 从 clash-mixed 移除绕过
+- 遗留预防: `scripts/subscription-matrix-test.sh --deep` 已跑绿,未来 sing-box 继续变 schema 时会第一时间被 binary check 逮住
+
 ### 🟢 轻微
 
 - **#L1** ✅ 已修(2026-04-22 commit 8dc4576): `gofmt -w .` 清零了最后 5 个违规文件

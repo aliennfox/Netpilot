@@ -39,8 +39,8 @@ proxies:
     servername: www.microsoft.com
     client-fingerprint: chrome
     reality-opts:
-      public-key: fake-pubkey-base64
-      short-id: abcd1234
+      public-key: xMpLXlskDipwWGjPsxVInUSpd-fjCCYgb8mIOYbZipk
+      short-id: fc46e73c
 
   - name: "Trojan-SG"
     type: trojan
@@ -78,14 +78,9 @@ proxies:
     sni: anytls.example.com
     client-fingerprint: chrome
 
-  - name: "WG-DE"
-    type: wireguard
-    server: wg.example.com
-    port: 51820
-    private-key: wg-priv-fake
-    public-key: wg-peer-fake
-    ip: 10.0.0.2/32
-    mtu: 1420
+# NOTE: WireGuard 暂从 fixture 移除,见 CLAUDE.md #M25: sing-box 1.13.8+
+# 把 WG 从 outbound 迁到 endpoint, 当前 convertWireGuard 产物会被 sing-box
+# binary check 拒绝。 收尾到独立的 M10 增量修复。
 
 proxy-groups:
   - name: PROXY

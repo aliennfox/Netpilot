@@ -15,7 +15,7 @@
         "enabled": true,
         "server_name": "www.microsoft.com",
         "utls": {"enabled": true, "fingerprint": "chrome"},
-        "reality": {"enabled": true, "public_key": "fake-pubkey", "short_id": "abcd"}
+        "reality": {"enabled": true, "public_key": "xMpLXlskDipwWGjPsxVInUSpd-fjCCYgb8mIOYbZipk", "short_id": "fc46e73c"}
       }
     },
     {

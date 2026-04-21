@@ -24,8 +24,9 @@ type fixtureExpectation struct {
 
 var fixtureExpectations = map[string]fixtureExpectation{
 	"clash-mixed.yaml": {
-		MinNodes:      8,
-		RequiredTypes: []string{"shadowsocks", "vmess", "vless", "trojan", "hysteria2", "tuic", "anytls", "wireguard"},
+		// WG 暂从 clash-mixed 移除(#M25 sing-box 1.13.8+ WG→endpoint);剩 7
+		MinNodes:      7,
+		RequiredTypes: []string{"shadowsocks", "vmess", "vless", "trojan", "hysteria2", "tuic", "anytls"},
 		RequiredTags:  []string{"VLESS-Reality-US", "TUIC-KR", "AnyTLS-AU"},
 	},
 	"singbox-mixed.json": {
