@@ -100,11 +100,9 @@ fun SettingsScreen(
             }
         }
 
-        // 分流规则 (原 Rules tab 内联)
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Kicker("分流规则")
-            RulesSection()
-        }
+        // 分流规则 (原 Rules tab 内联) —— RulesSection 内部已有 Templates / Active rules
+        // 两个 Kicker 作为子标题,不再在外层重复"分流规则" 标题
+        RulesSection()
 
         // 关于
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

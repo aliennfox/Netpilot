@@ -27,7 +27,9 @@ object PilottyColors {
         val Ink5 = Color(0xFFD4D4D8)
         val Hairline = Color(0xFFEDEDEF)
         val HairlineStrong = Color(0xFFD7D7DA)
-        val NavBg = Color(0xC8FFFFFF)      // rgba(255,255,255,0.78)
+        // 原稿 rgba(255,255,255,0.78) 依赖 backdrop-filter blur;Compose 无原生 blur
+        // 兜底,透明度过高会看穿上层内容 → 提到 0.94 保留"半透明"语义但不穿透
+        val NavBg = Color(0xF0FFFFFF)
     }
 
     // Dark — pure black, lemon pops
@@ -43,6 +45,7 @@ object PilottyColors {
         val Ink5 = Color(0xFF404040)
         val Hairline = Color(0xFF1F1F1F)
         val HairlineStrong = Color(0xFF2A2A2A)
-        val NavBg = Color(0xB8141414)      // rgba(20,20,20,0.72)
+        // 同 Light 提阈值 (原 0.72 → 0.90)
+        val NavBg = Color(0xE6141414)
     }
 }
