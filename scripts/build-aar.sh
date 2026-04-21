@@ -49,7 +49,7 @@ if [ -z "${ANDROID_NDK_HOME:-}" ]; then
     fi
 fi
 
-# GOPROXY: 本机跑 NetPilot/sing-box 作 TUN 时, 默认 proxy.golang.org 会被 TUN 阻塞卡死。
+# GOPROXY: 本机跑 Pilotty/sing-box 作 TUN 时, 默认 proxy.golang.org 会被 TUN 阻塞卡死。
 # 见 CLAUDE.md #M9。
 export GOPROXY="${GOPROXY:-https://goproxy.cn,https://goproxy.io,direct}"
 export GOSUMDB="${GOSUMDB:-off}"

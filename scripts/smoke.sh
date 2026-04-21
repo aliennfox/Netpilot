@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NetPilot 冒烟测试：导入订阅 → 切节点 → 开 VPN → ping
+# Pilotty 冒烟测试：导入订阅 → 切节点 → 开 VPN → ping
 # 用法: ./scripts/smoke.sh [BASE_URL] [SUB_URL]
 #   BASE_URL 默认 http://127.0.0.1:8080
 #   SUB_URL  订阅链接（可选；缺省跳过导入步骤）

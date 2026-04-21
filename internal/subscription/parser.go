@@ -199,18 +199,30 @@ func parseLine(line string) (NodeConfig, error) {
 }
 
 // parseSS 解析 ss:// URI
-// 格式: ss://BASE64(method:password)@server:port#name
-// 或:   ss://BASE64(method:password@server:port)#name
+// 格式: ss://BASE64(method:password)@server:port[?plugin=...][#name]  (SIP002)
+// 或:   ss://BASE64(method:password@server:port)[?plugin=...][#name]
+//
+// 关键:SIP002 允许在 server:port 之后接 `?plugin=obfs-local;obfs=tls`
+// 等查询参数。早期实现把 `port?plugin=...` 一起送进 parseHostPort 导致
+// 端口解析失败、整条节点丢失 (#M17)。现在先把 `?query` 剥出来,再交给
+// parseHostPort,并把 query 参数收进 node.Extra 供上层消费。
 func parseSS(uri string) (NodeConfig, error) {
 	node := NodeConfig{Type: "shadowsocks", Extra: map[string]string{}}
 
-	// 提取名称 (#name)
+	// 提取名称 (#name) — 必须先于 query,因为 name 在最末尾
 	if idx := strings.LastIndex(uri, "#"); idx != -1 {
 		node.Name = decodeURIComponent(uri[idx+1:])
 		uri = uri[:idx]
 	}
 
 	body := strings.TrimPrefix(uri, "ss://")
+
+	// 剥离 query string (含 plugin / type 等),避免 server:port 解析受污染
+	queryStr := ""
+	if idx := strings.Index(body, "?"); idx != -1 {
+		queryStr = body[idx+1:]
+		body = body[:idx]
+	}
 
 	// 尝试格式1: BASE64(method:password)@server:port
 	if atIdx := strings.LastIndex(body, "@"); atIdx != -1 {
@@ -257,6 +269,19 @@ func parseSS(uri string) (NodeConfig, error) {
 		}
 		node.Server = server
 		node.Port = port
+	}
+
+	if queryStr != "" {
+		params := parseQuery(queryStr)
+		for k, v := range params {
+			node.Extra[k] = v
+		}
+		if t, ok := params["type"]; ok {
+			node.Network = t
+		}
+		if plugin, ok := params["plugin"]; ok {
+			node.Extra["plugin"] = decodeURIComponent(plugin)
+		}
 	}
 
 	if node.Name == "" {

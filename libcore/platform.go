@@ -2,7 +2,7 @@ package libcore
 
 // PlatformInterface 是 Android/iOS 侧实现, Go 侧回调以获得平台特定能力。
 //
-// 这一份是 NetPilot 自己的简化版, 不是 sing-box libbox.PlatformInterface 的镜像 —
+// 这一份是 Pilotty 自己的简化版, 不是 sing-box libbox.PlatformInterface 的镜像 —
 // gomobile bind 对接口类型支持有限, 必须用只包含 gomobile 可绑定类型 (string/int32/int64/bool/[]byte/error) 的接口。
 //
 // 3B-3 真正接入 libbox.NewCommandServer 时, 会写一个 libboxPlatformAdapter

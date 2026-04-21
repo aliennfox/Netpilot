@@ -89,7 +89,7 @@ func main() {
 	// 初始化对话历史（最多保留 40 条消息 = 20 轮对话）
 	history := agent.NewConversationHistory(40)
 
-	fmt.Printf("%sNetPilot CLI v0.7 (Phase 1 — Multi-turn Context)%s\n", colorCyan, colorReset)
+	fmt.Printf("%sPilotty CLI v0.7 (Phase 1 — Multi-turn Context)%s\n", colorCyan, colorReset)
 	fmt.Printf("Clash API: %s\n", cfg.ClashAPIAddr)
 	if orchestrator != nil {
 		fmt.Printf("AI Agent: %s (%s)\n", config.DefaultLLMModel, config.DefaultLLMBaseURL)

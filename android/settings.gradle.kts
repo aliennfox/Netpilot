@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "NetPilot"
+rootProject.name = "Pilotty"
 include(":app")

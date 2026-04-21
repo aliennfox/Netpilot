@@ -1,4 +1,4 @@
-package com.foxnetpilot.netpilot
+package com.pilotty.app
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -22,12 +22,12 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.foxnetpilot.netpilot.ui.ChatScreen
-import com.foxnetpilot.netpilot.ui.DashboardScreen
-import com.foxnetpilot.netpilot.ui.NodesScreen
-import com.foxnetpilot.netpilot.ui.RulesScreen
-import com.foxnetpilot.netpilot.ui.settings.SettingsScreen
-import com.foxnetpilot.netpilot.vpn.VpnController
+import com.pilotty.app.ui.ChatScreen
+import com.pilotty.app.ui.DashboardScreen
+import com.pilotty.app.ui.NodesScreen
+import com.pilotty.app.ui.RulesScreen
+import com.pilotty.app.ui.settings.SettingsScreen
+import com.pilotty.app.vpn.VpnController
 
 class MainActivity : ComponentActivity() {
     lateinit var vpn: VpnController
@@ -38,7 +38,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    NetPilotApp(onStartVpn = { vpn.start() }, onStopVpn = { vpn.stop() })
+                    PilottyApp(onStartVpn = { vpn.start() }, onStopVpn = { vpn.stop() })
                 }
             }
         }
@@ -57,14 +57,14 @@ private val navItems = listOf(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NetPilotApp(onStartVpn: () -> Unit, onStopVpn: () -> Unit) {
+fun PilottyApp(onStartVpn: () -> Unit, onStopVpn: () -> Unit) {
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val current = backStack?.destination?.route ?: "dashboard"
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("NetPilot · " + (navItems.firstOrNull { it.route == current }?.label ?: "")) })
+            TopAppBar(title = { Text("Pilotty · " + (navItems.firstOrNull { it.route == current }?.label ?: "")) })
         },
         bottomBar = {
             NavigationBar {

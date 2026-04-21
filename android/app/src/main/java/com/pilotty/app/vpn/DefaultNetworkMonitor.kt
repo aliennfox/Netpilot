@@ -1,4 +1,4 @@
-package com.foxnetpilot.netpilot.vpn
+package com.pilotty.app.vpn
 
 import android.net.ConnectivityManager
 import android.net.Network
@@ -8,7 +8,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.foxnetpilot.netpilot.NetPilotApp
+import com.pilotty.app.PilottyApp
 import libbox.InterfaceUpdateListener
 import java.net.NetworkInterface
 
@@ -68,7 +68,7 @@ object DefaultNetworkMonitor {
 
     private fun ensureRegistered() {
         if (registered) return
-        val cm = NetPilotApp.connectivity ?: run {
+        val cm = PilottyApp.connectivity ?: run {
             Log.w(TAG, "connectivity service unavailable, cannot register")
             return
         }
@@ -92,7 +92,7 @@ object DefaultNetworkMonitor {
     }
 
     fun unregister() {
-        val cm = NetPilotApp.connectivity ?: return
+        val cm = PilottyApp.connectivity ?: return
         if (!registered) return
         runCatching { cm.unregisterNetworkCallback(callback) }
             .onFailure { Log.w(TAG, "unregisterNetworkCallback", it) }
@@ -108,7 +108,7 @@ object DefaultNetworkMonitor {
                 .onFailure { Log.w(TAG, "updateDefaultInterface(empty)", it) }
             return
         }
-        val cm = NetPilotApp.connectivity ?: return
+        val cm = PilottyApp.connectivity ?: return
         val name = cm.getLinkProperties(network)?.interfaceName ?: return
         // NetworkInterface.getByName 在 callback 触发瞬间可能返回 null (内核慢一拍), 轮询 10 次
         var idx = -1

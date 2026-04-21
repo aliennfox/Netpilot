@@ -6,7 +6,7 @@
 
 ### 4.1 动态 System Prompt 编排（不是静态文本）
 
-Claude Code 的 `getSystemPrompt()` 分为**静态前缀**（可缓存，降低 token 成本）和**动态后缀**（按会话条件注入）。NetPilot 的 Agent system prompt 也必须动态组装。
+Claude Code 的 `getSystemPrompt()` 分为**静态前缀**（可缓存，降低 token 成本）和**动态后缀**（按会话条件注入）。Pilotty 的 Agent system prompt 也必须动态组装。
 
 **实现：Go 中的 Prompt Assembly Engine**
 
@@ -25,7 +25,7 @@ func (pa *PromptAssembler) Assemble(ctx *SessionContext) string {
     // ── 静态前缀（身份 + 基础规则，适合 prompt caching）──
     sections = append(sections, pa.staticPrefix)
     // 内容示例：
-    // "你是 NetPilot 的网络管理 Agent。你通过 Tool 操作 sing-box 内核。
+    // "你是 Pilotty 的网络管理 Agent。你通过 Tool 操作 sing-box 内核。
     //  你绝不直接修改用户配置，只在 Agent Overlay 区域操作。
     //  每次写操作前必须 snapshot，失败必须 rollback。"
 
@@ -83,7 +83,7 @@ func (pa *PromptAssembler) buildNetworkStateSection(ctx *SessionContext) string 
 
 ### 4.2 Tool Runtime Pipeline（工具不是裸调）
 
-Claude Code 的工具调用走完整的 runtime pipeline，不是模型直接裸调函数。NetPilot 的每个 Tool 调用也必须经过这个管道：
+Claude Code 的工具调用走完整的 runtime pipeline，不是模型直接裸调函数。Pilotty 的每个 Tool 调用也必须经过这个管道：
 
 ```
 LLM 输出 tool_use
@@ -283,7 +283,7 @@ func (h *HealthCheckHook) Run(call ToolCall, result *ToolResult) HealthStatus {
 
 ### 4.3 Agent 角色分工系统
 
-Claude Code 内建了 Explore/Plan/Verification 等专用角色。NetPilot 也不应该让一个 Agent 既诊断又配置又验证。
+Claude Code 内建了 Explore/Plan/Verification 等专用角色。Pilotty 也不应该让一个 Agent 既诊断又配置又验证。
 
 **三个专用 Agent 角色：**
 

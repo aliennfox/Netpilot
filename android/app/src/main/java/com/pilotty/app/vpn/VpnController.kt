@@ -1,4 +1,4 @@
-package com.foxnetpilot.netpilot.vpn
+package com.pilotty.app.vpn
 
 import android.app.Activity
 import android.content.Context
@@ -29,14 +29,14 @@ class VpnController(private val activity: Activity) {
     }
 
     fun stop() {
-        val intent = Intent(activity, NetPilotVpnService::class.java).apply {
-            action = NetPilotVpnService.ACTION_STOP
+        val intent = Intent(activity, PilottyVpnService::class.java).apply {
+            action = PilottyVpnService.ACTION_STOP
         }
         activity.startService(intent)
     }
 
     private fun startServiceInternal() {
-        val intent = Intent(activity, NetPilotVpnService::class.java)
+        val intent = Intent(activity, PilottyVpnService::class.java)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             activity.startForegroundService(intent)
         } else {

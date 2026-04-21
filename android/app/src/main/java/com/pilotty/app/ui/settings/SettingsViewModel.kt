@@ -1,12 +1,12 @@
-package com.foxnetpilot.netpilot.ui.settings
+package com.pilotty.app.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.foxnetpilot.netpilot.NetPilotApp
-import com.foxnetpilot.netpilot.NetPilotCore
-import com.foxnetpilot.netpilot.data.NetPilotRepository
-import com.foxnetpilot.netpilot.data.SubscriptionDto
-import com.foxnetpilot.netpilot.vpn.NetPilotVpnService
+import com.pilotty.app.PilottyApp
+import com.pilotty.app.PilottyCore
+import com.pilotty.app.data.PilottyRepository
+import com.pilotty.app.data.SubscriptionDto
+import com.pilotty.app.vpn.PilottyVpnService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,7 +30,7 @@ class SettingsViewModel : ViewModel() {
         try {
             _state.value = _state.value.copy(
                 loading = false,
-                subscriptions = NetPilotRepository.subscriptions(),
+                subscriptions = PilottyRepository.subscriptions(),
             )
         } catch (e: Throwable) {
             _state.value = _state.value.copy(loading = false, error = e.message)
@@ -46,7 +46,7 @@ class SettingsViewModel : ViewModel() {
         }
         _state.value = _state.value.copy(loading = true, error = null)
         try {
-            val r = NetPilotRepository.addSubscription(cleanName, cleanUrl)
+            val r = PilottyRepository.addSubscription(cleanName, cleanUrl)
             _state.value = _state.value.copy(
                 loading = false,
                 toast = r.message.ifEmpty { "订阅已导入" },
@@ -60,7 +60,7 @@ class SettingsViewModel : ViewModel() {
 
     fun removeSubscription(id: String) = viewModelScope.launch {
         try {
-            NetPilotRepository.removeSubscription(id)
+            PilottyRepository.removeSubscription(id)
             refresh()
             requestVpnReloadIfRunning()
         } catch (e: Throwable) {
@@ -71,7 +71,7 @@ class SettingsViewModel : ViewModel() {
     fun updateAll() = viewModelScope.launch {
         _state.value = _state.value.copy(loading = true, error = null)
         try {
-            val r = NetPilotRepository.updateAllSubscriptions()
+            val r = PilottyRepository.updateAllSubscriptions()
             _state.value = _state.value.copy(
                 loading = false,
                 toast = r.message.ifEmpty { "已更新全部订阅" },
@@ -85,8 +85,8 @@ class SettingsViewModel : ViewModel() {
 
     /** 订阅/overlay 变更后若 VPN 运行中则触发 libbox 热重载。未运行时 no-op。 */
     private fun requestVpnReloadIfRunning() {
-        if (!NetPilotCore.tunRunning.value) return
-        NetPilotApp.appContext?.let { NetPilotVpnService.requestReload(it) }
+        if (!PilottyCore.tunRunning.value) return
+        PilottyApp.appContext?.let { PilottyVpnService.requestReload(it) }
     }
 
     fun dismissToast() { _state.value = _state.value.copy(toast = null) }

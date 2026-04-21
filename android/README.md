@@ -1,4 +1,4 @@
-# NetPilot Android
+# Pilotty Android
 
 Jetpack Compose + Material3 客户端。底部 5 tab(首页 / 对话 / 节点 / 规则 / 设置),通过 gomobile 绑定调用 `mobile/netpilot.go` 提供的 Go 控制面。
 

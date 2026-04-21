@@ -1,11 +1,11 @@
-package com.foxnetpilot.netpilot.vpn
+package com.pilotty.app.vpn
 
 import android.net.NetworkCapabilities
 import android.os.Build
 import android.system.OsConstants
 import android.util.Base64
 import androidx.annotation.RequiresApi
-import com.foxnetpilot.netpilot.NetPilotApp
+import com.pilotty.app.PilottyApp
 import libbox.ConnectionOwner
 import libbox.InterfaceUpdateListener
 import libbox.Libbox
@@ -26,14 +26,14 @@ import java.net.NetworkInterface
  * 抄作业来源: hiddify-app/.../PlatformInterfaceWrapper.kt + sing-box-for-android。
  *
  * 设计要点:
- *  - 所有 libbox 要求的方法都给"合理默认实现", 子类 (NetPilotVpnService) 只需 override
+ *  - 所有 libbox 要求的方法都给"合理默认实现", 子类 (PilottyVpnService) 只需 override
  *    openTun / autoDetectInterfaceControl 两个 VpnService 相关方法
- *  - 多继承模拟: NetPilotVpnService : VpnService(), NetPilotPlatformInterface 同时满足
+ *  - 多继承模拟: PilottyVpnService : VpnService(), PilottyPlatformInterface 同时满足
  *    framework 要求 + Go 侧回调契约
  *  - getInterfaces / startDefaultInterfaceMonitor 真实实现 ——
  *    没有真数据 sing-box 的上游连接会回环进自己的 TUN, 导致 "UI 已连接但 ping 超时"
  */
-interface NetPilotPlatformInterface : PlatformInterface {
+interface PilottyPlatformInterface : PlatformInterface {
 
     // VpnService 子类必须实现的两个关键方法 (openTun 和 protect)
     override fun openTun(options: TunOptions): Int { error("openTun must be implemented by VpnService subclass") }
@@ -63,7 +63,7 @@ interface NetPilotPlatformInterface : PlatformInterface {
      * 错误地又发回 TUN, 造成无限回环。
      */
     override fun getInterfaces(): NetworkInterfaceIterator {
-        val cm = NetPilotApp.connectivity
+        val cm = PilottyApp.connectivity
             ?: return InterfaceArray(emptyList())
         val jInterfaces = runCatching { NetworkInterface.getNetworkInterfaces()?.toList() }
             .getOrNull() ?: emptyList()
@@ -149,7 +149,7 @@ interface NetPilotPlatformInterface : PlatformInterface {
         destinationAddress: String,
         destinationPort: Int,
     ): ConnectionOwner {
-        val cm = NetPilotApp.connectivity ?: error("connectivity service not ready")
+        val cm = PilottyApp.connectivity ?: error("connectivity service not ready")
         val uid = cm.getConnectionOwnerUid(
             ipProtocol,
             InetSocketAddress(sourceAddress, sourcePort),
@@ -157,7 +157,7 @@ interface NetPilotPlatformInterface : PlatformInterface {
         )
         val owner = ConnectionOwner()
         owner.userId = uid
-        val pm = NetPilotApp.packageManager ?: return owner
+        val pm = PilottyApp.packageManager ?: return owner
         val packages = pm.getPackagesForUid(uid)
         owner.userName = packages?.firstOrNull() ?: ""
         owner.setAndroidPackageNames(StringArray(packages?.toList() ?: emptyList()))

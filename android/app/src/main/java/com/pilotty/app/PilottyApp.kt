@@ -1,4 +1,4 @@
-package com.foxnetpilot.netpilot
+package com.pilotty.app
 
 import android.app.Application
 import android.content.Context
@@ -9,7 +9,7 @@ import libbox.Libbox
 import libbox.SetupOptions
 import java.io.File
 
-class NetPilotApp : Application() {
+class PilottyApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -31,7 +31,7 @@ class NetPilotApp : Application() {
 
         bootstrapConfigAssets()
 
-        NetPilotCore.init(this, clashAPIAddr = "127.0.0.1:9090", apiKey = "")
+        PilottyCore.init(this, clashAPIAddr = "127.0.0.1:9090", apiKey = "")
     }
 
     /**
@@ -56,16 +56,16 @@ class NetPilotApp : Application() {
     }
 
     override fun onTerminate() {
-        NetPilotCore.shutdown()
+        PilottyCore.shutdown()
         super.onTerminate()
     }
 
     companion object {
-        private const val TAG = "NetPilotApp"
+        private const val TAG = "PilottyApp"
         const val TUN_BASE_NAME = "android_tun_base.json"
         const val MINIMAL_NAME = "minimal.json"
 
-        @Volatile private var instance: NetPilotApp? = null
+        @Volatile private var instance: PilottyApp? = null
 
         val connectivity: ConnectivityManager?
             get() = instance?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager

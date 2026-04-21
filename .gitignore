@@ -20,3 +20,8 @@ android/local.properties
 .bytro
 CLAUDE_files/
 build/
+
+# Android signing (NEVER commit) — see docs/play-submission-checklist.md §4
+android/keystore.properties
+android/**/*.keystore
+android/**/*.jks

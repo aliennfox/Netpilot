@@ -1,6 +1,14 @@
 # Phase 3B-4 执行计划 · iOS NEPacketTunnelProvider 落地
 
-> 状态: **调研完成,代码实现待用户介入** (原版 2026-04-17, 3B-3 debrief 补 2026-04-22)
+> # ⚠️ 状态: **整体 DEFERRED** (2026-04-22 战略转向)
+> #
+> # Phase 3B 单平台优先, 先把 Android 推到可发布状态再回来看 iOS。 本文档冻结,
+> # 保留调研成果与 3B-3 债权, 待 Android v1 发布后重新评估优先级与可行性。
+> #
+> # 当前 Phase 3B 实际排程见 CLAUDE.md 的 Phase 3B 里程碑表 (3B-4 = Android 抛光, 3B-5 = iOS 已移除日期)。
+> # 新规划见 `docs/android-mvp-gap.md`。
+
+> 原始状态 (保留作历史存证): **调研完成,代码实现待用户介入** (原版 2026-04-17, 3B-3 debrief 补 2026-04-22)
 > 主要抄作业对象: **Hiddify / hiddify-app** (`~/References/hiddify-app/ios/`)
 > 次要参考: sing-box-for-apple 官方客户端 (GitHub, 未本地克隆)
 >

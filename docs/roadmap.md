@@ -145,9 +145,9 @@ sing-box 不在 App 内运行，Go Agent Core 连接 Mac 上运行的 sing-box�
 
 ## Claude Code 源码参考索引
 
-`~/References/claude-code-sourcemap/` 中与 NetPilot 各阶段对应的模块：
+`~/References/claude-code-sourcemap/` 中与 Pilotty 各阶段对应的模块：
 
-| NetPilot 组件 | 参考 Claude Code 中的 | 阶段 |
+| Pilotty 组件 | 参考 Claude Code 中的 | 阶段 |
 |--------------|----------------------|------|
 | Agent 主循环 (tool-use loop) | query/agent 主循环, tool_use 处理 | Phase 1 ✅已参考 |
 | Agent 角色分工 | built-in agents (Explore/Plan/Verification), AgentTool prompt | Phase 1 任务 7 |
@@ -162,7 +162,7 @@ sing-box 不在 App 内运行，Go Agent Core 连接 Mac 上运行的 sing-box�
 **在 Claude Code 任务提示词中这样引用：**
 ```
 参考 ~/References/claude-code-sourcemap/ 中的 [具体模块]，
-理解它的 [具体机制]，然后为 NetPilot 用 Go 重新实现。
+理解它的 [具体机制]，然后为 Pilotty 用 Go 重新实现。
 不要照搬 TypeScript 代码，理解设计模式后用 Go 惯用方式实现。
 ```
 

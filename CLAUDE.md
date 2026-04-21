@@ -1,12 +1,32 @@
-# CLAUDE.md — NetPilot
+# CLAUDE.md — Pilotty
 
-> LLM-Agent 驱动的智能网络代理客户端。sing-box 内核 + Go 后端 + Android/iOS 双端。
+> LLM-Agent 驱动的智能网络代理客户端。sing-box 内核 + Go 后端 + Android 端 (iOS DEFERRED)。
 >
 > **最后更新日期**: 2026-04-22 · 详见本文末尾 Known Issues 节
 
 ## 项目概述
 
-NetPilot 是一个能听懂用户意图、实时感知流量状态、自动编排复杂链路的智能网络代理客户端。核心差异:Agent 深度驱动,不只是代理 GUI。
+Pilotty 是一个能听懂用户意图、实时感知流量状态、自动编排复杂链路的智能网络代理客户端。核心差异:Agent 深度驱动,不只是代理 GUI。
+
+## 命名约定 (2026-04-22 rebrand 后)
+
+项目经历过一次 rebrand: **"NetPilot" → "Pilotty"**。为减少重构爆炸半径,以下 naming 刻意保留不一致:
+
+| 层 | 值 | 改过? |
+|---|---|---|
+| 品牌 / App 名 / Play 上架名 | **Pilotty** | ✅ 新值 |
+| Android 包名 / Bundle ID | `com.pilotty.app` | ✅ 新值 |
+| Kotlin root package | `com.pilotty.app` | ✅ 新值 |
+| Kotlin 主要类名 | `PilottyApp` / `PilottyCore` / `PilottyVpnService` / `PilottyPlatformInterface` / `PilottyRepository` | ✅ 新值 |
+| Go module path | `github.com/foxnetpilot/netpilot` | ❌ 保留旧值 |
+| 本地 repo 目录 | `/Users/fox/Netpilot` | ❌ 保留旧值 |
+| AAR artifact 文件名 | `android/app/libs/netpilot.aar` | ❌ 保留旧值 |
+| Go 源文件名 | `mobile/netpilot.go` etc. | ❌ 保留旧值 |
+| CLI 二进制名 | `netpilot` / `netpilot-server` | ❌ 保留旧值 |
+
+**原则**: 用户面 (App 标签、通知、UI 字符串、商店 listing) 必须是 Pilotty;开发者面 (文件路径、Go module、CLI 名) 保留 netpilot 以避免 churn。Go 侧 rename 留到未来用户有需求或准备 1.x 大重构时再做。
+
+---
 
 ## 技术栈
 
@@ -15,9 +35,9 @@ NetPilot 是一个能听懂用户意图、实时感知流量状态、自动编�
   - Phase 3B: 目标切换为嵌入式 libbox(gomobile bind)+ gRPC 控制
 - **后端语言**: Go(module `github.com/foxnetpilot/netpilot`)
 - **LLM**: DeepSeek V3 via 硅基流动(OpenAI 兼容 API,裸 HTTP 调用,无 SDK 依赖)
-- **目标平台**: Android 优先,iOS 跟进
+- **目标平台**: Android (v1 发布目标);iOS 已 DEFERRED,见设计原则 #7
 - **Android**: Jetpack Compose + Kotlin + Material3,Go 后端通过 gomobile 编译为 `.aar`
-- **iOS**: 当前为 SwiftUI + APIClient(HTTP 连本地 server);Phase 3B 目标为 NEPacketTunnelProvider + 嵌入式 libbox
+- **iOS**: [DEFERRED] 当前为 SwiftUI + APIClient(HTTP 连本地 server);原 Phase 3B 目标 NEPacketTunnelProvider + 嵌入式 libbox 已冻结
 - **架构模式**: 借鉴 Claude Code 的 tool-use 闭环 + Agent 角色分工
 
 ## 核心架构(四层)
@@ -44,6 +64,7 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 4. **本地优先**: 能本地处理的绝不调 LLM
 5. **内核可替换**: 所有 sing-box 依赖收敛到 EngineAdapter 接口(已验证合规,仅 `internal/engine/` 内部允许直连 Clash API)
 6. **参考优先**: 涉及 sing-box 内核集成、gomobile bind、VpnService、NEPacketTunnelProvider 等"行业有成熟解法"的工程问题,**先查 `~/References/` 下的 NekoBox / libneko / Hiddify 现有实现,再决定自己怎么做**。每个重要技术决策在 commit message 或 docs 里注明参考来源。若某决策无参考源,显式标注"自造",避免隐性自造轮子。
+7. **单平台优先**: 2026-04-22 战略转向 —— Android v1 发布前不投入任何 iOS 工程资源。iOS 相关文档 (`docs/phase-3b-4-plan.md`、`docs/ios-platform.md`)、调研成果、xcframework 都冻结保留,但禁止在本阶段开 iOS 工作分支、加 iOS 相关 Go tag、或让 `mobile/` 层为 iOS 二次抽象。重启信号:Android v1 发布 + 30 天无 P0 崩溃 + 有 >50 DAU + 用户明确要 iOS。Android v1 缺口清单见 `docs/android-mvp-gap.md`。
 
 ---
 
@@ -233,13 +254,13 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - `mobile/` gomobile 绑定层 474 行 ✅
 - `android/app/libs/netpilot.aar` 已构建(22.5 MB,仅控制面,**不含 libbox**)✅
 - Android Gradle 工程 + 5 tab 底部导航,工程可编译 APK ✅ (2026-04-17)
-- Android `NetPilotVpnService.kt` 骨架(fd 已通到 Go,待接 libbox)⚠️
+- Android `PilottyVpnService.kt` 骨架(fd 已通到 Go,待接 libbox)⚠️
 - iOS SwiftUI 5 页面 + APIClient ✅(无 VPN 能力)
 - iOS NEPacketTunnelProvider ❌ Phase 3B 任务
 
-### Phase 3B — libbox 嵌入式集成 🟡 **3B-3 真机验证今天进行**
+### Phase 3B — libbox 嵌入式集成 🟡 **3B-1~3 完成,3B-4 已改为 Android 抛光**
 
-**这是 iOS 可用性的必经关卡,也是 Android 从"壳"变"可用 App"的关键**。
+**这是 Android 从"壳"变"可发布 App"的关键**。 iOS 已根据原则 #7 暂停。
 
 里程碑拆解:
 - [x] **3B-1** 引入 sing-box + 编出含 libbox 的 aar ✅ (2026-04-17, 0.5 天含两轮阻塞预研)
@@ -250,10 +271,16 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
   - [x] 真机前功能补齐(Phase 2.5,见上节)+ 文档对齐 (2026-04-21)
   - [x] 真机 `09211JEC204960` 走流量验证:Chrome/GCM 等 UID 经 TUN → libbox → 香港-1 VLESS → 上游;/connections 观测到 `api.ipify.org:443 via ['香港-1','proxy-group']` 等真连接;延迟测 香港-1 2919ms、日本-1 4786ms (2026-04-22)
   - [x] **Android 端"真能用"闭环**(2026-04-22 同日): 订阅 UI(Settings tab 管理 add/remove/update-all) + 节点列表真数据(type/alive/latency) + 切换节点 + VpnService `ACTION_RELOAD` 热重载 + 自动延迟测速。ipdata.co 真机验证走 San-Jose VLESS 出口。
-- [ ] **3B-4** iOS NEPacketTunnelProviderExtension 从零实现(3-5 天)
-- [ ] **3B-5** 双端真机联调 + 稳定性修复(2-3 天)
+- [ ] **3B-4** **Android 抛光到可发布 (Polish-to-Shippable)** — 原 iOS NE 任务已 DEFERRED
+  - 范围:`docs/android-mvp-gap.md` 中的 M1-M9 Must-have 项 (~20-26h 工时)
+  - 交付:签名 release APK + Google Play Data Safety 就绪 + 订阅 M4 数据正确 + LLM API Key UI + 最小日志导出 + 异常通知
+  - 原 iOS NEPacketTunnelProviderExtension 实现计划见 `docs/phase-3b-4-plan.md` (整本冻结, 顶部已标注 DEFERRED)
+- [ ] **3B-5** **iOS (DEFERRED, 无排期)** — Android v1 发布并观察稳定性 30 天后重评估
+  - 触发信号:v1 无 P0 崩溃 + DAU > 50 + 用户明确要 iOS
+  - 现存资产:`~/References/ios-frameworks/Libbox_std.xcframework` 88MB + `docs/phase-3b-4-plan.md` 调研 + Phase 3A SwiftUI 壳
+  - 重启时最小工作量估算:3-5 天 (按原 3B-4 计划) + 苹果开发者账号 $99/年
 
-**参考计划文档**: `docs/phase-3b-plan.md`(含完整 4 合 1 预研踩坑史 + 工具链"sweet spot"决策)
+**参考计划文档**: `docs/phase-3b-plan.md`(含完整 4 合 1 预研踩坑史 + 工具链"sweet spot"决策);`docs/android-mvp-gap.md`(3B-4 实际任务清单)
 
 **3B-1 交付物**:
 - `libcore/` package(box.go + platform.go + gomobile_deps.go), 封装 sing-box libbox
@@ -261,10 +288,10 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - `scripts/build-aar.sh` 一键产出 `android/app/libs/netpilot.aar` (40MB, 4 架构)
 - `go.mod` 降到 go 1.25 + 引入 `github.com/sagernet/sing-box v1.13.8`
 - Android `./gradlew :app:assembleDebug` 成功 (APK 60MB debug, release 瘦后预计 ~20-25MB)
-- Kotlin `NetPilotCore.kt` / `NetPilotVpnService.kt` 同步 API 契约
+- Kotlin `PilottyCore.kt` / `PilottyVpnService.kt` 同步 API 契约
 - sing-box libbox 的真启停逻辑挂了 `TODO(3B-3)`, 3B-3 用 `libbox.NewCommandServer` 接入
 
-**战略建议**: 3B-3 完成后(Android 能真跑)先停,消化经验,再做 3B-4 iOS。
+**战略建议**: ~~3B-3 完成后(Android 能真跑)先停,消化经验,再做 3B-4 iOS。~~ 已按原则 #7 执行:3B-3 完成后 Android 进入 polish-to-shippable (3B-4 范围), iOS 进入 DEFERRED。
 
 ## 验证里程碑总表
 
@@ -289,7 +316,8 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 | netpilot.aar 含嵌入式 sing-box libbox + gvisor/quic/wg/utls/clash_api | ✅ 3B-1 (2026-04-17, 40MB 4-arch aar) |
 | Android APK (含 libbox) 能 `assembleDebug` | ✅ 3B-1 (60MB debug) |
 | Android 真机走代理 | ✅ 3B-3 (2026-04-22, Pixel 4a `09211JEC204960`, 香港-1 VLESS 走通) |
-| iOS 真机走代理 | ❌ Phase 3B-4 |
+| Android v1 可发布 (签名 + Play 合规 + 数据正确) | ⏳ 3B-4 (M1-M9, `docs/android-mvp-gap.md`) |
+| iOS 真机走代理 | [DEFERRED] 原 Phase 3B-4 整本冻结, 待 Android v1 稳定 30 天后重评估 |
 
 ## Known Issues(已知缺陷)
 
@@ -302,14 +330,14 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
   - 注入缺失的 `inbounds[type=tun]` / `outbounds[type=dns]` / `route.auto_detect_interface`
   - **关键细节**:base 的系统级 route rules(`protocol=dns`、`ip_is_private`)prepend 到 merged.rules 前,否则用户规则("抖音 direct")会拦截 DNS 流量,导致 dns-out 失效
   - 选 (c) 而非 (a)(Go NewClient 加 platform hint)的理由:不触发 aar 重建,避开 #M8 同步纪律
-- 遗留:iOS 3B-4 需要复刻同等合并逻辑(或改走方案 a 统一收敛)
+- 遗留:[DEFERRED] iOS 重启后需要复刻同等合并逻辑(或改走方案 a 统一收敛)
 
 **#H1 — libbox 数据面真机验证** ✅ **已完成 (2026-04-22)**
-- Kotlin `NetPilotVpnService` + `NetPilotPlatformInterface` + `DefaultNetworkMonitor` 全量接通 libbox
+- Kotlin `PilottyVpnService` + `PilottyPlatformInterface` + `DefaultNetworkMonitor` 全量接通 libbox
 - 关键踩坑: Android P+ `registerDefaultNetworkCallback` 会把 VPN 自己当默认网络返回, 导致 sing-box 上游回环 (表现: UI 已连接但 ping 超时)。修复: API 31+ 用 `registerBestMatchingNetworkCallback(NetworkRequest)`, API 28-30 用 `requestNetwork`, request 不含 VPN capability (需 `CHANGE_NETWORK_STATE` 权限)。抄作业来源: NekoBoxForAndroid `DefaultNetworkListener.kt`
 - `getInterfaces()` / `startDefaultInterfaceMonitor` / `closeDefaultInterfaceMonitor` 改为真实现 (原 stub 导致同样的回环)
 - 验证数据: `/proxies/香港-1/delay` 2919ms、日本-1 4786ms;`/connections` 观测到 Chrome / GCM / Safe Browsing 全部经 proxy-group
-- 遗留: iOS 3B-4 需复刻同等 PlatformInterface 真实现 (NE 侧用 `nw_path_monitor`)
+- 遗留: [DEFERRED] iOS 重启后需复刻同等 PlatformInterface 真实现 (NE 侧用 `nw_path_monitor`)
 
 **#H2 — Orchestrator 自动回滚路径名存实亡**
 - 位置: `internal/agent/orchestrator.go:86` 调用 `pipeline.Execute(ctx, "rollback", nil)`,但 `internal/tool/tools.go:282-291` 中 rollback tool 是占位实现
@@ -376,11 +404,11 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
   - CLI 和移动端代码路径不共享 sing-box 启停逻辑 —— 可接受, 因为语义本来就不同 (CLI 面对开发者/服务器; 移动端面对 VpnService/NE Extension 生命周期)
   - 无需维护 Go 侧嵌入式 adapter 代码, 减 2-3 天工作量
   - 风险: CLI 路径与移动端在 sing-box 行为上可能漂移, 需用一致的 `configs/*.json` + `merged.json` 作为"配置层契约"兜底
-- 位置: `internal/engine/singbox_adapter.go` (保持原样); `mobile/netpilot.go:197-252` StartTun/StopTun/TunRunning 空壳; `libcore/box.go` BoxInstance stub; `android/.../NetPilotVpnService.kt` Kotlin 直接驱动 libbox
+- 位置: `internal/engine/singbox_adapter.go` (保持原样); `mobile/netpilot.go:197-252` StartTun/StopTun/TunRunning 空壳; `libcore/box.go` BoxInstance stub; `android/.../PilottyVpnService.kt` Kotlin 直接驱动 libbox
 
 **#M13 — Android UI 连接状态不随 tunRunning 刷新** ✅ **已修 (2026-04-22)**
-- 根因: `NetPilotCore.tunRunningFlag` 原为 `@Volatile var Boolean`, 不是 StateFlow, Compose 无法订阅;`DashboardViewModel.refresh()` 只在 init 和手动刷新时读一次
-- 修复: `NetPilotCore` 改 `MutableStateFlow<Boolean>`, `DashboardViewModel.init` 里 launch 一个 collect 协程把值透到 UI state
+- 根因: `PilottyCore.tunRunningFlag` 原为 `@Volatile var Boolean`, 不是 StateFlow, Compose 无法订阅;`DashboardViewModel.refresh()` 只在 init 和手动刷新时读一次
+- 修复: `PilottyCore` 改 `MutableStateFlow<Boolean>`, `DashboardViewModel.init` 里 launch 一个 collect 协程把值透到 UI state
 - 验证: 真机点"启动 VPN" 后 `TUN: 未启动` 立即变 `运行中`, 无需按刷新
 
 **#M14 — Clash API baseURL 不接受裸 host:port** ✅ **已修 (2026-04-22)**
@@ -390,8 +418,8 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 
 **#M15 — Android 嵌入模式下 `overlay.Apply()` 调 exec("sing-box") 报错** ✅ **已修 (2026-04-22)**
 - 根因: CLI 模式下 `SingBoxAdapter.Reload()` 通过 `pkill sing-box && exec sing-box run -c merged.json` 重启外部进程;Android 上没有该二进制(sing-box 嵌在 libbox 里,由 Kotlin `libbox.CommandServer.startOrReloadService()` 驱动),每次订阅导入 / 更新都撞 `exec: "sing-box": executable file not found`
-- 修复: `Reload()` 先用 `exec.LookPath("sing-box")` 探测;找不到视为嵌入模式, merged.json 已经写盘, 返回 nil。Kotlin 端 `NetPilotVpnService.ACTION_RELOAD` intent 负责通知运行中的 libbox 吃新配置
-- 位置: `internal/engine/singbox_adapter.go:269-280`, `android/.../vpn/NetPilotVpnService.kt` `reloadIfRunning()`
+- 修复: `Reload()` 先用 `exec.LookPath("sing-box")` 探测;找不到视为嵌入模式, merged.json 已经写盘, 返回 nil。Kotlin 端 `PilottyVpnService.ACTION_RELOAD` intent 负责通知运行中的 libbox 吃新配置
+- 位置: `internal/engine/singbox_adapter.go:269-280`, `android/.../vpn/PilottyVpnService.kt` `reloadIfRunning()`
 
 **#M16 — Clash API `/proxies/<group>` 不含成员延迟 / 类型** ✅ **已修 (2026-04-22)**
 - 根因: 该 endpoint 只返回 `{type, now, all:[tag]}`, 无 per-proxy 的 `type`/`alive`/`history`;Nodes 列表 UI 永远显示 `—`
@@ -420,7 +448,9 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 |------|------|---------|
 | `docs/architecture.md` | 四层架构详细设计、Intent Router/Local Engine 实现 | 修改架构时 |
 | `docs/agent-runtime.md` | Agent 运行时、Tool Pipeline、Hook、角色分工、Orchestrator | 改 Agent / Pipeline 时必读 |
-| `docs/ios-platform.md` | iOS NE 实现、进程架构、IPC、Entitlement(含 Hiddify 验证数据) | Phase 3B-4 时 |
+| `docs/ios-platform.md` | [DEFERRED] iOS NE 实现、进程架构、IPC、Entitlement(含 Hiddify 验证数据) | iOS 重启后再用 |
+| `docs/phase-3b-4-plan.md` | [DEFERRED] 原 iOS NE 执行计划,整本冻结 | iOS 重启后再用 |
+| `docs/android-mvp-gap.md` | **Android v1 发布缺口分析 (M/S/W 三档)** | 3B-4 抛光期间持续参考 |
 | `docs/intent-pipeline.md` | 自然语言 → sing-box 配置的四层转译 | 做意图解析时 |
 | `docs/traffic-engine.md` | 流量感知引擎、Sniffing metadata | 流量感知特性开发时 |
 | `docs/engine-evolution.md` | 内核演进路线、EngineAdapter 完整接口、三阶段替换计划 | Phase 3B 必读 |
@@ -451,12 +481,12 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 | `~/References/nekobox/libcore/` | sing-box gomobile 绑定层,Phase 3B-1 抄作业首选 | ⭐⭐⭐ Phase 3B-1 |
 | `~/References/nekobox/app/` | Android 主 App,VpnService 集成权威参考 | ⭐⭐⭐ Phase 3B-3 |
 | `~/References/libneko/` | 跨平台工具集,非 libcore;Phase 3B-3 可能用其 protect_server/ 子包 | ⭐⭐ Phase 3B-3 |
-| `~/References/hiddify-app/` | Hiddify 全栈,iOS NEPacketTunnelProvider 唯一参考 | ⭐⭐⭐ Phase 3B-4 |
+| `~/References/hiddify-app/` | [DEFERRED] Hiddify 全栈,iOS NEPacketTunnelProvider 唯一参考 | iOS 重启后再用 |
 | `~/References/claude-code-sourcemap/` | Claude Code 还原源码,Agent 循环 / Tool 调度参考 | ⭐⭐ Agent 优化时 |
 | `~/References/claude-code-deep-dive/` | Claude Code 深度分析 | ⭐⭐ Agent 优化时 |
 | `~/References/ai-agent-deep-dive/` | 通用 Agent 设计分析 | ⭐ 架构演进时 |
-| `~/References/ios-frameworks/` | iOS 预编译 framework 产物(用途待确认) | ❓ 检查后定 |
-| `~/References/test-gomobile-ios.sh` | 先前做过的 gomobile iOS 构建测试脚本 | ⭐⭐⭐ Phase 3B-1 必读 |
+| `~/References/ios-frameworks/` | [DEFERRED] iOS 预编译 xcframework (Libbox_std 88MB) | iOS 重启后再用 |
+| `~/References/test-gomobile-ios.sh` | [DEFERRED] 先前做过的 gomobile iOS 构建测试脚本 | iOS 重启后再用 |
 | `~/References/test-singbox-api.sh` | 先前做过的 sing-box API 测试脚本 | ⭐⭐ Phase 3B-2 参考 |
 
 **DeepWiki 捷径**: https://deepwiki.com/MatsuriDayo/NekoBoxForAndroid/ —— NekoBox 整仓库的结构化逆向文档,Phase 3B 期间优先查

@@ -1,4 +1,4 @@
-package com.foxnetpilot.netpilot.ui
+package com.pilotty.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -18,7 +18,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.foxnetpilot.netpilot.data.*
+import com.pilotty.app.data.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,9 +39,9 @@ class DashboardViewModel : ViewModel() {
 
     init {
         refresh()
-        // 订阅 NetPilotCore.tunRunning StateFlow, VpnService 状态变化时 UI 自动刷新 (#M13)
+        // 订阅 PilottyCore.tunRunning StateFlow, VpnService 状态变化时 UI 自动刷新 (#M13)
         viewModelScope.launch {
-            com.foxnetpilot.netpilot.NetPilotCore.tunRunning.collect { running ->
+            com.pilotty.app.PilottyCore.tunRunning.collect { running ->
                 _state.value = _state.value.copy(tunRunning = running)
             }
         }
@@ -50,11 +50,11 @@ class DashboardViewModel : ViewModel() {
     fun refresh() = viewModelScope.launch {
         _state.value = _state.value.copy(loading = true, error = null)
         try {
-            val s = NetPilotRepository.status()
+            val s = PilottyRepository.status()
             _state.value = _state.value.copy(
                 loading = false,
                 status = s,
-                tunRunning = com.foxnetpilot.netpilot.NetPilotCore.tunRunning.value,
+                tunRunning = com.pilotty.app.PilottyCore.tunRunning.value,
             )
         } catch (e: Throwable) {
             _state.value = _state.value.copy(loading = false, error = e.message)
@@ -62,7 +62,7 @@ class DashboardViewModel : ViewModel() {
     }
 
     fun setMode(mode: String) = viewModelScope.launch {
-        try { NetPilotRepository.setMode(mode); refresh() }
+        try { PilottyRepository.setMode(mode); refresh() }
         catch (e: Throwable) { _state.value = _state.value.copy(error = e.message) }
     }
 }
@@ -148,7 +148,7 @@ class ChatViewModel : ViewModel() {
         )
         viewModelScope.launch {
             try {
-                val r = NetPilotRepository.chat(text)
+                val r = PilottyRepository.chat(text)
                 _state.value = _state.value.copy(
                     sending = false,
                     messages = _state.value.messages + ChatMessage("assistant", r.reply, r.source),
@@ -160,7 +160,7 @@ class ChatViewModel : ViewModel() {
     }
 
     fun clear() {
-        NetPilotRepository.clearHistory()
+        PilottyRepository.clearHistory()
         _state.value = ChatUi()
     }
 }
@@ -258,16 +258,16 @@ class NodesViewModel : ViewModel() {
     fun refresh() = viewModelScope.launch {
         _state.value = _state.value.copy(loading = true, error = null)
         try {
-            val n = NetPilotRepository.nodes()
+            val n = PilottyRepository.nodes()
             _state.value = _state.value.copy(loading = false, nodes = n)
             // Clash API 的 history 只在显式 /proxies/{tag}/delay 后才填充, 所以首次拿到节点
             // 列表时若延迟都是 0 且 VPN 在跑, 自动触发一次测速 (~3-5s), 测完再刷新一次 UI。
             if (!autoTestedOnce &&
-                com.foxnetpilot.netpilot.NetPilotCore.tunRunning.value &&
+                com.pilotty.app.PilottyCore.tunRunning.value &&
                 n.isNotEmpty() && n.all { it.latency == 0 }) {
                 autoTestedOnce = true
-                runCatching { NetPilotRepository.testLatencyAll() }
-                val n2 = runCatching { NetPilotRepository.nodes() }.getOrNull()
+                runCatching { PilottyRepository.testLatencyAll() }
+                val n2 = runCatching { PilottyRepository.nodes() }.getOrNull()
                 if (n2 != null) _state.value = _state.value.copy(nodes = n2)
             }
         } catch (e: Throwable) {
@@ -278,12 +278,12 @@ class NodesViewModel : ViewModel() {
     fun setQuery(q: String) { _state.value = _state.value.copy(query = q) }
 
     fun switchTo(tag: String) = viewModelScope.launch {
-        try { NetPilotRepository.switchNode("proxy-group", tag); refresh() }
+        try { PilottyRepository.switchNode("proxy-group", tag); refresh() }
         catch (e: Throwable) { _state.value = _state.value.copy(error = e.message) }
     }
 
     fun testAll() = viewModelScope.launch {
-        try { NetPilotRepository.testLatencyAll(); refresh() }
+        try { PilottyRepository.testLatencyAll(); refresh() }
         catch (e: Throwable) { _state.value = _state.value.copy(error = e.message) }
     }
 }
@@ -368,8 +368,8 @@ class RulesViewModel : ViewModel() {
     fun refresh() = viewModelScope.launch {
         _state.value = _state.value.copy(loading = true, error = null)
         try {
-            val r = NetPilotRepository.rules()
-            val t = NetPilotRepository.templates()
+            val r = PilottyRepository.rules()
+            val t = PilottyRepository.templates()
             _state.value = _state.value.copy(loading = false, rules = r, templates = t)
         } catch (e: Throwable) {
             _state.value = _state.value.copy(loading = false, error = e.message)
@@ -378,7 +378,7 @@ class RulesViewModel : ViewModel() {
 
     fun applyTemplate(id: String) = viewModelScope.launch {
         try {
-            val m = NetPilotRepository.applyTemplate(id)
+            val m = PilottyRepository.applyTemplate(id)
             _state.value = _state.value.copy(toast = m.message)
             refresh()
         } catch (e: Throwable) {

@@ -1,4 +1,4 @@
-package com.foxnetpilot.netpilot
+package com.pilotty.app
 
 import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,7 +11,7 @@ import mobile.Mobile
  * Go core 单例。封装 gomobile 生成的 [mobile.Client]，
  * 上层只看到 Kotlin 友好的接口。所有方法都是同步阻塞，调用方负责切到 IO 线程。
  */
-object NetPilotCore {
+object PilottyCore {
     @Volatile private var client: Client? = null
 
     /** 在 Application.onCreate 中调用一次。 */
@@ -28,7 +28,7 @@ object NetPilotCore {
         client = null
     }
 
-    private fun require(): Client = client ?: error("NetPilotCore.init() not called")
+    private fun require(): Client = client ?: error("PilottyCore.init() not called")
 
     // ---- thin proxies (JSON 字符串原样返回，调用方解析) ----
     fun status(): String                          = require().status()
@@ -49,7 +49,7 @@ object NetPilotCore {
     fun agentReady(): Boolean                     = require().agentReady()
     fun version(): String                         = require().version()
 
-    // VPN 数据面 (3B-3 改为 Kotlin 直接调 libbox.CommandServer, 详见 NetPilotVpnService.kt)。
+    // VPN 数据面 (3B-3 改为 Kotlin 直接调 libbox.CommandServer, 详见 PilottyVpnService.kt)。
     // Go 侧 libcore.BoxInstance 当前保留作为占位, 待 3B-5 精简时移除。
     // mobile/netpilot.go 的 StartTun / StopTun / SetPlatformInterface 保留签名但 Android 不再调用。
     //

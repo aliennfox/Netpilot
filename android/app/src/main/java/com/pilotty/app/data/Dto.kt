@@ -1,4 +1,4 @@
-package com.foxnetpilot.netpilot.data
+package com.pilotty.app.data
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable

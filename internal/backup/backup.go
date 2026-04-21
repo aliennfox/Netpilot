@@ -1,4 +1,4 @@
-// Package backup 实现 NetPilot 用户数据的导出/导入。
+// Package backup 实现 Pilotty 用户数据的导出/导入。
 //
 // 导出范围：
 //   - overlay：路由规则、agent outbounds、DNS 配置

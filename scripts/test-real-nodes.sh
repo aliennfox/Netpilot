@@ -10,7 +10,7 @@ set -e
 
 cd "$(dirname "$0")/.."
 
-echo "=== NetPilot 真实节点测试 ==="
+echo "=== Pilotty 真实节点测试 ==="
 echo ""
 
 # 编译

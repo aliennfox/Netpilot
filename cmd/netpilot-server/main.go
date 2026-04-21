@@ -246,7 +246,7 @@ func main() {
 	handler := authMiddleware(apiToken, mux)
 
 	addr := "127.0.0.1:8080"
-	log.Printf("NetPilot HTTP Server starting on %s", addr)
+	log.Printf("Pilotty HTTP Server starting on %s", addr)
 	log.Printf("Clash API: %s", cfg.ClashAPIAddr)
 	if apiToken != "" {
 		log.Printf("Auth: Bearer token 已启用")

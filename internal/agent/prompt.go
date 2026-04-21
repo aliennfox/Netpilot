@@ -17,7 +17,7 @@ func NewPromptAssembler(adapter engine.EngineAdapter) *PromptAssembler {
 	return &PromptAssembler{adapter: adapter}
 }
 
-const staticPrefix = `你是 NetPilot 的网络管理 Agent。你通过调用工具来帮助用户管理网络代理。
+const staticPrefix = `你是 Pilotty 的网络管理 Agent。你通过调用工具来帮助用户管理网络代理。
 
 核心规则：
 1. 你只能通过提供的工具操作网络，不能直接输出配置代码让用户手动执行

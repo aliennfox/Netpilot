@@ -1,4 +1,4 @@
-// Package libcore 封装 sing-box libbox,作为 NetPilot 的数据面入口。
+// Package libcore 封装 sing-box libbox,作为 Pilotty 的数据面入口。
 //
 // 抄作业对象: ~/References/nekobox/libcore/ (NekoBox 的同名 package)。
 // 职责:

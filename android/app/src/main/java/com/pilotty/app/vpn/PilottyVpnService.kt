@@ -1,4 +1,4 @@
-package com.foxnetpilot.netpilot.vpn
+package com.pilotty.app.vpn
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -13,9 +13,9 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import com.foxnetpilot.netpilot.MainActivity
-import com.foxnetpilot.netpilot.NetPilotApp
-import com.foxnetpilot.netpilot.NetPilotCore
+import com.pilotty.app.MainActivity
+import com.pilotty.app.PilottyApp
+import com.pilotty.app.PilottyCore
 import libbox.CommandServer
 import libbox.CommandServerHandler
 import libbox.Libbox
@@ -27,7 +27,7 @@ import java.io.File
  * Android VpnService 数据面实现。
  *
  * 架构:
- *   VpnService(framework) + NetPilotPlatformInterface(libbox.PlatformInterface 默认实现)
+ *   VpnService(framework) + PilottyPlatformInterface(libbox.PlatformInterface 默认实现)
  *   -> 同时满足 Android 框架 (TUN 建立权限) + sing-box libbox 回调契约 (openTun/protect)
  *
  * 启动流程 (抄 sing-box-for-android BoxService.kt):
@@ -41,17 +41,17 @@ import java.io.File
  * VPN 授权由 MainActivity/VpnController 在启动 Service 前通过
  * VpnService.prepare() + ActivityResultLauncher 处理, Service 本身不弹框。
  */
-class NetPilotVpnService : VpnService(), NetPilotPlatformInterface, CommandServerHandler {
+class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerHandler {
 
     private var pfd: ParcelFileDescriptor? = null
     private var commandServer: CommandServer? = null
 
-    // ──────────────── NetPilotPlatformInterface (libbox 反向回调) ─────────────────
+    // ──────────────── PilottyPlatformInterface (libbox 反向回调) ─────────────────
 
     /** libbox 启动 TUN inbound 时反向调用;此时 builder.establish() 并返回 fd。 */
     override fun openTun(options: TunOptions): Int {
         val builder = Builder()
-            .setSession("NetPilot")
+            .setSession("Pilotty")
             .setMtu(options.mtu)
             .setConfigureIntent(buildConfigureIntent())
 
@@ -94,7 +94,7 @@ class NetPilotVpnService : VpnService(), NetPilotPlatformInterface, CommandServe
                 .onFailure { Log.w(TAG, "addAllowedApplication $pkg failed", it) }
         }
         if (includeCount == 0) {
-            // 没有白名单时走黑名单; NetPilot 自身必须排除, 否则 TUN 流量回环
+            // 没有白名单时走黑名单; Pilotty 自身必须排除, 否则 TUN 流量回环
             runCatching { builder.addDisallowedApplication(packageName) }
             iterateStrings(options.excludePackage) { pkg ->
                 runCatching { builder.addDisallowedApplication(pkg) }
@@ -206,7 +206,7 @@ class NetPilotVpnService : VpnService(), NetPilotPlatformInterface, CommandServe
 
             server.startOrReloadService(configJson, OverrideOptions())
             Log.i(TAG, "sing-box service started via libbox")
-            NetPilotCore.markTunRunning(true)
+            PilottyCore.markTunRunning(true)
         } catch (t: Throwable) {
             Log.e(TAG, "startService failed", t)
             stopService()
@@ -221,7 +221,7 @@ class NetPilotVpnService : VpnService(), NetPilotPlatformInterface, CommandServe
         runCatching { pfd?.close() }
         pfd = null
         runCatching { DefaultNetworkMonitor.unregister() }
-        NetPilotCore.markTunRunning(false)
+        PilottyCore.markTunRunning(false)
     }
 
     override fun onDestroy() {
@@ -238,10 +238,10 @@ class NetPilotVpnService : VpnService(), NetPilotPlatformInterface, CommandServe
      * 配置来源优先级:
      *  1) filesDir/merged.json —— Go overlay.Apply() 生成 (mobile.Client dataDir=filesDir);
      *     经 ConfigMerger 二次注入 tun inbound / route 系统规则 (详见 ConfigMerger 文档 + Known Issue #H4)
-     *  2) filesDir/configs/android_tun_base.json —— NetPilotApp.onCreate() 从 assets 拷出
+     *  2) filesDir/configs/android_tun_base.json —— PilottyApp.onCreate() 从 assets 拷出
      */
     private fun loadConfigJson(): String {
-        val tunBaseFile = File(filesDir, "configs/${NetPilotApp.TUN_BASE_NAME}")
+        val tunBaseFile = File(filesDir, "configs/${PilottyApp.TUN_BASE_NAME}")
         val mergedFile = File(filesDir, "merged.json")
 
         if (mergedFile.exists() && mergedFile.length() > 0) {
@@ -268,11 +268,11 @@ class NetPilotVpnService : VpnService(), NetPilotPlatformInterface, CommandServe
     private fun buildNotification(): Notification {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL_ID, "NetPilot VPN", NotificationManager.IMPORTANCE_LOW)
+            val ch = NotificationChannel(CHANNEL_ID, "Pilotty VPN", NotificationManager.IMPORTANCE_LOW)
             nm.createNotificationChannel(ch)
         }
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("NetPilot")
+            .setContentTitle("Pilotty")
             .setContentText("VPN 已连接")
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setContentIntent(buildConfigureIntent())
@@ -316,15 +316,15 @@ class NetPilotVpnService : VpnService(), NetPilotPlatformInterface, CommandServe
     }
 
     companion object {
-        private const val TAG = "NetPilotVpnService"
-        private const val CHANNEL_ID = "netpilot_vpn"
+        private const val TAG = "PilottyVpnService"
+        private const val CHANNEL_ID = "pilotty_vpn"
         private const val NOTIF_ID = 1001
-        const val ACTION_STOP = "com.foxnetpilot.netpilot.STOP_VPN"
-        const val ACTION_RELOAD = "com.foxnetpilot.netpilot.RELOAD_VPN"
+        const val ACTION_STOP = "com.pilotty.app.STOP_VPN"
+        const val ACTION_RELOAD = "com.pilotty.app.RELOAD_VPN"
 
         /** 订阅/规则变更后请求 VpnService 重载 libbox 配置;未运行时为 no-op。 */
         fun requestReload(ctx: Context) {
-            val intent = Intent(ctx, NetPilotVpnService::class.java).apply {
+            val intent = Intent(ctx, PilottyVpnService::class.java).apply {
                 action = ACTION_RELOAD
             }
             runCatching { ctx.startService(intent) }

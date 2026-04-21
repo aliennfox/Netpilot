@@ -1,4 +1,4 @@
-package com.foxnetpilot.netpilot.vpn
+package com.pilotty.app.vpn
 
 import android.util.Log
 import org.json.JSONArray

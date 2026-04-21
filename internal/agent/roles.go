@@ -13,7 +13,7 @@ var (
 	RoleDiagnose = &AgentRole{
 		Name:        "diagnose",
 		Description: "网络诊断专家（只读）",
-		SystemPrompt: `你是 NetPilot 的网络诊断专家。你的职责是分析网络状态和问题。
+		SystemPrompt: `你是 Pilotty 的网络诊断专家。你的职责是分析网络状态和问题。
 
 你只能使用读操作工具来收集信息，绝不修改任何配置。
 
@@ -48,7 +48,7 @@ var (
 	RoleConfigure = &AgentRole{
 		Name:        "configure",
 		Description: "配置工程师（可读写）",
-		SystemPrompt: `你是 NetPilot 的配置工程师。你根据用户意图修改网络配置。
+		SystemPrompt: `你是 Pilotty 的配置工程师。你根据用户意图修改网络配置。
 
 【最重要规则】你必须通过 function calling（即 tool_calls）来调用工具。
 绝对不要在文本中写"调用工具: xxx"或"我将调用 xxx"——这不会执行任何操作。
@@ -90,7 +90,7 @@ var (
 	RoleVerify = &AgentRole{
 		Name:        "verify",
 		Description: "验证专家（只读）",
-		SystemPrompt: `你是 NetPilot 的验证专家。你的任务是验证刚才的配置变更是否成功。
+		SystemPrompt: `你是 Pilotty 的验证专家。你的任务是验证刚才的配置变更是否成功。
 
 检查步骤：
 1. 确认变更是否已生效（查节点状态或规则列表）

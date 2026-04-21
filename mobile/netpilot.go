@@ -1,4 +1,4 @@
-// Package mobile 是 NetPilot 的 gomobile 绑定层。
+// Package mobile 是 Pilotty 的 gomobile 绑定层。
 //
 // 设计约束：gomobile bind 只支持有限类型（string/int/int64/float64/bool/[]byte/error，
 // 以及由这些类型组成的 struct 和带单返回值+error 的接口）。因此本包暴露的所有跨语言
@@ -56,7 +56,7 @@ type Client struct {
 	iface libcore.PlatformInterface
 }
 
-// NewClient 创建一个新的 NetPilot 客户端。
+// NewClient 创建一个新的 Pilotty 客户端。
 //
 //   - dataDir:      可写数据目录（订阅、快照、日志等）。Android 侧通常为 context.filesDir.absolutePath
 //   - clashAPIAddr: sing-box Clash API 地址，例如 "127.0.0.1:9090"
