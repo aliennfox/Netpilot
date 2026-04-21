@@ -17,6 +17,7 @@ type ToolPipeline struct {
 	snapshots *SnapshotStore
 	telemetry *TelemetryLogger
 	adapter   engine.EngineAdapter
+	perms     *PermissionManager
 }
 
 func NewPipeline(adapter engine.EngineAdapter, dataDir string) *ToolPipeline {
@@ -26,8 +27,18 @@ func NewPipeline(adapter engine.EngineAdapter, dataDir string) *ToolPipeline {
 		snapshots: NewSnapshotStore(dataDir + "/snapshots"),
 		telemetry: NewTelemetryLogger(dataDir),
 		adapter:   adapter,
+		perms:     NewPermissionManager(TrustAuto, nil), // 默认 auto，调用方可覆盖
 	}
 }
+
+// SetPermissionManager 由调用方注入信任策略与 approver
+func (p *ToolPipeline) SetPermissionManager(pm *PermissionManager) {
+	if pm != nil {
+		p.perms = pm
+	}
+}
+
+func (p *ToolPipeline) Permissions() *PermissionManager { return p.perms }
 
 // RegisterExtraTools 注册额外的工具（如 overlay tools）
 func (p *ToolPipeline) RegisterExtraTools(extra map[string]*ToolDef) {
@@ -36,8 +47,8 @@ func (p *ToolPipeline) RegisterExtraTools(extra map[string]*ToolDef) {
 	}
 }
 
-func (p *ToolPipeline) Snapshots() *SnapshotStore   { return p.snapshots }
-func (p *ToolPipeline) Telemetry() *TelemetryLogger { return p.telemetry }
+func (p *ToolPipeline) Snapshots() *SnapshotStore     { return p.snapshots }
+func (p *ToolPipeline) Telemetry() *TelemetryLogger   { return p.telemetry }
 func (p *ToolPipeline) GetTools() map[string]*ToolDef { return p.tools }
 
 // Execute runs a tool through the full pipeline.
@@ -53,7 +64,23 @@ func (p *ToolPipeline) Execute(ctx context.Context, toolName string, params map[
 	var snapshotID string
 
 	if tool.IsWriteOp {
-		// Step 2: Pre-Hooks
+		// Step 2a: Permission check (user approval for write ops)
+		if p.perms != nil {
+			permDecision := p.perms.Check(toolName, params)
+			if permDecision == PermDeny {
+				p.telemetry.Log(TelemetryEntry{
+					Timestamp:  time.Now(),
+					Tool:       toolName,
+					Params:     params,
+					Success:    false,
+					DurationMs: time.Since(start).Milliseconds(),
+					Error:      "permission denied by user",
+				})
+				return &ToolResult{Success: false, Message: "操作被用户拒绝。"}
+			}
+		}
+
+		// Step 2b: Pre-Hooks
 		decision := p.hooks.RunPreHooks(toolName, params)
 		if decision.Action == "deny" {
 			return &ToolResult{Success: false, Message: fmt.Sprintf("操作被拒绝: %s", decision.Reason)}

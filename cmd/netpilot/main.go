@@ -30,6 +30,8 @@ func main() {
 	cfg := config.Default()
 	adapter := engine.NewSingBoxAdapter(cfg.ClashAPIAddr)
 	pipeline := tool.NewPipeline(adapter, cfg.DataDir)
+	// Permission system: CLI 默认 ask 模式，写操作需用户确认
+	pipeline.SetPermissionManager(tool.NewPermissionManager(tool.TrustAsk, tool.NewCLIApprover()))
 	intentRouter := router.NewIntentRouter()
 	localEngine := local.NewEngine(adapter, pipeline, "proxy-group")
 
@@ -125,6 +127,26 @@ func main() {
 		}
 		if line == "/history" {
 			fmt.Print(history.FormatDisplay())
+			continue
+		}
+		if strings.HasPrefix(line, "/trust") {
+			parts := strings.Fields(line)
+			pm := pipeline.Permissions()
+			if len(parts) == 1 {
+				fmt.Printf("当前信任模式: %s (ask=每次询问 / auto=全部放行 / strict=全部拒绝)\n", pm.Mode())
+				continue
+			}
+			switch parts[1] {
+			case "ask", "auto", "strict":
+				pm.SetMode(tool.TrustMode(parts[1]))
+				pm.ResetSession()
+				fmt.Printf("信任模式已切换为: %s\n", parts[1])
+			case "reset":
+				pm.ResetSession()
+				fmt.Println("session 白名单已清空。")
+			default:
+				fmt.Println("用法: /trust [ask|auto|strict|reset]")
+			}
 			continue
 		}
 
