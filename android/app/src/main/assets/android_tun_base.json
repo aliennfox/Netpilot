@@ -15,11 +15,11 @@
   },
   "dns": {
     "servers": [
-      { "tag": "cf-doh", "address": "https://1.1.1.1/dns-query", "detour": "proxy-group" },
-      { "tag": "local-dns", "address": "223.5.5.5", "detour": "direct-out" }
+      { "type": "https", "tag": "cf-doh", "server": "1.1.1.1", "detour": "proxy-group" },
+      { "type": "udp", "tag": "local-dns", "server": "223.5.5.5" }
     ],
     "rules": [
-      { "outbound": "any", "server": "local-dns" }
+      { "ip_is_private": true, "server": "local-dns" }
     ],
     "final": "cf-doh",
     "strategy": "prefer_ipv4"
@@ -33,25 +33,24 @@
       "auto_route": true,
       "strict_route": false,
       "endpoint_independent_nat": false,
-      "stack": "gvisor",
-      "sniff": true
+      "stack": "gvisor"
     }
   ],
   "outbounds": [
     {
       "type": "selector",
       "tag": "proxy-group",
-      "outbounds": ["direct-out", "block-out"],
+      "outbounds": ["direct-out"],
       "default": "direct-out"
     },
-    { "type": "direct", "tag": "direct-out" },
-    { "type": "block", "tag": "block-out" },
-    { "type": "dns", "tag": "dns-out" }
+    { "type": "direct", "tag": "direct-out" }
   ],
   "route": {
     "auto_detect_interface": true,
+    "default_domain_resolver": "local-dns",
     "rules": [
-      { "protocol": "dns", "outbound": "dns-out" },
+      { "action": "sniff" },
+      { "protocol": "dns", "action": "hijack-dns" },
       { "ip_is_private": true, "outbound": "direct-out" }
     ],
     "final": "proxy-group"

@@ -36,16 +36,20 @@ class NetPilotApp : Application() {
 
     /**
      * 把 assets/android_tun_base.json 拷到 filesDir/configs/, 首次启动或 asset 更新后生效。
-     * merged.json 由 Go overlay.Apply() 生成; 当其不存在时, VpnService 回退到这份基础 tun config。
+     *
+     * 同时写成 `minimal.json` —— Go mobile.NewClient 用 `filesDir/configs/minimal.json` 作 overlay base;
+     * 在 Android 上两者内容一致 (都是 tun 版), 这样 Go overlay.MergeConfigs 能正确产出含 tun inbound 的 merged.json。
+     * merged.json 由 Go overlay.Apply() 生成; 当其不存在时, VpnService 回退到 minimal.json。
      */
     private fun bootstrapConfigAssets() {
         val configsDir = File(filesDir, "configs").apply { mkdirs() }
-        val dst = File(configsDir, TUN_BASE_NAME)
         runCatching {
-            assets.open(TUN_BASE_NAME).use { input ->
-                dst.outputStream().use { input.copyTo(it) }
+            val bytes = assets.open(TUN_BASE_NAME).use { it.readBytes() }
+            for (name in arrayOf(TUN_BASE_NAME, MINIMAL_NAME)) {
+                val dst = File(configsDir, name)
+                dst.outputStream().use { it.write(bytes) }
+                Log.i(TAG, "asset copied: ${dst.path} (${dst.length()} bytes)")
             }
-            Log.i(TAG, "asset copied: ${dst.path} (${dst.length()} bytes)")
         }.onFailure {
             Log.e(TAG, "asset copy failed: $TUN_BASE_NAME", it)
         }
@@ -59,6 +63,7 @@ class NetPilotApp : Application() {
     companion object {
         private const val TAG = "NetPilotApp"
         const val TUN_BASE_NAME = "android_tun_base.json"
+        const val MINIMAL_NAME = "minimal.json"
 
         @Volatile private var instance: NetPilotApp? = null
 

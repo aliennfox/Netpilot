@@ -6,18 +6,24 @@ import org.json.JSONObject
 
 /**
  * 把 Go 侧 overlay.Apply() 生成的 `merged.json` 与 Android 基础 tun 配置 (`android_tun_base.json`)
- * 再合并一次,确保关键的 tun inbound / route / dns / dns-out outbound 不缺。
+ * 再合并一次,确保关键的 tun inbound / route / dns 不缺。
  *
  * 动机 (Known Issue #H4): Go 侧 overlay 的 base 是 CLI 用的 minimal.json (mixed inbound),
- * 合出来的 merged.json 没有 tun inbound, sing-box libbox 永不会回调 openTun。
+ * 合出来的 merged.json 没有 tun inbound, libbox 永不会回调 openTun。
  * 选"Kotlin 二次合并"而非改 Go overlay 层是为了不触发 aar 重建,避开 #M8 同步纪律问题。
+ *
+ * sing-box 1.13 schema:
+ *  - 移除了 `outbounds[type=dns]`, 改用 route rule `{action:"hijack-dns"}`
+ *  - 移除了 `outbounds[type=block]`, 改用 route rule `{action:"reject"}`
+ *  - 移除了 inbound 级 `sniff:true`, 改用 route rule `{action:"sniff"}`
  *
  * 合并策略:
  *  - inbounds: 若无 type=tun, 从 base 拷一份 tun inbound 追加到末尾
- *  - outbounds: 若无 type=dns (dns-out), 从 base 拷一份
  *  - route.auto_detect_interface: 若 merged 未设, 取 base 值
- *  - route.rules: base 的系统级规则 (protocol=dns, ip_is_private) prepend 到 merged.rules 前
- *    —— 必须 prepend 而非 append, 否则用户规则 "抖音 direct" 会拦截 DNS 流量导致 dns-out 失效
+ *  - route.default_domain_resolver: 若 merged 未设, 取 base 值 (sing-box 1.12+ 必需)
+ *  - route.rules 系统规则 (action=sniff / action=hijack-dns / ip_is_private direct) 确保存在
+ *    - 若 merged 的首条不是 sniff, 把 base 的系统规则 prepend 到 merged.rules 前
+ *    - **必须 prepend**, 否则用户规则 "抖音 direct" 会拦截 DNS 流量, DNS 永远不到 hijack-dns
  *  - dns: 若 merged 无 dns 字段, 整段拷 base
  */
 object ConfigMerger {
@@ -28,7 +34,6 @@ object ConfigMerger {
         val b = JSONObject(tunBaseJson)
 
         mergeInbounds(m, b)
-        mergeOutbounds(m, b)
         mergeRoute(m, b)
         mergeDns(m, b)
 
@@ -55,23 +60,6 @@ object ConfigMerger {
         }
     }
 
-    private fun mergeOutbounds(merged: JSONObject, base: JSONObject) {
-        val mOutbounds = merged.optJSONArray("outbounds") ?: JSONArray().also { merged.put("outbounds", it) }
-        val hasDnsOut = (0 until mOutbounds.length()).any {
-            mOutbounds.optJSONObject(it)?.optString("type") == "dns"
-        }
-        if (hasDnsOut) return
-        val bOutbounds = base.optJSONArray("outbounds") ?: return
-        for (i in 0 until bOutbounds.length()) {
-            val ob = bOutbounds.optJSONObject(i) ?: continue
-            if (ob.optString("type") == "dns") {
-                mOutbounds.put(ob)
-                Log.i(TAG, "injected dns outbound tag=${ob.optString("tag")}")
-                return
-            }
-        }
-    }
-
     private fun mergeRoute(merged: JSONObject, base: JSONObject) {
         val bRoute = base.optJSONObject("route") ?: return
         val mRoute = merged.optJSONObject("route") ?: JSONObject().also { merged.put("route", it) }
@@ -79,11 +67,23 @@ object ConfigMerger {
         if (!mRoute.has("auto_detect_interface") && bRoute.has("auto_detect_interface")) {
             mRoute.put("auto_detect_interface", bRoute.optBoolean("auto_detect_interface", true))
         }
+        if (!mRoute.has("default_domain_resolver") && bRoute.has("default_domain_resolver")) {
+            mRoute.put("default_domain_resolver", bRoute.opt("default_domain_resolver"))
+        }
 
-        // base 的系统级规则必须先匹配, prepend 到前面
         val bRules = bRoute.optJSONArray("rules") ?: JSONArray()
         val mRules = mRoute.optJSONArray("rules") ?: JSONArray()
         if (bRules.length() == 0) return
+
+        // 检测 merged 是否已有系统级 action 规则 (sniff / hijack-dns)
+        val hasSystemAction = (0 until mRules.length()).any { idx ->
+            val r = mRules.optJSONObject(idx) ?: return@any false
+            val act = r.optString("action")
+            act == "sniff" || act == "hijack-dns"
+        }
+        if (hasSystemAction) return
+
+        // prepend base 的系统规则到 merged.rules 前
         val newRules = JSONArray()
         for (i in 0 until bRules.length()) newRules.put(bRules.opt(i))
         for (i in 0 until mRules.length()) newRules.put(mRules.opt(i))

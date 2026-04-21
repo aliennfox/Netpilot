@@ -21,22 +21,18 @@
     {
       "type": "selector",
       "tag": "proxy-group",
-      "outbounds": [
-        "direct-out",
-        "block-out"
-      ],
+      "outbounds": ["direct-out"],
       "default": "direct-out"
     },
     {
       "type": "direct",
       "tag": "direct-out"
-    },
-    {
-      "type": "block",
-      "tag": "block-out"
     }
   ],
   "route": {
+    "rules": [
+      { "action": "sniff" }
+    ],
     "final": "proxy-group"
   }
 }
