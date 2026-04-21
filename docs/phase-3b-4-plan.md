@@ -1,8 +1,10 @@
 # Phase 3B-4 执行计划 · iOS NEPacketTunnelProvider 落地
 
-> 状态: **调研完成,代码实现待用户介入** (2026-04-17)
+> 状态: **调研完成,代码实现待用户介入** (原版 2026-04-17, 3B-3 debrief 补 2026-04-22)
 > 主要抄作业对象: **Hiddify / hiddify-app** (`~/References/hiddify-app/ios/`)
 > 次要参考: sing-box-for-apple 官方客户端 (GitHub, 未本地克隆)
+>
+> **3B-3 真机收官后新发现**: 详见第 14 节 debrief, 直接影响第 5 节 PlatformInterface 的范围。
 
 ---
 
@@ -407,3 +409,118 @@ Hiddify 用了 on-demand rules 让 VPN 在所有网络下自动连接。这个�
 6. **最后** 真机跑通 → 调路由映射细节
 
 务必先让"能编译 + 能启动"跑通,再追求 DNS/route 完全对齐。MVP 就是能连上代理访问到墙外,其他都是稳定性。
+
+---
+
+## 14. 3B-3 Debrief — 直接应用到 iOS 的经验教训 (2026-04-22 补)
+
+3B-3 在 Pixel 4a 上从"UI 已连接但 ping 超时"到真走流量,踩了 5 个坑。写给未来实现 3B-4 的人:
+
+### 14.1 sing-box 1.13 schema 必须先迁移 (和 Android 完全同款)
+
+Android 侧是今天发现的硬伤。任何 1.11- 的配置语法直接 `Libbox.checkConfig` 失败:
+
+- 删: `outbounds[type="dns"]`、`outbounds[type="block"]`
+- 改: 用 `route.rules` 里 `{action:"hijack-dns"}` / `{action:"reject"}` / `{action:"sniff"}`
+- 注: DNS server `detour` 不能指向没特殊配置的 direct outbound (报错 "detour to an empty direct outbound makes no sense")
+- `route.default_domain_resolver` 在 1.12+ 必需
+
+**iOS 影响**: `ios/NetPilotPacketTunnel/ios_tun_base.json` (或放 App Group container 的 fallback 配置) 必须按 1.13 schema 写。直接抄 `android/app/src/main/assets/android_tun_base.json` 即可,两边 TUN inbound 形态一样。
+
+### 14.2 ConfigMerger 逻辑几乎可以 1:1 抄 Kotlin 版
+
+Android 走通的合并策略:
+- inbounds: merged 里没 `type=tun` → 从 base 拷一份
+- route: 若无 `auto_detect_interface` / `default_domain_resolver` → 补;系统级 rules (`sniff` / `hijack-dns` / `ip_is_private direct`) 必须 prepend 到 merged.rules 前 (用户规则如 "抖音 direct" 会截胡 DNS 流量)
+- dns: 若无 dns 字段 → 整段拷 base
+
+iOS Swift 版用 `JSONSerialization` + `Dictionary<String,Any>` 基本 1:1 对应 `JSONObject`。**不要自造逻辑**,抄现成的。
+
+### 14.3 iOS 侧 `getInterfaces` / `startDefaultInterfaceMonitor` 不用真实现 (!)
+
+这是今天最大的意外收获。Android 这两个 stub 掉是灾难 (#H1 loopback, 花了半天查), 但 **iOS 不需要** —— `underNetworkExtension() = true` 告诉 sing-box "我在 NE 沙箱里,数据面你用 NE 的代码路径", 它就不会 fallback 去枚举物理网卡。
+
+证据: `~/References/hiddify-app/ios/HiddifyPacketTunnel/SingBox/ExtensionPlatformInterface.swift:257` 和 `:292` 两个方法都在顶部直接 `return` / `throw`, 而真实现都 **注释掉或 unreachable**。Hiddify 跑得好好的。
+
+**这意味着 Swift 版 NetPilotPlatformInterface 大约只有 Kotlin 版的 60% 代码量**, 原来估的 500-800 行应修正到 300-500 行。
+
+但留个口子: 若真机测出 "sing-box 上游连接回环" 症状, 回来看 `NWPathMonitor` 的真实现 (Hiddify 有注释掉的代码可启用)。
+
+### 14.4 VPN-as-default-network loopback bug 在 iOS 上不存在
+
+Android P+ `registerDefaultNetworkCallback` 把 VPN 自己当默认网络返回 → sing-box 出口指向 tun0 → 死循环。这是 Android 平台特定 bug, NE 框架自己保证不回环 (sing-box 通过 NE 的 packet flow 直接读包, 不走 OS 路由表选出口)。
+
+**iOS 影响**: 这个坑不用防, 但要记住为什么不用防 —— 避免将来有人"好心"地在 iOS 侧加一个 `NWPathMonitor` 真实现却观察到 VPN 接口被误选。
+
+### 14.5 Extension 进程的 startTunnel 幂等保护必须有 (和 Android 同款坑)
+
+Android 侧发现: 用户双击"开启"、或 Android 重复投递 intent, 第二次 `startService()` 会试图启第二个 libbox, 撞 `bind 127.0.0.1:9090 address already in use`, catch 路径 stopService() 把正常 instance 一起带走, 表现为"点了没反应"。
+
+**iOS 对应场景**: iOS 重连后台 / 网络切换 / on-demand rules 触发, 都可能让系统把已运行的 Extension 再次 `startTunnel(options:)` 一次。`PacketTunnelProvider` 内部需要:
+
+```swift
+private var isRunning = false
+
+override func startTunnel(options: ...) async throws {
+    if isRunning {
+        NSLog("startTunnel re-entered, ignoring")
+        return
+    }
+    isRunning = true
+    defer { if !success { isRunning = false } }
+    // ... real startup
+}
+```
+
+对应 `reset()` 路径要把 `isRunning = false` 写回去。
+
+### 14.6 validation 路径: 一定用 `/connections` 而不是 `/delay`
+
+3B-3 一开始只看 `/proxies/香港-1/delay` 成功 (2919ms), 差点以为 DoD 达成。但 delay 测试是在 sing-box 进程内部直接走 outbound 栈, **不经过 TUN 入口**, 证明不了其他 app 的流量真的被路由了。
+
+真正证据是 `/connections` 里看到 `api.ipify.org:443 via ['香港-1', 'proxy-group']` 且 metadata 里的 process 不是 NetPilot 自己。
+
+**iOS 影响**: 3B-4 验证时第一时间 `curl http://127.0.0.1:19090/connections` (记得 adb forward 在 iOS 上换成其他机制, 或进 App 看内置面板), 确认有外部 UID 的连接经 proxy-group。仅看 delay 通过会漏掉"其他 app 流量走 Bypass VPN" 这种静默错误。
+
+### 14.7 文件路径契约
+
+Android 两边达成的约定:
+- Go overlay 写: `filesDir/merged.json` (不带 configs/ 前缀, 来自 `overlay.MergedConfigPath()`)
+- Kotlin VpnService 读: `filesDir/merged.json`, fallback `filesDir/configs/android_tun_base.json`
+- App bootstrap 把 asset 拷到 `filesDir/configs/{android_tun_base.json, minimal.json}` (后者是 Go overlay base 的硬要求)
+
+**iOS 对应**:
+- Go overlay 写: `$GROUP_CONTAINER/Library/merged.json`
+- Swift PacketTunnelProvider 读: 同上, fallback `$GROUP_CONTAINER/Library/configs/ios_tun_base.json`
+- 主 App 启动时把 Bundle 里的 `ios_tun_base.json` 拷到 container 并同时写 `configs/minimal.json` (给 Go overlay 吃)
+
+注意 iOS App Group container 的具体子目录由 `FileManager.default.containerURL(forSecurityApplicationGroupIdentifier:)` 返回, 里面常用 `Library/` 做工作区, `Library/Caches/` 做临时。
+
+### 14.8 调试工具链 (Android 的经验可复用)
+
+Android 侧一路用:
+- `adb logcat -v brief > file` 流式
+- `adb shell run-as <pkg> sh -c '...'` 读 Extension 私有目录
+- `adb forward tcp:19090 tcp:9090` 把设备 Clash API 映射到主机
+- `adb shell am start -a android.intent.action.VIEW -d <url>` 触发外部 UID 流量
+
+**iOS 对应**:
+- `Console.app` + 选 iPhone 设备 + 过滤 `subsystem:com.foxnetpilot.NetPilot` 看日志流
+- `xcrun devicectl device list` + `devicectl` 系列命令 (新式替代 iOS 16+)
+- Clash API 映射: 无直接等价, 需要在主 App 内做一个调试面板 HTTP 打 Extension 内的 127.0.0.1:9090, 前提是 Extension 绑定在 container 内 (不是 loopback)。或改 Clash API 绑到 Unix domain socket 放 App Group container, 让主 App 通过 AppGroupFile.swift 读响应
+- 触发外部流量: 在 iOS 上打开 Safari 访问网站即可,但"看连接列表"不如 Android 方便
+
+### 14.9 Android UI 残留 bug (#M13) 对 iOS 的启示
+
+Android 侧发现 `NetPilotCore.markTunRunning(true)` 被调用了但 Compose UI 没更新, 推测是 state flow 观测链路断。
+
+**iOS 影响**: Swift 侧用 `@Published var state: NEVPNStatus` + `NotificationCenter.default.addObserver(forName: .NEVPNStatusDidChange)` 来同步,这是系统标准机制,基本不会踩坑。反而比 Android 稳。但仍要注意: Extension 的状态变化通过 `manager.connection.status` 获取, 不要自己维护一份。
+
+### 14.10 3B-4 前应先修 #M13 么?
+
+不修。理由:
+- 3B-4 换了 Swift 侧, Android Compose 的 bug 不会带过去
+- 3B-4 和 #M13 是正交的 work
+- #M13 只影响视觉, 流量是通的
+
+但 3B-5 双端联调阶段一定要修 (UX 不能接受用户以为没连上反复点)。
