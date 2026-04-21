@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"regexp"
@@ -10,6 +11,9 @@ import (
 	"github.com/foxnetpilot/netpilot/internal/engine"
 	"github.com/foxnetpilot/netpilot/internal/overlay"
 )
+
+var jsonMarshal = json.Marshal
+var jsonUnmarshal = json.Unmarshal
 
 var domainRegex = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?$`)
 
@@ -37,7 +41,98 @@ func RegisterOverlayTools(ov *overlay.ConfigOverlay) map[string]*ToolDef {
 		"patch_route_rule":  toolPatchRouteRule(ov),
 		"remove_route_rule": toolRemoveRouteRule(ov),
 		"list_route_rules":  toolListRouteRules(ov),
+		"create_chain":      toolCreateChain(ov),
 	}
+}
+
+// toolCreateChain 创建链式代理（detour chain）
+// params:
+//
+//	tag: 链路出口节点的新名字（自动加 _agent: 前缀）
+//	nodes: 节点 tag 列表，顺序 entry→exit，例如 ["JP-node","HK-node"] 表示 traffic → JP → HK → target
+func toolCreateChain(ov *overlay.ConfigOverlay) *ToolDef {
+	return &ToolDef{
+		Name:        "create_chain",
+		Description: "Create a chained proxy: traffic flows through nodes in order (entry → ... → exit). The exit node is exposed as a new outbound tag for routing.",
+		IsWriteOp:   true,
+		Execute: func(ctx context.Context, a engine.EngineAdapter, params map[string]interface{}) (*ToolResult, error) {
+			chainTag, _ := params["tag"].(string)
+			nodes := toStringSlice(params["nodes"])
+			if chainTag == "" {
+				return nil, fmt.Errorf("missing param: tag")
+			}
+			if len(nodes) < 2 {
+				return nil, fmt.Errorf("nodes 至少需要 2 个节点（entry → exit）")
+			}
+			if !strings.HasPrefix(chainTag, "_agent:") {
+				chainTag = "_agent:" + chainTag
+			}
+
+			// 验证所有节点都存在
+			for _, n := range nodes {
+				if _, err := ov.FindOutboundByTag(n); err != nil {
+					return nil, fmt.Errorf("节点 %q 不存在", n)
+				}
+			}
+
+			// 链路语义：nodes = [entry, mid..., exit]
+			// 流量方向：client → entry → mid → ... → exit → target
+			// sing-box detour 语义：outbound A 的 detour=B 表示"拨号 A 时先经过 B"
+			// 因此 exit.detour = mid_via_entry, mid.detour = entry, entry.detour = direct
+			// 即从 exit 往回构造，每一跳 detour 指向上一跳（更靠近 client 的那个）
+			//
+			// 中间跳和出口都需要 clone 一份新的 outbound 设置 detour，
+			// 因为原始 outbound 不能被修改（它们可能也用作普通节点）。
+			// entry 节点不需要克隆（它的 detour 默认为 direct）。
+
+			var newObs []map[string]interface{}
+			prevTag := nodes[0] // 首跳直接用原 tag
+
+			for i := 1; i < len(nodes); i++ {
+				original, err := ov.FindOutboundByTag(nodes[i])
+				if err != nil {
+					return nil, err
+				}
+				clone := deepCopyJSON(original)
+				// 出口跳用 chainTag，中间跳用衍生 tag
+				var newTag string
+				if i == len(nodes)-1 {
+					newTag = chainTag
+				} else {
+					newTag = fmt.Sprintf("%s:hop%d-%s", chainTag, i, nodes[i])
+				}
+				clone["tag"] = newTag
+				clone["detour"] = prevTag
+				newObs = append(newObs, clone)
+				prevTag = newTag
+			}
+
+			if err := ov.AddOutboundsBatch(newObs); err != nil {
+				return nil, fmt.Errorf("保存链路 outbound 失败: %w", err)
+			}
+			if err := ov.Apply(a); err != nil {
+				return nil, fmt.Errorf("应用配置失败: %w", err)
+			}
+
+			return &ToolResult{
+				Success: true,
+				Message: fmt.Sprintf("已创建链路 %s: %s（共 %d 跳，%d 个新 outbound）",
+					chainTag, strings.Join(nodes, " → "), len(nodes), len(newObs)),
+				Data: map[string]interface{}{
+					"chain_tag": chainTag,
+					"nodes":     nodes,
+					"hops":      len(nodes),
+				},
+			}, nil
+		},
+	}
+}
+
+func deepCopyJSON(m map[string]interface{}) map[string]interface{} {
+	b, _ := jsonMarshal(m)
+	var out map[string]interface{}
+	_ = jsonUnmarshal(b, &out)
+	return out
 }
 
 func toolPatchRouteRule(ov *overlay.ConfigOverlay) *ToolDef {

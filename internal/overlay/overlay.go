@@ -24,16 +24,16 @@ type RouteRule struct {
 
 // DNSServer 是 overlay 中的 DNS 服务器配置（sing-box 1.12+ 新格式）
 type DNSServer struct {
-	Type       string `json:"type"`                  // "tls", "udp", "local"
+	Type       string `json:"type"` // "tls", "udp", "local"
 	Tag        string `json:"tag"`
-	Server     string `json:"server,omitempty"`       // IP 或域名
+	Server     string `json:"server,omitempty"` // IP 或域名
 	ServerPort int    `json:"server_port,omitempty"`
 	Detour     string `json:"detour,omitempty"`
 }
 
 // DNSRule 是 overlay 中的 DNS 路由规则（sing-box 1.12+ 新格式）
 type DNSRule struct {
-	Action       string   `json:"action"`                      // "route" | "reject"
+	Action       string   `json:"action"` // "route" | "reject"
 	Server       string   `json:"server,omitempty"`
 	Outbound     string   `json:"outbound,omitempty"`
 	Domain       []string `json:"domain,omitempty"`
@@ -44,7 +44,7 @@ type DNSRule struct {
 type DNSConfig struct {
 	Servers  []DNSServer `json:"servers"`
 	Rules    []DNSRule   `json:"rules,omitempty"`
-	Final    string      `json:"final"`                // 默认 DNS 服务器 tag
+	Final    string      `json:"final"` // 默认 DNS 服务器 tag
 	Strategy string      `json:"strategy"`
 }
 
@@ -211,6 +211,46 @@ func (o *ConfigOverlay) RemoveOutboundsByTags(tags []string) error {
 	return o.saveLocked()
 }
 
+// FindOutboundByTag 在 base 配置和 overlay 中查找指定 tag 的 outbound（返回深拷贝）
+func (o *ConfigOverlay) FindOutboundByTag(tag string) (map[string]interface{}, error) {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	// 先查 overlay
+	for _, ob := range o.data.Outbounds {
+		if t, _ := ob["tag"].(string); t == tag {
+			return deepCopyMap(ob), nil
+		}
+	}
+
+	// 再查 base config
+	baseData, err := os.ReadFile(o.baseConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("读取 base config 失败: %w", err)
+	}
+	var config map[string]interface{}
+	if err := json.Unmarshal(baseData, &config); err != nil {
+		return nil, fmt.Errorf("解析 base config 失败: %w", err)
+	}
+	if raw, ok := config["outbounds"].([]interface{}); ok {
+		for _, ob := range raw {
+			if m, ok := ob.(map[string]interface{}); ok {
+				if t, _ := m["tag"].(string); t == tag {
+					return deepCopyMap(m), nil
+				}
+			}
+		}
+	}
+	return nil, fmt.Errorf("未找到 outbound: %s", tag)
+}
+
+func deepCopyMap(m map[string]interface{}) map[string]interface{} {
+	b, _ := json.Marshal(m)
+	var out map[string]interface{}
+	_ = json.Unmarshal(b, &out)
+	return out
+}
+
 // OutboundTags 返回所有 overlay 出站节点的 tag
 func (o *ConfigOverlay) OutboundTags() []string {
 	o.mu.RLock()
@@ -288,10 +328,19 @@ func (o *ConfigOverlay) GetData() OverlayData {
 	result := OverlayData{
 		RouteRules: make([]RouteRule, len(o.data.RouteRules)),
 		Outbounds:  make([]map[string]interface{}, len(o.data.Outbounds)),
+		DNS:        o.data.DNS,
 	}
 	copy(result.RouteRules, o.data.RouteRules)
 	copy(result.Outbounds, o.data.Outbounds)
 	return result
+}
+
+// SetData 整体替换 overlay 数据并立即持久化。供 backup 导入使用。
+func (o *ConfigOverlay) SetData(d OverlayData) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.data = d
+	return o.saveLocked()
 }
 
 func (o *ConfigOverlay) saveLocked() error {
