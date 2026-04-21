@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -15,8 +16,10 @@ import (
 	"time"
 
 	"github.com/foxnetpilot/netpilot/internal/agent"
+	"github.com/foxnetpilot/netpilot/internal/backup"
 	"github.com/foxnetpilot/netpilot/internal/config"
 	"github.com/foxnetpilot/netpilot/internal/engine"
+	"github.com/foxnetpilot/netpilot/internal/failover"
 	"github.com/foxnetpilot/netpilot/internal/local"
 	"github.com/foxnetpilot/netpilot/internal/overlay"
 	"github.com/foxnetpilot/netpilot/internal/router"
@@ -94,7 +97,7 @@ type APIResponse struct {
 type ChatResponse struct {
 	Reply   string       `json:"reply"`
 	Source  string       `json:"source"`
-	Stages []string     `json:"stages,omitempty"`
+	Stages  []string     `json:"stages,omitempty"`
 	Actions []ChatAction `json:"actions,omitempty"`
 }
 
@@ -116,6 +119,7 @@ type Server struct {
 	history      *agent.ConversationHistory
 	intentRouter *router.IntentRouter
 	chatLimiter  *rateLimiter
+	failover     *failover.Monitor
 }
 
 func main() {
@@ -190,7 +194,9 @@ func main() {
 		history:      history,
 		intentRouter: intentRouter,
 		chatLimiter:  newRateLimiter(10, time.Minute),
+		failover:     failover.New(adapter, failover.Config{}),
 	}
+	defer srv.failover.Stop()
 
 	mux := http.NewServeMux()
 
@@ -225,6 +231,15 @@ func main() {
 	// 连接 & 日志
 	mux.HandleFunc("GET /api/connections", srv.handleGetConnections)
 	mux.HandleFunc("GET /api/logs", srv.handleGetLogs)
+
+	// 故障自动切换
+	mux.HandleFunc("GET /api/failover", srv.handleFailoverStatus)
+	mux.HandleFunc("POST /api/failover/start", srv.handleFailoverStart)
+	mux.HandleFunc("POST /api/failover/stop", srv.handleFailoverStop)
+
+	// 配置备份/导入
+	mux.HandleFunc("GET /api/backup/export", srv.handleBackupExport)
+	mux.HandleFunc("POST /api/backup/import", srv.handleBackupImport)
 
 	// 认证中间件
 	apiToken := os.Getenv("NETPILOT_API_TOKEN")
@@ -354,7 +369,7 @@ func (s *Server) handleGetNodes(w http.ResponseWriter, r *http.Request) {
 			Port:     p.Port,
 			Alive:    p.Alive,
 			Latency:  p.Latency,
-			GroupTag:  p.GroupTag,
+			GroupTag: p.GroupTag,
 			Active:   p.Tag == group.Now,
 		})
 	}
@@ -473,8 +488,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		s.history.Add("assistant", stripANSI(result), "local")
 
 		resp := ChatResponse{
-			Reply:  stripANSI(result),
-			Source: "local",
+			Reply:   stripANSI(result),
+			Source:  "local",
 			Actions: suggestActions(routing.ActionID),
 		}
 		okJSON(w, resp)
@@ -497,9 +512,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	s.history.Add("assistant", reply, "agent")
 
 	resp := ChatResponse{
-		Reply:  reply,
-		Source: "agent",
-		Stages: detectStages(reply),
+		Reply:   reply,
+		Source:  "agent",
+		Stages:  detectStages(reply),
 		Actions: suggestActionsFromReply(reply),
 	}
 	okJSON(w, resp)
@@ -734,4 +749,68 @@ func detectStages(reply string) []string {
 		stages = append(stages, "verify")
 	}
 	return stages
+}
+
+// --- 故障自动切换 ---
+
+func (s *Server) handleFailoverStatus(w http.ResponseWriter, r *http.Request) {
+	okJSON(w, s.failover.Status())
+}
+
+func (s *Server) handleFailoverStart(w http.ResponseWriter, r *http.Request) {
+	var cfg failover.Config
+	// body 可选；为空则用默认配置
+	if r.ContentLength > 0 {
+		if err := decodeBody(r, &cfg); err != nil {
+			errJSON(w, http.StatusBadRequest, "invalid config: "+err.Error())
+			return
+		}
+		s.failover.SetConfig(cfg)
+	}
+	s.failover.Start()
+	okJSON(w, s.failover.Status())
+}
+
+func (s *Server) handleFailoverStop(w http.ResponseWriter, r *http.Request) {
+	s.failover.Stop()
+	okJSON(w, s.failover.Status())
+}
+
+// --- 配置备份/导入 ---
+
+func (s *Server) handleBackupExport(w http.ResponseWriter, r *http.Request) {
+	mgr := backup.NewManager(s.overlay, s.subMgr.Store())
+	data, err := mgr.Export()
+	if err != nil {
+		errJSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// 直接以 attachment 形式返回 JSON 文件，便于浏览器/CLI 下载
+	filename := fmt.Sprintf("netpilot-backup-%s.json", time.Now().UTC().Format("20060102-150405"))
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	w.WriteHeader(http.StatusOK)
+	w.Write(data)
+}
+
+func (s *Server) handleBackupImport(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(r.Body, 16<<20)) // 16 MiB 上限
+	if err != nil {
+		errJSON(w, http.StatusBadRequest, "read body: "+err.Error())
+		return
+	}
+	mgr := backup.NewManager(s.overlay, s.subMgr.Store())
+	snap, err := mgr.Import(body)
+	if err != nil {
+		errJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	okJSON(w, map[string]interface{}{
+		"version":            snap.Version,
+		"exported_at":        snap.ExportedAt,
+		"route_rules":        len(snap.Overlay.RouteRules),
+		"outbounds":          len(snap.Overlay.Outbounds),
+		"subscription_count": len(snap.Subscriptions),
+	})
 }
