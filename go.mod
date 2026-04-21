@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/sagernet/sing-box v1.13.8
 	golang.org/x/mobile v0.0.0-20260410095206-2cfb76559b7b
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

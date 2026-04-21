@@ -1,0 +1,96 @@
+# 脱敏 Clash / Clash.Meta 订阅样本 (M13 矩阵回归用)
+# 所有 UUID / password / 域名均为 example.com 假数据
+mixed-port: 7890
+mode: rule
+log-level: info
+
+proxies:
+  - name: "SS-HK-01"
+    type: ss
+    server: ss.example.com
+    port: 8388
+    cipher: aes-256-gcm
+    password: ss-password-fake
+    udp: true
+
+  - name: "VMess-WS-JP"
+    type: vmess
+    server: vmess.example.com
+    port: 443
+    uuid: 00000000-0000-0000-0000-000000000001
+    alterId: 0
+    cipher: auto
+    tls: true
+    servername: vmess.example.com
+    network: ws
+    ws-opts:
+      path: /vmess
+      headers:
+        Host: vmess.example.com
+
+  - name: "VLESS-Reality-US"
+    type: vless
+    server: reality.example.com
+    port: 443
+    uuid: 00000000-0000-0000-0000-000000000002
+    network: tcp
+    flow: xtls-rprx-vision
+    tls: true
+    servername: www.microsoft.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: fake-pubkey-base64
+      short-id: abcd1234
+
+  - name: "Trojan-SG"
+    type: trojan
+    server: trojan.example.com
+    port: 443
+    password: trojan-fake-pw
+    sni: trojan.example.com
+    alpn: [h2, http/1.1]
+
+  - name: "Hy2-TW"
+    type: hysteria2
+    server: hy2.example.com
+    port: 443
+    password: hy2-fake-pw
+    sni: hy2.example.com
+    obfs: salamander
+    obfs-password: fake-obfs
+
+  - name: "TUIC-KR"
+    type: tuic
+    server: tuic.example.com
+    port: 443
+    uuid: 00000000-0000-0000-0000-000000000003
+    password: tuic-fake-pw
+    sni: tuic.example.com
+    congestion-controller: bbr
+    udp-relay-mode: native
+    alpn: [h3]
+
+  - name: "AnyTLS-AU"
+    type: anytls
+    server: anytls.example.com
+    port: 443
+    password: anytls-fake-pw
+    sni: anytls.example.com
+    client-fingerprint: chrome
+
+  - name: "WG-DE"
+    type: wireguard
+    server: wg.example.com
+    port: 51820
+    private-key: wg-priv-fake
+    public-key: wg-peer-fake
+    ip: 10.0.0.2/32
+    mtu: 1420
+
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies: [SS-HK-01, VMess-WS-JP, VLESS-Reality-US]
+
+rules:
+  - MATCH,PROXY

@@ -14,21 +14,29 @@ import (
 
 // NodeConfig 是解析后的通用节点配置
 type NodeConfig struct {
-	Name        string
-	Type        string // "shadowsocks", "trojan", "vmess", "vless", "hysteria2", "wireguard"
-	Server      string
-	Port        int
-	Password    string // ss, trojan, hysteria2
-	Method      string // ss 加密方式
-	UUID        string // vmess, vless
-	AlterId     int    // vmess
-	Network     string // vmess/vless 传输层 (ws, tcp, grpc...)
-	TLS         bool
-	SNI         string
-	Path        string            // ws path
-	Host        string            // ws host
-	Extra       map[string]string // 其他未分类参数
-	IsInfoEntry bool              // 机场塞的信息条目（套餐到期、剩余流量等），非真实节点
+	Name     string
+	Type     string // "shadowsocks" | "trojan" | "vmess" | "vless" | "hysteria" | "hysteria2" | "wireguard" | "tuic" | "anytls" | "shadowtls"
+	Server   string
+	Port     int
+	Password string // ss / trojan / hysteria2 / anytls / shadowtls / tuic-token-fallback
+	Method   string // ss 加密方式
+	UUID     string // vmess / vless / tuic
+	AlterId  int    // vmess
+	Network  string // vmess/vless 传输层 (ws, tcp, grpc...)
+	TLS      bool
+	SNI      string
+	Path     string // ws path
+	Host     string // ws host
+	// Extra 保留协议特有字段,避免主结构膨胀。按协议惯用 key:
+	//   VLESS Reality: public_key / short_id / fingerprint / flow / spider_x
+	//   WireGuard: private_key / peer_public_key / pre_shared_key / local_address / mtu / reserved
+	//   Hysteria2: insecure / obfs / obfs_password / hop_ports
+	//   Hysteria v1: auth / alpn / obfs / obfs_param / up_mbps / down_mbps / protocol / insecure / hop_ports
+	//   TUIC v5: congestion_control / udp_relay_mode / alpn / allow_insecure / disable_sni / token
+	//   AnyTLS: insecure / fingerprint / alpn
+	//   ShadowTLS: version / handshake_server / handshake_port / fingerprint
+	Extra       map[string]string
+	IsInfoEntry bool // 机场塞的信息条目（套餐到期、剩余流量等），非真实节点
 }
 
 // infoKeywords 机场在订阅中塞的信息条目关键词
@@ -123,12 +131,34 @@ func ParseUserInfoHeader(header string) *UserInfo {
 	return info
 }
 
-// ParseSubscription 解析 Base64 编码的订阅内容
+// ParseSubscription 解析订阅内容。 支持三种输入格式(按优先级探测):
+//  1. Clash / Clash.Meta / Mihomo YAML (顶层 `proxies:` key)
+//  2. sing-box native JSON (顶层 `{`, 含 outbounds 数组, M12 支持)
+//  3. Base64 编码的 URI 列表 (默认兜底, 兼容 v2ray-subscribe 生态)
 func ParseSubscription(raw string) ([]NodeConfig, error) {
-	// 尝试 Base64 解码（标准和 URL-safe）
-	decoded := tryBase64Decode(strings.TrimSpace(raw))
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, fmt.Errorf("订阅内容为空")
+	}
+
+	// 1. Clash YAML 优先 —— 这是 Karing / Clash Meta 生态的主流订阅格式
+	if IsClashYAML(trimmed) {
+		return ParseClashYAML([]byte(trimmed))
+	}
+
+	// 2. sing-box native JSON —— 顶层 `{` 且含 outbounds 数组
+	if strings.HasPrefix(trimmed, "{") {
+		if nodes, err := ParseSingBoxJSON([]byte(trimmed)); err == nil {
+			return nodes, nil
+		}
+		// fallthrough: 可能是"意外以 { 开头的 base64",继续尝试 base64 路径
+	}
+
+	// 3. Base64 URI 列表 (原主路径)
+	decoded := tryBase64Decode(trimmed)
 	if decoded == "" {
-		return nil, fmt.Errorf("Base64 解码失败")
+		// 再尝试当作明文 URI 列表(每行一条)
+		decoded = trimmed
 	}
 
 	var nodes []NodeConfig
@@ -191,6 +221,14 @@ func parseLine(line string) (NodeConfig, error) {
 		return parseVLess(line)
 	case strings.HasPrefix(line, "hysteria2://") || strings.HasPrefix(line, "hy2://"):
 		return parseHysteria2(line)
+	case strings.HasPrefix(line, "hysteria://"):
+		return parseHysteria1(line)
+	case strings.HasPrefix(line, "tuic://"):
+		return parseTuic(line)
+	case strings.HasPrefix(line, "anytls://"):
+		return parseAnyTLS(line)
+	case strings.HasPrefix(line, "shadowtls://"):
+		return parseShadowTLS(line)
 	case strings.HasPrefix(line, "wireguard://") || strings.HasPrefix(line, "wg://"):
 		return parseWireGuard(line)
 	default:
@@ -595,6 +633,298 @@ func parseWireGuard(uri string) (NodeConfig, error) {
 
 	if node.Name == "" {
 		node.Name = fmt.Sprintf("%s:%d", node.Server, node.Port)
+	}
+	return node, nil
+}
+
+// parseTuic 解析 tuic:// URI (TUIC v5)
+// 格式: tuic://UUID[:TOKEN]@server:port?sni=&congestion_control=&udp_relay_mode=&alpn=&allow_insecure=&disable_sni=#name
+//
+// 参考:
+//   - NekoBox `~/References/nekobox/app/src/main/java/io/nekohasekai/sagernet/fmt/tuic/TuicFmt.kt:parseTuic`
+//   - sing-box TUIC outbound: https://sing-box.sagernet.org/configuration/outbound/tuic/
+//
+// 关键细节: userinfo 形如 `uuid:token`, 二者均 URL-decoded。也支持 "uuid@host" + 把
+// token 放 query 参数里的变体(部分机场),但主流是冒号分隔。
+func parseTuic(uri string) (NodeConfig, error) {
+	node := NodeConfig{Type: "tuic", TLS: true, Extra: map[string]string{}}
+
+	// 名称
+	if idx := strings.LastIndex(uri, "#"); idx != -1 {
+		node.Name = decodeURIComponent(uri[idx+1:])
+		uri = uri[:idx]
+	}
+
+	body := strings.TrimPrefix(uri, "tuic://")
+
+	queryStr := ""
+	if idx := strings.Index(body, "?"); idx != -1 {
+		queryStr = body[idx+1:]
+		body = body[:idx]
+	}
+	body = strings.TrimRight(body, "/")
+
+	atIdx := strings.LastIndex(body, "@")
+	if atIdx == -1 {
+		return node, fmt.Errorf("tuic URI 无 @")
+	}
+	userinfo := decodeURIComponent(body[:atIdx])
+	server, port, err := parseHostPort(body[atIdx+1:])
+	if err != nil {
+		return node, err
+	}
+	node.Server = server
+	node.Port = port
+
+	if colon := strings.Index(userinfo, ":"); colon != -1 {
+		node.UUID = userinfo[:colon]
+		node.Password = userinfo[colon+1:]
+	} else {
+		node.UUID = userinfo
+	}
+
+	if queryStr != "" {
+		params := parseQuery(queryStr)
+		if sni, ok := params["sni"]; ok && sni != "" {
+			node.SNI = decodeURIComponent(sni)
+		}
+		if cc, ok := params["congestion_control"]; ok && cc != "" {
+			node.Extra["congestion_control"] = cc
+		}
+		if urm, ok := params["udp_relay_mode"]; ok && urm != "" {
+			node.Extra["udp_relay_mode"] = urm
+		}
+		if alpn, ok := params["alpn"]; ok && alpn != "" {
+			node.Extra["alpn"] = decodeURIComponent(alpn)
+		}
+		if ai, ok := params["allow_insecure"]; ok && (ai == "1" || ai == "true") {
+			node.Extra["allow_insecure"] = "true"
+		}
+		if ds, ok := params["disable_sni"]; ok && (ds == "1" || ds == "true") {
+			node.Extra["disable_sni"] = "true"
+		}
+		// 非标变体: token 放 query
+		if tok, ok := params["password"]; ok && node.Password == "" && tok != "" {
+			node.Password = decodeURIComponent(tok)
+		}
+		if tok, ok := params["token"]; ok && node.Password == "" && tok != "" {
+			node.Password = decodeURIComponent(tok)
+		}
+	}
+
+	if node.UUID == "" {
+		return node, fmt.Errorf("tuic URI 缺 uuid")
+	}
+	if node.Name == "" {
+		node.Name = fmt.Sprintf("%s:%d", node.Server, node.Port)
+	}
+	return node, nil
+}
+
+// parseHysteria1 解析 hysteria:// URI (Hysteria v1, 非 hy2)
+// 格式: hysteria://host:port?auth=&peer=&insecure=&upmbps=&downmbps=&alpn=&obfs=&obfsParam=&protocol=&mport=#name
+//
+// 关键区别 vs Hysteria2:
+//   - auth 在 query 而非 userinfo
+//   - up_mbps / down_mbps 必填
+//   - obfs 是 "xplus" 等,obfsParam 才是密码
+//
+// 参考: NekoBox `io/nekohasekai/sagernet/fmt/hysteria/HysteriaFmt.kt:parseHysteria1`
+func parseHysteria1(uri string) (NodeConfig, error) {
+	node := NodeConfig{Type: "hysteria", TLS: true, Extra: map[string]string{}}
+
+	if idx := strings.LastIndex(uri, "#"); idx != -1 {
+		node.Name = decodeURIComponent(uri[idx+1:])
+		uri = uri[:idx]
+	}
+
+	body := strings.TrimPrefix(uri, "hysteria://")
+	queryStr := ""
+	if idx := strings.Index(body, "?"); idx != -1 {
+		queryStr = body[idx+1:]
+		body = body[:idx]
+	}
+	body = strings.TrimRight(body, "/")
+
+	// Hysteria v1 URI 不一定有 @: 通常是 host:port 开头
+	hostPart := body
+	if atIdx := strings.LastIndex(body, "@"); atIdx != -1 {
+		// 某些变体把 auth 塞 userinfo
+		node.Extra["auth"] = decodeURIComponent(body[:atIdx])
+		hostPart = body[atIdx+1:]
+	}
+	server, port, err := parseHostPort(hostPart)
+	if err != nil {
+		return node, err
+	}
+	node.Server = server
+	node.Port = port
+
+	if queryStr != "" {
+		params := parseQuery(queryStr)
+		if mport, ok := params["mport"]; ok && mport != "" {
+			node.Extra["hop_ports"] = mport
+		}
+		if peer, ok := params["peer"]; ok && peer != "" {
+			node.SNI = decodeURIComponent(peer)
+		}
+		if auth, ok := params["auth"]; ok && auth != "" {
+			node.Extra["auth"] = decodeURIComponent(auth)
+		}
+		if alpn, ok := params["alpn"]; ok && alpn != "" {
+			node.Extra["alpn"] = decodeURIComponent(alpn)
+		}
+		if obfs, ok := params["obfs"]; ok && obfs != "" {
+			node.Extra["obfs"] = obfs
+		}
+		if op, ok := params["obfsParam"]; ok && op != "" {
+			node.Extra["obfs_param"] = decodeURIComponent(op)
+		}
+		if up, ok := params["upmbps"]; ok && up != "" {
+			node.Extra["up_mbps"] = up
+		}
+		if down, ok := params["downmbps"]; ok && down != "" {
+			node.Extra["down_mbps"] = down
+		}
+		if proto, ok := params["protocol"]; ok && proto != "" {
+			node.Extra["protocol"] = proto
+		}
+		if ins, ok := params["insecure"]; ok && (ins == "1" || ins == "true") {
+			node.Extra["insecure"] = "true"
+		}
+	}
+
+	if node.Name == "" {
+		node.Name = fmt.Sprintf("%s:%d", node.Server, node.Port)
+	}
+	return node, nil
+}
+
+// parseAnyTLS 解析 anytls:// URI
+// 格式: anytls://password@server:port?sni=&insecure=&fp=#name
+// 规范:  https://github.com/anytls/anytls-go/blob/main/docs/uri_scheme.md
+//
+// 参考: NekoBox `moe/matsuri/nb4a/proxy/anytls/AnyTLSFmt.kt:parseAnytls`
+func parseAnyTLS(uri string) (NodeConfig, error) {
+	node := NodeConfig{Type: "anytls", TLS: true, Extra: map[string]string{}}
+
+	if idx := strings.LastIndex(uri, "#"); idx != -1 {
+		node.Name = decodeURIComponent(uri[idx+1:])
+		uri = uri[:idx]
+	}
+
+	body := strings.TrimPrefix(uri, "anytls://")
+	queryStr := ""
+	if idx := strings.Index(body, "?"); idx != -1 {
+		queryStr = body[idx+1:]
+		body = body[:idx]
+	}
+	body = strings.TrimRight(body, "/")
+
+	atIdx := strings.LastIndex(body, "@")
+	if atIdx == -1 {
+		return node, fmt.Errorf("anytls URI 无 @")
+	}
+	node.Password = decodeURIComponent(body[:atIdx])
+	server, port, err := parseHostPort(body[atIdx+1:])
+	if err != nil {
+		return node, err
+	}
+	node.Server = server
+	node.Port = port
+
+	if queryStr != "" {
+		params := parseQuery(queryStr)
+		if sni, ok := params["sni"]; ok && sni != "" {
+			node.SNI = decodeURIComponent(sni)
+		}
+		if ins, ok := params["insecure"]; ok && (ins == "1" || ins == "true") {
+			node.Extra["insecure"] = "true"
+		}
+		if fp, ok := params["fp"]; ok && fp != "" {
+			node.Extra["fingerprint"] = fp
+		}
+		if alpn, ok := params["alpn"]; ok && alpn != "" {
+			node.Extra["alpn"] = decodeURIComponent(alpn)
+		}
+	}
+
+	if node.Password == "" {
+		return node, fmt.Errorf("anytls URI 缺 password")
+	}
+	if node.Name == "" {
+		node.Name = fmt.Sprintf("%s:%d", node.Server, node.Port)
+	}
+	return node, nil
+}
+
+// parseShadowTLS 解析 shadowtls:// URI
+// 格式: shadowtls://password@server:port?version=3&host=handshake.sni&fp=chrome#name
+//
+// 注意: NekoBox 本身不提供 shadowtls URI 解析(只有设置 UI + 内部 Bean 往 sing-box
+// 写配置)。 sing-box `shadowtls` outbound 官方文档:
+//
+//	https://sing-box.sagernet.org/configuration/outbound/shadowtls/
+//
+// 真实世界部署 90% 走 Clash YAML(M11 覆盖)或 sing-box JSON(M12 覆盖), 独立 URI
+// 粘贴场景少见。这里按"shadowtls 作为一条独立 URI"的合理约定实现,如果生态里冒出
+// 别的非标格式,按需在 Extra 增字段即可。
+func parseShadowTLS(uri string) (NodeConfig, error) {
+	node := NodeConfig{Type: "shadowtls", TLS: true, Extra: map[string]string{}}
+
+	if idx := strings.LastIndex(uri, "#"); idx != -1 {
+		node.Name = decodeURIComponent(uri[idx+1:])
+		uri = uri[:idx]
+	}
+
+	body := strings.TrimPrefix(uri, "shadowtls://")
+	queryStr := ""
+	if idx := strings.Index(body, "?"); idx != -1 {
+		queryStr = body[idx+1:]
+		body = body[:idx]
+	}
+	body = strings.TrimRight(body, "/")
+
+	atIdx := strings.LastIndex(body, "@")
+	if atIdx == -1 {
+		return node, fmt.Errorf("shadowtls URI 无 @")
+	}
+	node.Password = decodeURIComponent(body[:atIdx])
+	server, port, err := parseHostPort(body[atIdx+1:])
+	if err != nil {
+		return node, err
+	}
+	node.Server = server
+	node.Port = port
+
+	if queryStr != "" {
+		params := parseQuery(queryStr)
+		if v, ok := params["version"]; ok && v != "" {
+			node.Extra["version"] = v
+		}
+		if host, ok := params["host"]; ok && host != "" {
+			// "host" 或 "sni" 均指 handshake 服务器 SNI
+			node.SNI = decodeURIComponent(host)
+		} else if sni, ok := params["sni"]; ok && sni != "" {
+			node.SNI = decodeURIComponent(sni)
+		}
+		if ins, ok := params["insecure"]; ok && (ins == "1" || ins == "true") {
+			node.Extra["insecure"] = "true"
+		}
+		if fp, ok := params["fp"]; ok && fp != "" {
+			node.Extra["fingerprint"] = fp
+		}
+		if alpn, ok := params["alpn"]; ok && alpn != "" {
+			node.Extra["alpn"] = decodeURIComponent(alpn)
+		}
+	}
+
+	if node.Name == "" {
+		node.Name = fmt.Sprintf("%s:%d", node.Server, node.Port)
+	}
+	// version 缺省为 3 (ShadowTLS v3 是当前主流)
+	if _, ok := node.Extra["version"]; !ok {
+		node.Extra["version"] = "3"
 	}
 	return node, nil
 }

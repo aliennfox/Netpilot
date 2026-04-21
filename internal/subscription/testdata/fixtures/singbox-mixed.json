@@ -1,0 +1,41 @@
+{
+  "log": {"level": "info"},
+  "outbounds": [
+    {"type": "direct", "tag": "direct"},
+    {"type": "block", "tag": "block"},
+    {"type": "selector", "tag": "proxy", "outbounds": ["HK-VLESS", "JP-TUIC", "SG-Trojan"]},
+    {
+      "type": "vless",
+      "tag": "HK-VLESS",
+      "server": "reality.example.com",
+      "server_port": 443,
+      "uuid": "00000000-0000-0000-0000-0000000000aa",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "www.microsoft.com",
+        "utls": {"enabled": true, "fingerprint": "chrome"},
+        "reality": {"enabled": true, "public_key": "fake-pubkey", "short_id": "abcd"}
+      }
+    },
+    {
+      "type": "tuic",
+      "tag": "JP-TUIC",
+      "server": "tuic.example.com",
+      "server_port": 443,
+      "uuid": "00000000-0000-0000-0000-0000000000bb",
+      "password": "tuic-fake",
+      "congestion_control": "bbr",
+      "udp_relay_mode": "native",
+      "tls": {"enabled": true, "server_name": "tuic.example.com"}
+    },
+    {
+      "type": "trojan",
+      "tag": "SG-Trojan",
+      "server": "trojan.example.com",
+      "server_port": 443,
+      "password": "trojan-fake",
+      "tls": {"enabled": true, "server_name": "trojan.example.com"}
+    }
+  ]
+}

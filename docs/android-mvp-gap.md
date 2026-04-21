@@ -380,7 +380,12 @@ Pilotty 的目标用户画像**重合度最高的是 Karing**(消费级 UX / 多
 | **M11** | **Clash / Clash.Meta YAML 订阅格式** | **8-10h** | **是(消费级入场券)** |
 | **M12** | **sing-box native JSON 订阅** | **4-6h** | 是(品牌一致性) |
 | **M13** | **订阅 × 协议真机回归矩阵** | **4-6h** | 否(自我保护) |
-| **M 合计** | | **~45-57h(原 20-26h + 新增 ~25-31h)** | |
+| **M14** | **Per-App VPN UI** | **6-8h** | **是(竞品普遍都有)** |
+| **M15** | **Kill Switch(方式 A 引导版)** | **3-4h** | **是(隐私用户门槛)** |
+| **M16** | **Deep Link + QR + 剪贴板导入** | **7-9h** | **是(分享路径断流)** |
+| **M17(feat)** | **订阅流量配额 UI**(后端已有) | **3-4h** | 是(to-avoid-surprise) |
+| **M18(feat)** | **路由规则 CRUD UI**(仅 Agent 不够) | **6-8h** | 是(普通用户找不到入口) |
+| **M 合计(v2)** | | **~70-96h(原 45-57h + 非协议基线 ~25-33h)** | |
 | S1 | Dark Theme | 2-3h | |
 | S2 | 流量图 / 连接列表 | 6-8h | |
 | S3 | Quick Settings Tile | 3h | |
@@ -394,13 +399,25 @@ Pilotty 的目标用户画像**重合度最高的是 Karing**(消费级 UX / 多
 | S11 | In-App 日志 Viewer | 3h | |
 | **S12** | **SOCKS 4/5 + HTTP(S) 基础协议** | **3-4h** | |
 | **S13** | **单条节点 URI 粘贴导入** | **1h** | |
-| **S 合计** | | **47-61h** | |
+| **S14** | **订阅到期提醒** | **2-3h** | |
+| **S15** | **Nodes 页面 Auto-failover 开关** | **2h** | |
+| **S16** | **连接时自动选最快节点** | **2-3h** | |
+| **S 合计** | | **53-69h** | |
+| D1 | 自然语言指令 Dashboard 顶部入口 | 3-5h | **AI 护城河 UI** |
+| D2 | Safety card(Snapshot 一键回滚) | 3-5h | **AI 护城河 UI** |
+| D3 | Chat tool-call inline timeline | 4-6h | **AI 护城河 UI** |
+| **D 合计** | | **10-16h** | |
 
-**建议打包**(2026-04-22 新版):
-- **v1.0 基线追平** = M1-M13 (~6 天专注工作,比原计划 +3 天)
-  - 其中 **M10-M13 协议 + 订阅格式基线(~3 天)是 Karing/NekoBox 已做的,我们补的是欠的账,不是加分项**
-- v1.1 "抛光" = S1 + S3 + S8 + S13 (低成本高回报 ≈ 1 天)
-- v1.2 "可见性" = S2 + S7 + S11 (≈ 2 天)
+**建议打包**(2026-04-22 二次扩充版):
+- **v1.0 可发布 = M1-M18 + D1-D3 (~7-10 天单人全职)**
+  - Day 1-3: M10-M13 协议 + 订阅格式(追平消费级基线)
+  - Day 4-5: M14-M18 非协议功能基线(追平竞品 table-stakes)
+  - Day 6-7: M1-M9 UI / 合规(可发布条件)
+  - Day 8-9: D1-D3 AI 护城河 UI 强化(差异化点)
+  - Day 10: 真机端到端 + buffer
+  - **关键认识: 原先以为 20-26h(3 天)就能发布,真实基线是其 3-4 倍**
+- v1.1 "抛光" = S1 + S3 + S8 + S13 + S14 + S15 (低成本高回报 ≈ 1.5 天)
+- v1.2 "可见性" = S2 + S7 + S11 + S16 (≈ 2 天)
 - v1.3 "分流能力" = S4 + S5 + S9 + S12 (≈ 3 天)
 - v1.4 "出海准备" = S6 + S10 + 实际翻译 (按需)
 
@@ -491,3 +508,167 @@ Karing 是**本项目真正的对手**(同 sing-box 核、同消费级定位、�
 **我们的护城河**:Agent 层(三项)
 
 **Must-have 缺的不是特性,是门槛** —— 不进门,Agent 层用户根本看不到。
+
+---
+
+## 10. Feature Baseline Gap (non-protocol)
+
+协议 / 订阅格式之外,还有一组"用户打开 App 第 5 分钟就会问'怎么没有'"的非协议 table-stakes。 NekoBox / Hiddify / Karing / Clash Meta / v2rayNG 全部都有; Pilotty 当前**一个没做**。
+
+### 10.1 Must-have for v1 release (~3-5 天)
+
+#### M14. Per-App VPN UI
+- **现状**: `PilottyVpnService.kt:91-103` 已读取 libbox `TunOptions.includePackage/excludePackage`,但 overlay 里这两个字段无 UI 编辑入口;实际等同"全局接管所有 App 流量"。代码只硬写了 `excludePackage = [self packageName]` 防 VPN 回环
+- **竞品做法**:
+  - NekoBox: `~/References/nekobox/app/src/main/java/io/nekohasekai/sagernet/ui/AppManagerActivity.kt` + `AppListActivity.kt` —— 完整"应用列表 + 多选 + 搜索" UI,写入 `DataStore.bypassApps`,下发到 VpnService.Builder.addDisallowedApplication
+  - Hiddify: `per_app_proxy_settings.dart` 同款选人模式
+  - Karing / Clash Meta:App 列表 + 模式切换(白名单/黑名单/关闭)
+- **需要**:
+  - (a) Settings 页加 "按 App 代理" 开关 + 模式选择 (全局 / 白名单 / 黑名单)
+  - (b) 应用列表页:`PackageManager.getInstalledApplications(MATCH_UNINSTALLED_PACKAGES)` + 图标 + label + 多选,过滤掉系统 package
+  - (c) 写入 overlay `_agent:perapp.includes / excludes`,下发到 libbox TunOptions 的 `include_package / exclude_package`
+  - (d) `PilottyVpnService.onStartCommand` 读 overlay 后用 Android 原生 `VpnService.Builder.addAllowedApplication / addDisallowedApplication` 对 TUN 接口本身做裁剪(libbox 侧 include/exclude 是上层匹配, VpnService.Builder 是系统层路由, 两层互补)
+- **工时**: 6-8h(含列表 lazy-load + 图标缓存)
+- **用户影响**: 不做 → 想"微信 QQ 直连, 浏览器和 GCM 走代理"的国内用户只能"全走"或"全不走";小众场景但高频诉求
+
+#### M15. Kill Switch (断网保护)
+- **现状**: 无。VPN 断开 / 崩溃时系统自动回到物理网络, 所有流量明文出去
+- **竞品做法**:
+  - Android 系统自身提供 `Settings > 网络 > VPN > 始终开启 VPN + 阻止未使用 VPN 的连接` (ALWAYS_ON_VPN_LOCKDOWN),**但**该设置是用户手动在系统设置里开, App 只能引导不能直接开
+  - Karing / Hiddify: 应用内"Kill Switch"开关, 记录 preference, 在 VpnService.onRevoke() / onDestroy() 异常路径里继续持有一个阻断所有流量的最小 VpnService(空 TUN + 零路由)直到用户显式关
+  - NekoBox: 无独立 Kill Switch UI, 依赖 Android 系统的 lockdown 模式 + "Bypass LAN" 等配置项(参考 grep 结果:`BYPASS_LAN` 见于 SettingsPreferenceFragment.kt / DataStore.kt / Constants.kt,但没有 "Kill Switch" 命名项)
+- **需要**:
+  - (a) Settings 加 "Kill Switch" 开关 + 说明 "VPN 断开时阻止所有网络(保护隐私)"
+  - (b) 实现方式二选一:
+    - 方式 A 引导型:检测系统 always-on VPN lockdown 状态(`VpnService.prepare(ctx) == null` + system setting),未开启时弹引导跳系统 VPN 设置页
+    - 方式 B 实现型:维护一个 `BlockingTunService`,当主 VpnService onDestroy 时自动 startService 挂一个 0.0.0.0/0 → reject 的 TUN
+  - (c) v1 做方式 A(开发量最小、风险最低, 告诉用户"请在系统里也开 always-on"); 方式 B 延到 v1.x
+- **工时**: 3-4h(方式 A) · 10-14h(方式 B)
+- **用户影响**: 不做 → 隐私敏感用户直接放弃本 App;但真正用 lockdown 的是少数,方式 A 的引导对大多数用户足够
+
+#### M16. Deep Link / QR Code 订阅导入
+- **现状**: `AndroidManifest.xml` 无 `<intent-filter android:scheme="ss|vmess|vless|trojan|tuic|hysteria|hysteria2|sub">`。用户在 Telegram 收到 `vmess://...` 链接点击后,系统不会把意图路由给 Pilotty
+- **竞品做法**:
+  - NekoBox: `~/References/nekobox/app/src/main/AndroidManifest.xml` 有 ≥3 个 `<action android:name="android.intent.action.VIEW" />` + data scheme 过滤(grep 证据:行 96/108/119)
+  - Karing / v2rayNG: 同样的 scheme 过滤 + QR 扫码 Activity
+- **需要**:
+  - (a) AndroidManifest.xml 加 intent-filter 捕获 `ss|vmess|vless|trojan|tuic|hysteria|hysteria2|wireguard|wg|anytls|shadowtls|sub|clash` 等 scheme, launcher Activity 的 `onNewIntent` 里取 `intent.data` 丢给 parser.parseLine / ParseSubscription
+  - (b) 扫码:CameraX + ZXing(`com.google.zxing:core`),结果文本走同一条 parser 管道
+  - (c) 剪贴板检测:添加订阅对话框 `onCreate` 时读 clipboard 若匹配 scheme 弹"检测到 XX, 是否粘贴?"按钮
+- **来源**: NekoBox AndroidManifest + ScannerActivity
+- **工时**: 3-4h(scheme 过滤 + clipboard) · +4-5h(扫码 UI)= 共 ~1 天
+- **用户影响**: 不做 → 用户在 TG / 微信收到机场分享的节点链接,点完打开浏览器"无法识别协议",流失
+
+#### M17(feat). 订阅流量配额 UI
+- **现状**: 后端 `internal/subscription/parser.go:ParseUserInfoHeader` + `store.go:UserInfo` 已解析 `upload / download / total / expire`;Kotlin `StatusDto` 里没透传,Dashboard 看不到"还剩 X GB · 到期 Y 天"
+- **竞品做法**:
+  - Hiddify: 订阅卡片主视觉 = 环形进度条 + 到期时间,文档 homepage 突出
+  - Karing: 订阅列表每条下方带 used/total/expire 三行
+  - v2rayN / v2rayNG: 同款
+- **需要**:
+  - (a) `mobile/netpilot.go:Subscriptions()` 返回列表里补 `usedBytes / totalBytes / expireAt` 字段
+  - (b) Kotlin `SubscriptionDto` 同步;Settings 订阅列表卡片加进度条 + 到期日
+  - (c) 可选 Dashboard 顶部 summary 带"当前订阅: 剩余 X GB / Y 天"
+- **工时**: 3-4h(纯 UI + 已有后端数据 wire up)
+- **用户影响**: 不做 → 用户不知道自己还剩多少流量 / 何时到期,被动遇到"突然连不上了"的 surprise
+
+#### M18(feat). 路由规则 CRUD UI
+- **现状**: Rules tab 能列出规则 + 应用 4 个内置模板 (`直连/代理/国内直连+国外代理/广告屏蔽`),不能手工加减单条规则。 Overlay 后端 `AddRoutingRule / RemoveRoutingRule` 已有,Agent 能 tool-call 修改, 但用户无直接入口
+- **竞品做法**:
+  - NekoBox: `RouteSettingsActivity.kt` 完整规则编辑器
+  - Clash Meta: yaml 文本编辑器(门槛高但存在)
+  - Karing: 规则列表 + 增删改图形化
+- **需要**:
+  - (a) Rules tab 底部"+ 自定义规则"按钮 → dialog 选 (matcher: domain_suffix / domain_keyword / ip_cidr / process_name) + (outbound: direct / proxy / reject / 某 group)
+  - (b) 已有规则项右滑删除 / 点击编辑
+  - (c) 校验: 重复规则、无效 CIDR 等在 dialog 层 reject
+- **来源**: NekoBox RouteSettingsActivity, Karing 规则编辑截图
+- **工时**: 6-8h(含表单校验 + outbound 下拉填充)
+- **用户影响**: 不做 → 想加"公司内网 走直连"的用户, 只能告诉 Agent "给我加条公司内网直连规则" —— Agent 当然能做, 但**要求用户先懂 Agent 是干啥的**;普通用户直觉找"加规则"按钮找不到就放弃
+
+### 10.2 Should-have (第一印象,~1.5 天)
+
+#### S14. 订阅到期提醒
+- 检测 `expireAt - now < 72h` 时发本地 notification
+- 依赖 WorkManager + M17(feat) 的 expire 数据
+- 工时: 2-3h
+
+#### S15. Nodes 页面的 Auto-failover 开关
+- 后端 `internal/failover/monitor.go` 已实现连续失败 Cooldown 自动切换
+- Nodes tab 顶部缺一个开关 toggle + "当前策略" 指示
+- 工时: 2h
+
+#### S16. 连接时自动选最快节点
+- 非开关, 行为默认值: 用户点"启动 VPN" 且 selector 为"自动"时, 先跑一次 `test_latency_all` 再选最低 latency
+- 工时: 2-3h
+- 风险: 机场节点数量大时首次启动会卡 5-10s,需要 loading 遮罩
+
+### 10.3 Won't-do for v1
+
+#### W16. WebDAV 云同步
+- 理由: v2rayN / Karing 有,nice 但非阻塞;S7 本地备份已覆盖"换设备"场景
+- 触发重启: 多设备用户明确要
+
+#### W17. Web dashboard (Yacd 式外部面板)
+- 理由: NekoBox / Clash Meta 有 Yacd 选项;我们的 Clash API server 已在 `127.0.0.1:9090`,技术上用户自己跑 Yacd 可以连,但 v1 手机端 Compose 页面足够(S2 流量图 + S11 日志),不专门做
+- 触发重启: 手机端 UI 信息密度撑不住
+
+#### W18. Material You 动态取色
+- 理由: Android 12+ 独占,S1 Dark/Light 主题已够; 动态取色是 polish 不是 blocker
+- 触发重启: v1.1+ 抛光
+
+#### W19. Apple TV / 大屏适配
+- 理由: Karing 的独特卖点,我们是 Android-only,没这个战场
+- 触发重启: 永不(iOS 都 DEFERRED 了, TV 更别谈)
+
+#### W20. 插件系统
+- 理由: NekoBox 有 5 个插件(SSR-Rust / NaïveProxy / Hysteria / Xray-Core / Mieru),是"sing-box 不原生支持协议"的应对。Pilotty 走 sing-box 一个内核到底(见原则 #5 内核可替换 + W5 不自营插件)
+- 触发重启: sing-box 原生缺的协议有大量用户
+
+---
+
+## 11. Differentiators to Prominently Showcase
+
+Pilotty 有 3 项**无任一竞品提供**的能力。 这 3 项**必须在 UI 里显眼**(不是藏在 Settings 里),否则 Pilotty 就变成"NekoBox 的 60% 功能 + Karing 的 50% UX", 死在基线战里。
+
+### D1. 自然语言指令入口(Raycast 式体验)
+- **定位**: 首页 Dashboard 顶部的 Chat 输入条不是 tab,是**主交互**。用户输入"切到最快的节点" / "加一条公司内网直连" / "广告屏蔽模板加上" 直接出结果
+- **现状**: Chat 是独立 tab, 和其他 tab 同级, 视觉权重等同
+- **需要**:
+  - (a) Dashboard 顶部加一条 "问 Pilotty 帮你..." 搜索框 (单行, 点开才展开完整 Chat 视图)
+  - (b) 允许快捷指令: 输入前缀"/" 出命令选单(/切换 / /延迟 / /加规则 ...)
+  - (c) Chat tab 保留做完整历史视图, 但主入口是 Dashboard 的输入条
+- **工时**: 3-5h
+- **为什么是关键**: Raycast 的护城河就是"唤起即指令"。 我们的 Agent 藏在 tab 里,用户永远不会意识到它存在
+
+### D2. Safety Card — 写操作随时可回滚
+- **定位**: Dashboard 第一屏必有一张 "安全" 卡片,显示最近 5 个写操作(每个带 "撤销"按钮)
+- **现状**: 后端 `internal/tool/snapshot.go` 已有 Snapshot/Rollback 能力, Agent 调工具时自动打快照;但用户看不到, 点不到"撤销"
+- **需要**:
+  - (a) `mobile/netpilot.go` 暴露 `ListRecentSnapshots()` / `RollbackSnapshot(id)`
+  - (b) Dashboard "最近操作" 卡:每条显示 timestamp + 描述 ("加了规则 XX" / "切到 香港-1") + 右侧 "撤销"按钮
+  - (c) 撤销后播一个 haptic + toast "已回滚到 HH:MM:SS 之前"
+- **工时**: 3-5h
+- **为什么是关键**: 竞品都是"操作 → 失败 → 自己查哪里错了"; 我们是"操作 → 失败 → 一键回滚"。 这是 Agent-driven 产品对"黑箱焦虑"的原生解法,必须让用户看到
+
+### D3. Agent Action Trace — Chat 内联工具调用时间线
+- **定位**: Chat 消息不是"用户说 → Agent 说",是"用户说 → Agent 思考 → 调用 tool A(带 input/output) → 调用 tool B → 最终回答"。 每一步都可点开看细节
+- **现状**: Agent 后端(`internal/agent/`)已记录 tool call trace;Chat UI 只显示最终文本回答, 过程 spinning 几秒,用户以为是"慢"
+- **需要**:
+  - (a) Chat message DTO 增加 `toolCalls: List<ToolCallEvent>` 字段 (name / input / output / duration_ms)
+  - (b) Compose 渲染:Agent 回答上方 inline timeline, 每个 tool call 一个 chip "🔧 list_nodes (320ms)" 点开 bottom-sheet 看 input/output JSON
+  - (c) 错误 tool call 红色高亮 + 展示 stack
+- **工时**: 4-6h(含后端 trace 透传 + Compose 渲染)
+- **为什么是关键**: Claude Code / Cursor 的 tool-use visibility 是用户理解 LLM 在做什么的唯一手段。 我们不做 = 用户以为 Chat 是黑箱聊天机器人 = 和 ChatGPT 没区别
+
+### 11.1 总战略: UI 权重分配
+
+| 区域 | 当前权重 | 目标权重 |
+|---|---|---|
+| Dashboard 状态卡(节点/流量) | 60% | 30% |
+| Dashboard 自然语言输入 (D1) | 0% | 30% |
+| Dashboard Safety card (D2) | 0% | 20% |
+| Dashboard 流量图 (S2) | 40% | 20% |
+| Chat tab 内联 tool timeline (D3) | 0% | 必加 |
+
+**Phase 3B-4 的 UI 抛光必须按此目标权重重新设计 Dashboard, 而不是纯粹打磨现有组件**。 抛光方向错,补再多细节也没用。

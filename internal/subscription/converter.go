@@ -30,6 +30,14 @@ func ConvertToSingboxOutbound(node NodeConfig) (map[string]interface{}, error) {
 		return convertVLess(node, tag)
 	case "hysteria2":
 		return convertHysteria2(node, tag)
+	case "hysteria":
+		return convertHysteria1(node, tag)
+	case "tuic":
+		return convertTuic(node, tag)
+	case "anytls":
+		return convertAnyTLS(node, tag)
+	case "shadowtls":
+		return convertShadowTLS(node, tag)
 	case "wireguard":
 		return convertWireGuard(node, tag)
 	default:
@@ -228,6 +236,188 @@ func convertWireGuard(node NodeConfig, tag string) (map[string]interface{}, erro
 	return ob, nil
 }
 
+// convertTuic 将 TUIC v5 节点转为 sing-box outbound
+// Schema 依据: sing-box v1.13.8 `option/tuic.go:TUICOutboundOptions`
+func convertTuic(node NodeConfig, tag string) (map[string]interface{}, error) {
+	if node.Server == "" || node.Port == 0 || node.UUID == "" {
+		return nil, fmt.Errorf("TUIC 节点缺少必要字段: server=%s port=%d uuid=%s", node.Server, node.Port, node.UUID)
+	}
+	ob := map[string]interface{}{
+		"type":        "tuic",
+		"tag":         tag,
+		"server":      node.Server,
+		"server_port": node.Port,
+		"uuid":        node.UUID,
+	}
+	if node.Password != "" {
+		ob["password"] = node.Password
+	}
+	if cc := node.Extra["congestion_control"]; cc != "" {
+		ob["congestion_control"] = cc
+	}
+	if urm := node.Extra["udp_relay_mode"]; urm != "" {
+		ob["udp_relay_mode"] = urm
+	}
+	tls := map[string]interface{}{"enabled": true}
+	if node.SNI != "" {
+		tls["server_name"] = node.SNI
+	}
+	if node.Extra["allow_insecure"] == "true" {
+		tls["insecure"] = true
+	}
+	if node.Extra["disable_sni"] == "true" {
+		tls["disable_sni"] = true
+	}
+	if alpn := node.Extra["alpn"]; alpn != "" {
+		tls["alpn"] = splitCSV(alpn)
+	}
+	ob["tls"] = tls
+	return ob, nil
+}
+
+// convertHysteria1 将 Hysteria v1 节点转为 sing-box outbound
+// Schema 依据: sing-box v1.13.8 `option/hysteria.go:HysteriaOutboundOptions`
+// 注意: Hysteria v1 的 auth 字段有两种:bytes 版 `auth` 和 字符串版 `auth_str`,
+// 字符串 URL 传递的一律 auth_str 更合适(base64 版极少出现在 URI)。
+func convertHysteria1(node NodeConfig, tag string) (map[string]interface{}, error) {
+	if node.Server == "" || node.Port == 0 {
+		return nil, fmt.Errorf("Hysteria 节点缺少必要字段: server=%s port=%d", node.Server, node.Port)
+	}
+	ob := map[string]interface{}{
+		"type":        "hysteria",
+		"tag":         tag,
+		"server":      node.Server,
+		"server_port": node.Port,
+	}
+	if auth := node.Extra["auth"]; auth != "" {
+		ob["auth_str"] = auth
+	}
+	if up := node.Extra["up_mbps"]; up != "" {
+		if n, err := strconv.Atoi(up); err == nil && n > 0 {
+			ob["up_mbps"] = n
+		}
+	}
+	if down := node.Extra["down_mbps"]; down != "" {
+		if n, err := strconv.Atoi(down); err == nil && n > 0 {
+			ob["down_mbps"] = n
+		}
+	}
+	// Hysteria v1 的 obfs 是对称混淆密码(单字符串),非 hy2 的 {type,password} 结构
+	if obfs := node.Extra["obfs_param"]; obfs != "" {
+		ob["obfs"] = obfs
+	} else if obfs := node.Extra["obfs"]; obfs != "" && obfs != "xplus" {
+		// fallback: 部分机场把实际密码塞在 obfs 字段
+		ob["obfs"] = obfs
+	}
+	if hop := node.Extra["hop_ports"]; hop != "" {
+		// sing-box server_ports 格式: ["12000:14000","15001"]
+		ob["server_ports"] = splitCSV(hop)
+	}
+	tls := map[string]interface{}{"enabled": true}
+	if node.SNI != "" {
+		tls["server_name"] = node.SNI
+	}
+	if node.Extra["insecure"] == "true" {
+		tls["insecure"] = true
+	}
+	if alpn := node.Extra["alpn"]; alpn != "" {
+		tls["alpn"] = splitCSV(alpn)
+	}
+	ob["tls"] = tls
+	return ob, nil
+}
+
+// convertAnyTLS 将 AnyTLS 节点转为 sing-box outbound
+// Schema: sing-box v1.13.8 `option/anytls.go:AnyTLSOutboundOptions`
+func convertAnyTLS(node NodeConfig, tag string) (map[string]interface{}, error) {
+	if node.Server == "" || node.Port == 0 || node.Password == "" {
+		return nil, fmt.Errorf("AnyTLS 节点缺少必要字段: server=%s port=%d", node.Server, node.Port)
+	}
+	ob := map[string]interface{}{
+		"type":        "anytls",
+		"tag":         tag,
+		"server":      node.Server,
+		"server_port": node.Port,
+		"password":    node.Password,
+	}
+	tls := map[string]interface{}{"enabled": true}
+	if node.SNI != "" {
+		tls["server_name"] = node.SNI
+	}
+	if node.Extra["insecure"] == "true" {
+		tls["insecure"] = true
+	}
+	if fp := node.Extra["fingerprint"]; fp != "" {
+		tls["utls"] = map[string]interface{}{
+			"enabled":     true,
+			"fingerprint": fp,
+		}
+	}
+	if alpn := node.Extra["alpn"]; alpn != "" {
+		tls["alpn"] = splitCSV(alpn)
+	}
+	ob["tls"] = tls
+	return ob, nil
+}
+
+// convertShadowTLS 将 ShadowTLS 节点转为 sing-box outbound
+// Schema: sing-box v1.13.8 `option/shadowtls.go:ShadowTLSOutboundOptions`
+// 注意: 生产环境 ShadowTLS 通常作为 SS 的 detour 前置;本函数只产出 shadowtls 单独
+// outbound, 链式编排留给用户 (create_chain tool 或 Clash YAML 订阅本身自带链式描述)
+func convertShadowTLS(node NodeConfig, tag string) (map[string]interface{}, error) {
+	if node.Server == "" || node.Port == 0 {
+		return nil, fmt.Errorf("ShadowTLS 节点缺少必要字段: server=%s port=%d", node.Server, node.Port)
+	}
+	version := 3
+	if v := node.Extra["version"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 3 {
+			version = n
+		}
+	}
+	ob := map[string]interface{}{
+		"type":        "shadowtls",
+		"tag":         tag,
+		"server":      node.Server,
+		"server_port": node.Port,
+		"version":     version,
+	}
+	if node.Password != "" {
+		ob["password"] = node.Password
+	}
+	tls := map[string]interface{}{"enabled": true}
+	if node.SNI != "" {
+		tls["server_name"] = node.SNI
+	}
+	if node.Extra["insecure"] == "true" {
+		tls["insecure"] = true
+	}
+	if fp := node.Extra["fingerprint"]; fp != "" {
+		tls["utls"] = map[string]interface{}{
+			"enabled":     true,
+			"fingerprint": fp,
+		}
+	}
+	if alpn := node.Extra["alpn"]; alpn != "" {
+		tls["alpn"] = splitCSV(alpn)
+	}
+	ob["tls"] = tls
+	return ob, nil
+}
+
+// splitCSV 把 "a,b,c" 或 "a b c" 或换行分隔拆成 []interface{}(sing-box JSON slice 语义)
+func splitCSV(s string) []interface{} {
+	var list []interface{}
+	// 按逗号 / 换行 / 空白分割, 三者都容忍
+	sep := func(r rune) bool { return r == ',' || r == '\n' || r == ' ' || r == '\r' }
+	for _, part := range strings.FieldsFunc(s, sep) {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			list = append(list, part)
+		}
+	}
+	return list
+}
+
 // addTransport 添加传输层配置（ws, grpc, h2）
 func addTransport(ob map[string]interface{}, node NodeConfig) {
 	switch node.Network {
@@ -271,7 +461,7 @@ func addTransport(ob map[string]interface{}, node NodeConfig) {
 }
 
 // protocolSuffixRegex 匹配节点名末尾的协议类型后缀，如 "(Hysteria2)", "(SS)", " [VMess]" 等
-var protocolSuffixRegex = regexp.MustCompile(`(?i)\s*[\(\[]\s*(hysteria2?|hy2|ss|shadowsocks|trojan|vmess|vless|wireguard|tuic)\s*[\)\]]\s*$`)
+var protocolSuffixRegex = regexp.MustCompile(`(?i)\s*[\(\[]\s*(hysteria2?|hy2?|ss|shadowsocks|trojan|vmess|vless|wireguard|wg|tuic|anytls|shadowtls|stls)\s*[\)\]]\s*$`)
 
 // tagCleanRegex 清理 tag 中不允许的字符（只保留中日韩文字、英文字母、数字、连字符）
 var tagCleanRegex = regexp.MustCompile(`[^a-zA-Z0-9\-\p{Han}\p{Katakana}\p{Hiragana}\p{Hangul}]`)
@@ -305,8 +495,19 @@ func SummarizeNodes(nodes []NodeConfig) string {
 		}
 	}
 	var parts []string
-	order := []string{"shadowsocks", "trojan", "vmess", "vless", "hysteria2", "wireguard"}
-	labels := map[string]string{"shadowsocks": "SS", "trojan": "Trojan", "vmess": "VMess", "vless": "VLess", "hysteria2": "Hy2", "wireguard": "WG"}
+	order := []string{"shadowsocks", "trojan", "vmess", "vless", "hysteria2", "hysteria", "tuic", "anytls", "shadowtls", "wireguard"}
+	labels := map[string]string{
+		"shadowsocks": "SS",
+		"trojan":      "Trojan",
+		"vmess":       "VMess",
+		"vless":       "VLess",
+		"hysteria2":   "Hy2",
+		"hysteria":    "Hy",
+		"tuic":        "TUIC",
+		"anytls":      "AnyTLS",
+		"shadowtls":   "ShadowTLS",
+		"wireguard":   "WG",
+	}
 	for _, t := range order {
 		if c, ok := counts[t]; ok && c > 0 {
 			parts = append(parts, fmt.Sprintf("%s: %d", labels[t], c))

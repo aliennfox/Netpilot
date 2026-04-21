@@ -274,10 +274,13 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
   - [x] 真机 `09211JEC204960` 走流量验证:Chrome/GCM 等 UID 经 TUN → libbox → 香港-1 VLESS → 上游;/connections 观测到 `api.ipify.org:443 via ['香港-1','proxy-group']` 等真连接;延迟测 香港-1 2919ms、日本-1 4786ms (2026-04-22)
   - [x] **Android 端"真能用"闭环**(2026-04-22 同日): 订阅 UI(Settings tab 管理 add/remove/update-all) + 节点列表真数据(type/alive/latency) + 切换节点 + VpnService `ACTION_RELOAD` 热重载 + 自动延迟测速。ipdata.co 真机验证走 San-Jose VLESS 出口。
 - [ ] **3B-4** **Android 抛光到可发布 (Polish-to-Shippable)** — 原 iOS NE 任务已 DEFERRED
-  - 范围(2026-04-22 扩充):`docs/android-mvp-gap.md` 中的 M1-M13 Must-have 项 (~45-57h 工时 ≈ 6 天)
-    - M1-M9 (UI/合规/日志):原计划,~20-26h
-    - **M10-M13 (协议 + 订阅格式基线,新增):~25-31h** — 对应 Known Issues #M18 #M19,对齐 Karing/NekoBox 消费级门槛
-  - 交付:签名 release APK + Google Play Data Safety 就绪 + 主流协议覆盖(TUIC/AnyTLS/ShadowTLS/Hy1/VLESS-flow)+ Clash/sing-box 订阅格式解析 + LLM API Key UI + 最小日志导出 + 异常通知
+  - 范围(2026-04-22 二次扩充):`docs/android-mvp-gap.md` 中的 M1-M18 Must-have + D1-D3 AI 护城河 UI (~77-113h 工时 ≈ **7-10 天单人**)
+    - M1-M9 (UI/合规/日志):~20-26h
+    - **M10-M13 (协议 + 订阅格式基线):~25-31h** — Known Issues #M18 #M19
+    - **M14-M18 (非协议功能基线):~25-33h** — Known Issues #M20-#M24(Per-App VPN / Kill Switch / Deep Link+QR / 配额 UI / 规则 CRUD UI)
+    - **D1-D3 (AI 护城河 UI):~10-16h** — 自然语言 Dashboard 入口 / Safety card / Chat tool-call timeline
+  - 交付:签名 release APK + Google Play Data Safety 就绪 + 消费级协议覆盖 + Clash/sing-box 订阅格式解析 + 5 项非协议 table-stakes(Per-App/Kill Switch/深链/配额/规则)+ AI 护城河 3 项差异化 UI
+  - **原计划 M1-M9 only (~3 天) 严重低估**,真实基线按上表 7-10 天;对标不做 = "又一个 NekoBox 克隆"
   - 原 iOS NEPacketTunnelProviderExtension 实现计划见 `docs/phase-3b-4-plan.md` (整本冻结, 顶部已标注 DEFERRED)
 - [ ] **3B-5** **iOS (DEFERRED, 无排期)** — Android v1 发布并观察稳定性 30 天后重评估
   - 触发信号:v1 无 P0 崩溃 + DAU > 50 + 用户明确要 iOS
@@ -435,17 +438,47 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - 测试: `internal/subscription/parser_test.go` 加 5 个 case(sip002 basic / `?type=tcp` 回归 / `?plugin=obfs-local;obfs=tls` / legacy all-base64 / malformed),覆盖 SIP002 主要格式
 - 遗留: 其他 parser(vmess/vless/trojan/hysteria2/wg)同类单测尚未写 —— 归入 `docs/android-mvp-gap.md` M4 的"剩余"项,不在 #M17 本身
 
-**#M18 — 协议 URI 解析器覆盖低于消费级基线**(2026-04-22 经 Karing/NekoBox 四方对照识别)
-- 现象: `internal/subscription/parser.go:182-198` 的 `parseLine` switch 只识别 6 个 scheme:`ss / trojan / vmess / vless / hysteria2|hy2 / wireguard|wg`。Karing/NekoBox/Hiddify **均支持**的 `tuic://` / `anytls://` / `shadowtls://` / `hysteria://`(v1) 全部静默丢弃。注:VLESS Reality `flow` 字段已在 converter.go:116-117 映射到 outbound.flow(本次核对修正),剩 `fp`/`spx` 二字段仅进 Extra 未 write-through,需验证 sing-box 是否期望这些
-- 影响: 用户粘贴 2024 年后新机场订阅, 每条不支持的 URI 都被 `parseLine` 默默 skip(跟 #M17 表现一模一样 "明明 20 节点只剩 8 个")
+**#M18 — 协议 URI 解析器覆盖低于消费级基线** ✅ **已修(2026-04-22 当晚 M10 完成)**
+- 修复: `parseLine` switch 扩到 10 个 scheme,新增 `tuic` / `hysteria` / `anytls` / `shadowtls` 四个 parser + 对应 `convertTuic` / `convertHysteria1` / `convertAnyTLS` / `convertShadowTLS` converter;VLESS `flow` (converter.go:116-117)和 `fingerprint` → `tls.utls.fingerprint` (converter.go:137-142) 已 write-through;`spider_x` 不写(sing-box v1.13.8 `option/tls.go:OutboundRealityOptions` 无该字段,验证后刻意 skip,test 锁死)
+- 覆盖: `internal/subscription/parser.go:201-470` 新增 4 个 parser, `converter.go:47-200` 新增 4 个 converter + 扩 SummarizeNodes/protocolSuffixRegex
+- 测试: `parser_test.go` 新增 9 个 case(TestParseTuic / TestConvertTuic / TestParseHysteria1 / TestConvertHysteria1 / TestParseAnyTLS / TestConvertAnyTLS / TestParseShadowTLS / TestConvertShadowTLS / TestParseVLessReality_Vision)
+- 遗留: 真实世界脏数据变体回归还需靠 M13 矩阵脚本 + 真实机场 fixture 补充
 - 修复: `docs/android-mvp-gap.md` M10 (~8-12h),在 Phase 3B-4 内完成。参考 `~/References/nekobox/app/src/main/java/io/nekohasekai/sagernet/fmt/` 各子目录 + `moe/matsuri/nb4a/proxy/anytls|shadowtls/`
 - 关联: 明确延期的 SSR/Mieru/Naive/SSH/Trojan-Go 见 gap 文档 W11-W15
 
-**#M19 — 订阅格式仅支持 Base64-URI 列表, 不识别 Clash YAML**(2026-04-22 对照识别)
-- 现象: `internal/subscription/parser.go:127-154` `ParseSubscription` 只走 `tryBase64Decode` → 按行 URI 解析。 `proxies:` 顶层 YAML(Clash / Clash.Meta / Mihomo 订阅)直接报"Base64 解码失败"。 sing-box 自家 JSON 订阅也不识别
-- 影响: 国内机场生态"Clash 优先, v2ray/sing-box 其次", 约 50%+ 的消费级机场**只**给 Clash 订阅。用户粘贴进来立刻被拒, 是 Karing 相对我们的最大 UX 护城河
-- 修复: `docs/android-mvp-gap.md` M11 (~8-10h Clash YAML) + M12 (~4-6h sing-box JSON)。参考 NekoBox `~/References/nekobox/app/src/main/java/io/nekohasekai/sagernet/group/RawUpdater.kt:227-243` 的 SnakeYAML 方案, Go 侧等价用 `gopkg.in/yaml.v3`;记得修完 rebuild aar(#M8 纪律)
-- 关联: M13 系统回归矩阵把 M10+M11+M12 的交叉组合拉回归
+**#M19 — 订阅格式仅支持 Base64-URI 列表, 不识别 Clash YAML** ✅ **已修(2026-04-22 当晚 M11/M12/M13 完成)**
+- M11 Clash / Clash.Meta YAML: `internal/subscription/clash.go` 430 行, `IsClashYAML` 探测(容忍顶层先出现 `mixed-port:` 等 Clash 全局 key) + `ParseClashYAML` + 10 种协议映射 + ws-opts/grpc-opts/reality-opts 回填;参考 NekoBox `RawUpdater.kt:227-243`;依赖 `gopkg.in/yaml.v3`
+- M12 sing-box native JSON: `internal/subscription/singbox.go` 200 行, `ParseSingBoxJSON` 反向映射 outbound → NodeConfig,跳过 direct/block/selector/urltest 控制流
+- Dispatch: `ParseSubscription` 按优先级 `Clash → sing-box JSON → base64-URI` 探测(parser.go:138-184)
+- M13 回归矩阵: `scripts/subscription-matrix-test.sh` + `internal/subscription/matrix_test.go` + `testdata/fixtures/{clash-mixed.yaml, singbox-mixed.json, base64-uri-mixed.txt}`, `--deep` 模式额外用 sing-box binary `check` 验证 (binary 版本需对齐 go.mod)
+- 测试: `clash_test.go` (IsClashYAML 6 case + ParseClashYAML 映射全协议 + 端到端 dispatch) + `matrix_test.go` 断言每个 fixture 的 MinNodes/RequiredTypes/RequiredTags
+- Android: 不需要 rebuild aar —— 订阅解析走 subscription 包, mobile/netpilot.go 只持有 SubscriptionManager 句柄,新 parser 自动生效
+- 遗留: Clash `proxy-providers:` 外部 URL 拉取暂不解析(W 档,非 must);真实机场 fixture 应持续补充 testdata/fixtures/
+
+**#M20 — Per-App VPN UI 缺失**(2026-04-22 对照识别)
+- 现象: `android/.../vpn/PilottyVpnService.kt:91-103` 已读取 libbox `TunOptions.includePackage/excludePackage`,但 overlay 这两个字段无 UI 编辑入口;实际"全局接管"
+- 影响: 国内高频诉求"微信直连 / 浏览器走代理"完全做不到;NekoBox / Hiddify / Karing / Clash Meta / v2rayNG 均有此功能
+- 修复: `docs/android-mvp-gap.md` M14 (~6-8h)。 参考 `~/References/nekobox/app/src/main/java/io/nekohasekai/sagernet/ui/AppManagerActivity.kt` + `AppListActivity.kt`
+
+**#M21 — Kill Switch 缺失**(2026-04-22 对照识别)
+- 现象: VPN 断开 / 崩溃时无阻断,流量明文回到物理网络
+- 影响: 隐私敏感用户直接劝退。Android 系统自带 `Settings > 网络 > VPN > 始终开启` (lockdown), App 不能直接开但可引导
+- 修复: `docs/android-mvp-gap.md` M15 方式 A (~3-4h 引导型) · 方式 B (~10-14h 实现型 BlockingTunService) v1 用方式 A
+
+**#M22 — Deep Link / QR Code 订阅导入缺失**(2026-04-22 对照识别)
+- 现象: `AndroidManifest.xml` 无任何 `<intent-filter scheme="ss|vmess|vless|trojan|tuic|..." />`;用户在 TG / 微信点节点链接不会路由给 Pilotty
+- 影响: 节点分享路径完全断流,用户必须"长按复制 → 切回 Pilotty → 粘贴",80% 场景直接流失
+- 修复: `docs/android-mvp-gap.md` M16 (~7-9h, 含扫码)。参考 NekoBox AndroidManifest.xml:96/108/119 + ScannerActivity
+
+**#M23 — 订阅流量配额 UI 缺失(后端已实现)**(2026-04-22 对照识别)
+- 现象: `internal/subscription/parser.go:ParseUserInfoHeader` + `store.go:UserInfo` 解析 upload/download/total/expire 齐了, Kotlin StatusDto + Subscription UI 无透传
+- 影响: 用户不知道"还剩多少流量 / 何时到期",被动撞"突然连不上"
+- 修复: `docs/android-mvp-gap.md` M17(feat) (~3-4h),纯 UI wire up
+
+**#M24 — 用户侧路由规则 CRUD UI 缺失(仅 Agent 可改)**(2026-04-22 对照识别)
+- 现象: Rules tab 能列规则 + 应用 4 个内置模板,但用户无法手工 加 / 删 / 改 单条规则。 后端 Overlay `AddRoutingRule / RemoveRoutingRule` 有,Agent 能用, 普通用户找不到入口
+- 影响: "加一条公司内网直连" 这种诉求, Agent 固然能做, 但要求用户先懂 Agent 存在
+- 修复: `docs/android-mvp-gap.md` M18(feat) (~6-8h)。参考 NekoBox RouteSettingsActivity
 
 ### 🟢 轻微
 
