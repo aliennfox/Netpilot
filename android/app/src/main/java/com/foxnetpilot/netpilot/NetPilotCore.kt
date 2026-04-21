@@ -1,6 +1,9 @@
 package com.foxnetpilot.netpilot
 
 import android.content.Context
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import mobile.Client
 import mobile.Mobile
 
@@ -49,9 +52,12 @@ object NetPilotCore {
     // VPN 数据面 (3B-3 改为 Kotlin 直接调 libbox.CommandServer, 详见 NetPilotVpnService.kt)。
     // Go 侧 libcore.BoxInstance 当前保留作为占位, 待 3B-5 精简时移除。
     // mobile/netpilot.go 的 StartTun / StopTun / SetPlatformInterface 保留签名但 Android 不再调用。
-    @Volatile private var tunRunningFlag: Boolean = false
-    fun markTunRunning(running: Boolean) { tunRunningFlag = running }
-    fun tunRunning(): Boolean = tunRunningFlag
+    //
+    // #M13 修复: tunRunning 对外暴露为 StateFlow, 让 Compose ViewModel 可订阅;
+    // 原来是 @Volatile Boolean, UI 只在 init/刷新时读一次 -> VpnService markTunRunning 后 UI 不刷
+    private val _tunRunning = MutableStateFlow(false)
+    val tunRunning: StateFlow<Boolean> = _tunRunning.asStateFlow()
+    fun markTunRunning(running: Boolean) { _tunRunning.value = running }
 
     // 故障自动切换
     fun startFailover(configJSON: String = ""): String = require().startFailover(configJSON)

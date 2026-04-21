@@ -37,7 +37,15 @@ class DashboardViewModel : ViewModel() {
     private val _state = MutableStateFlow(DashboardUi())
     val state: StateFlow<DashboardUi> = _state.asStateFlow()
 
-    init { refresh() }
+    init {
+        refresh()
+        // 订阅 NetPilotCore.tunRunning StateFlow, VpnService 状态变化时 UI 自动刷新 (#M13)
+        viewModelScope.launch {
+            com.foxnetpilot.netpilot.NetPilotCore.tunRunning.collect { running ->
+                _state.value = _state.value.copy(tunRunning = running)
+            }
+        }
+    }
 
     fun refresh() = viewModelScope.launch {
         _state.value = _state.value.copy(loading = true, error = null)
@@ -46,7 +54,7 @@ class DashboardViewModel : ViewModel() {
             _state.value = _state.value.copy(
                 loading = false,
                 status = s,
-                tunRunning = com.foxnetpilot.netpilot.NetPilotCore.tunRunning(),
+                tunRunning = com.foxnetpilot.netpilot.NetPilotCore.tunRunning.value,
             )
         } catch (e: Throwable) {
             _state.value = _state.value.copy(loading = false, error = e.message)

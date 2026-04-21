@@ -377,12 +377,10 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
   - 风险: CLI 路径与移动端在 sing-box 行为上可能漂移, 需用一致的 `configs/*.json` + `merged.json` 作为"配置层契约"兜底
 - 位置: `internal/engine/singbox_adapter.go` (保持原样); `mobile/netpilot.go:197-252` StartTun/StopTun/TunRunning 空壳; `libcore/box.go` BoxInstance stub; `android/.../NetPilotVpnService.kt` Kotlin 直接驱动 libbox
 
-**#M13 — Android UI 连接状态不随 tunRunning 刷新**(Phase 3B-3 真机发现, 2026-04-22)
-- 现象: `NetPilotVpnService.startService()` 成功 (openTun fd 建立, libbox 跑起来, tun0 拿到地址, /connections 显示真流量走 proxy-group) 后 UI 仍显示"未连接"
-- 根因待查: `NetPilotCore.markTunRunning(true)` 是被调用了, 但 Composable 读的那个 state flow 没刷新 —— 推测是 MutableStateFlow / Jetpack Compose 的观测链路断了
-- 影响: 仅 UI 视觉, 不影响真流量;用户体验坏 (以为点了没生效, 会反复点触发 startService 重入 —— 幂等保护已覆盖这一副作用)
-- 位置: `android/app/src/main/java/com/foxnetpilot/netpilot/NetPilotCore.kt` + 对应 Composable
-- 修复方向: 查 markTunRunning 改的是哪个 state, 观测侧是不是同一个实例;若不是, 改用 StateFlow 全局单例
+**#M13 — Android UI 连接状态不随 tunRunning 刷新** ✅ **已修 (2026-04-22)**
+- 根因: `NetPilotCore.tunRunningFlag` 原为 `@Volatile var Boolean`, 不是 StateFlow, Compose 无法订阅;`DashboardViewModel.refresh()` 只在 init 和手动刷新时读一次
+- 修复: `NetPilotCore` 改 `MutableStateFlow<Boolean>`, `DashboardViewModel.init` 里 launch 一个 collect 协程把值透到 UI state
+- 验证: 真机点"启动 VPN" 后 `TUN: 未启动` 立即变 `运行中`, 无需按刷新
 
 ### 🟢 轻微
 
