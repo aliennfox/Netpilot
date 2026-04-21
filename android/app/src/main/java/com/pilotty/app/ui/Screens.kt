@@ -1,130 +1,38 @@
 package com.pilotty.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pilotty.app.data.*
+import com.pilotty.app.ui.components.*
+import com.pilotty.app.ui.theme.LocalPilottyColors
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/* ---------- Dashboard ---------- */
-
-data class DashboardUi(
-    val loading: Boolean = false,
-    val status: StatusDto? = null,
-    val tunRunning: Boolean = false,
-    val error: String? = null,
-)
-
-class DashboardViewModel : ViewModel() {
-    private val _state = MutableStateFlow(DashboardUi())
-    val state: StateFlow<DashboardUi> = _state.asStateFlow()
-
-    init {
-        refresh()
-        // 订阅 PilottyCore.tunRunning StateFlow, VpnService 状态变化时 UI 自动刷新 (#M13)
-        viewModelScope.launch {
-            com.pilotty.app.PilottyCore.tunRunning.collect { running ->
-                _state.value = _state.value.copy(tunRunning = running)
-            }
-        }
-    }
-
-    fun refresh() = viewModelScope.launch {
-        _state.value = _state.value.copy(loading = true, error = null)
-        try {
-            val s = PilottyRepository.status()
-            _state.value = _state.value.copy(
-                loading = false,
-                status = s,
-                tunRunning = com.pilotty.app.PilottyCore.tunRunning.value,
-            )
-        } catch (e: Throwable) {
-            _state.value = _state.value.copy(loading = false, error = e.message)
-        }
-    }
-
-    fun setMode(mode: String) = viewModelScope.launch {
-        try { PilottyRepository.setMode(mode); refresh() }
-        catch (e: Throwable) { _state.value = _state.value.copy(error = e.message) }
-    }
-}
-
-@Composable
-fun DashboardScreen(
-    onStartVpn: () -> Unit,
-    onStopVpn: () -> Unit,
-    vm: DashboardViewModel = viewModel(),
-) {
-    val ui by vm.state.collectAsStateWithLifecycle()
-    Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        ui.error?.let { Text("错误: $it", color = MaterialTheme.colorScheme.error) }
-        if (ui.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-
-        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                val s = ui.status
-                Text("当前节点", style = MaterialTheme.typography.labelMedium)
-                Text(
-                    s?.currentNode?.ifEmpty { "—" } ?: "—",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text("模式: ${s?.mode ?: "—"}  ·  节点数: ${s?.nodeCount ?: 0}")
-                Text("活跃连接: ${s?.connections ?: 0}")
-                Text("⬆ ${s?.upload ?: 0} B   ⬇ ${s?.download ?: 0} B")
-                Text(
-                    "Agent: ${if (s?.agentReady == true) "就绪" else "未启用"}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Text(
-                    "TUN: ${if (ui.tunRunning) "运行中" else "未启动"}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onStartVpn) { Text("启动 VPN") }
-            OutlinedButton(onClick = onStopVpn) { Text("停止") }
-            OutlinedButton(onClick = { vm.refresh() }) { Text("刷新") }
-        }
-
-        Text("代理模式", style = MaterialTheme.typography.titleMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("rule" to "规则", "global" to "全局", "direct" to "直连").forEach { (id, label) ->
-                FilterChip(
-                    selected = ui.status?.mode.equals(id, true),
-                    onClick = { vm.setMode(id) },
-                    label = { Text(label) },
-                )
-            }
-        }
-    }
-}
-
-/* ---------- Chat ---------- */
+/* ============================= Chat ============================= */
 
 data class ChatMessage(val role: String, val text: String, val source: String = "")
 
@@ -167,6 +75,7 @@ class ChatViewModel : ViewModel() {
 
 @Composable
 fun ChatScreen(vm: ChatViewModel = viewModel()) {
+    val pc = LocalPilottyColors.current
     val ui by vm.state.collectAsStateWithLifecycle()
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -175,21 +84,50 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
         if (ui.messages.isNotEmpty()) listState.animateScrollToItem(ui.messages.size - 1)
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(pc.bg),
+    ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("对话", style = MaterialTheme.typography.titleMedium)
-            TextButton(onClick = { vm.clear() }) { Text("清空") }
+            Column {
+                Text("Agent", color = pc.ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.15).sp)
+                Text(
+                    "deepseek-chat · ${ui.messages.count { it.role == "user" }} msgs",
+                    color = pc.ink3,
+                    fontSize = 10.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 0.2.sp,
+                )
+            }
+            TextButton(onClick = { vm.clear() }) {
+                Text("清空", color = pc.ink3, fontSize = 12.sp)
+            }
         }
-        ui.error?.let { Text("错误: $it", color = MaterialTheme.colorScheme.error) }
+        HorizontalDivider(color = pc.hairline, thickness = 1.dp)
+
+        ui.error?.let {
+            Text(
+                "错误: $it",
+                color = pc.error,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            )
+        }
 
         LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
             state = listState,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(vertical = 16.dp),
         ) {
             items(ui.messages) { msg ->
                 val isUser = msg.role == "user"
@@ -198,16 +136,25 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                     horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
                 ) {
                     Surface(
-                        color = if (isUser) MaterialTheme.colorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(12.dp),
+                        color = if (isUser) pc.ink else pc.surface2,
+                        shape = if (isUser) RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp)
+                                else RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp),
                     ) {
-                        Column(Modifier.padding(10.dp)) {
-                            Text(msg.text, style = MaterialTheme.typography.bodyMedium)
+                        Column(Modifier.padding(horizontal = 13.dp, vertical = 9.dp)) {
+                            Text(
+                                msg.text,
+                                color = if (isUser) pc.bg else pc.ink,
+                                fontSize = 14.sp,
+                                lineHeight = 20.sp,
+                                letterSpacing = (-0.07).sp,
+                            )
                             if (!isUser && msg.source.isNotEmpty()) {
+                                Spacer(Modifier.height(4.dp))
                                 Text(
                                     "via ${msg.source}",
-                                    style = MaterialTheme.typography.labelSmall,
+                                    color = pc.ink4,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
                                 )
                             }
                         }
@@ -216,30 +163,77 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
             }
         }
 
-        if (ui.sending) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        if (ui.sending) LinearProgressIndicator(
+            modifier = Modifier.fillMaxWidth(),
+            color = pc.accent,
+            trackColor = pc.surface3,
+        )
 
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(pc.surface)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .padding(bottom = 96.dp),
         ) {
-            OutlinedTextField(
-                value = input,
-                onValueChange = { input = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("跟 Agent 聊聊…") },
-                singleLine = true,
-                enabled = !ui.sending,
-            )
-            Button(
-                onClick = { vm.send(input); input = "" },
-                enabled = !ui.sending && input.isNotBlank(),
-            ) { Text("发送") }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(pc.bg)
+                    .border(1.dp, pc.hairlineStrong, RoundedCornerShape(16.dp))
+                    .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(modifier = Modifier.weight(1f).heightIn(min = 36.dp, max = 140.dp)) {
+                    BasicTextField(
+                        value = input,
+                        onValueChange = { input = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        textStyle = TextStyle(
+                            color = pc.ink,
+                            fontSize = 14.sp,
+                            lineHeight = 20.sp,
+                            letterSpacing = (-0.07).sp,
+                        ),
+                        cursorBrush = SolidColor(pc.ink),
+                        maxLines = 6,
+                        enabled = !ui.sending,
+                    )
+                    if (input.isEmpty()) {
+                        Text(
+                            "Reply to agent…",
+                            color = pc.ink4,
+                            fontSize = 14.sp,
+                            lineHeight = 20.sp,
+                        )
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (input.isNotBlank()) pc.accent else pc.surface3)
+                        .clickable(enabled = !ui.sending && input.isNotBlank()) {
+                            vm.send(input)
+                            input = ""
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "↑",
+                        color = if (input.isNotBlank()) pc.accentOnBg else pc.ink4,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
         }
     }
 }
 
-/* ---------- Nodes ---------- */
+/* ============================= Nodes ============================= */
 
 data class NodesUi(
     val loading: Boolean = false,
@@ -260,8 +254,6 @@ class NodesViewModel : ViewModel() {
         try {
             val n = PilottyRepository.nodes()
             _state.value = _state.value.copy(loading = false, nodes = n)
-            // Clash API 的 history 只在显式 /proxies/{tag}/delay 后才填充, 所以首次拿到节点
-            // 列表时若延迟都是 0 且 VPN 在跑, 自动触发一次测速 (~3-5s), 测完再刷新一次 UI。
             if (!autoTestedOnce &&
                 com.pilotty.app.PilottyCore.tunRunning.value &&
                 n.isNotEmpty() && n.all { it.latency == 0 }) {
@@ -290,66 +282,192 @@ class NodesViewModel : ViewModel() {
 
 @Composable
 fun NodesScreen(vm: NodesViewModel = viewModel()) {
+    val pc = LocalPilottyColors.current
     val ui by vm.state.collectAsStateWithLifecycle()
     val filtered = remember(ui.nodes, ui.query) {
-        if (ui.query.isBlank()) ui.nodes
-        else ui.nodes.filter {
+        val sorted = ui.nodes.sortedWith(compareBy { if (it.latency == 0) Int.MAX_VALUE else it.latency })
+        if (ui.query.isBlank()) sorted
+        else sorted.filter {
             it.tag.contains(ui.query, true) || it.server.contains(ui.query, true)
         }
     }
-    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(pc.bg)
+            .padding(horizontal = 20.dp),
+    ) {
+        Spacer(Modifier.height(12.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OutlinedTextField(
+            Column {
+                Text("Nodes", color = pc.ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.3).sp)
+                Text(
+                    "${filtered.size} of ${ui.nodes.size} · sorted by latency",
+                    color = pc.ink3,
+                    fontSize = 10.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 0.2.sp,
+                )
+            }
+            PilottyButton(
+                text = "测速全部",
+                onClick = { vm.testAll() },
+                variant = PilottyButtonVariant.Outline,
+                small = true,
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(pc.bg)
+                .border(1.dp, pc.hairlineStrong, RoundedCornerShape(10.dp))
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            BasicTextField(
                 value = ui.query,
                 onValueChange = { vm.setQuery(it) },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("搜索节点…") },
+                textStyle = TextStyle(
+                    color = pc.ink,
+                    fontSize = 13.5.sp,
+                    letterSpacing = (-0.05).sp,
+                ),
+                cursorBrush = SolidColor(pc.ink),
+                modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
-            Button(onClick = { vm.testAll() }) { Text("测速") }
-            OutlinedButton(onClick = { vm.refresh() }) { Text("刷新") }
+            if (ui.query.isEmpty()) {
+                Text("Search nodes…", color = pc.ink4, fontSize = 13.5.sp)
+            }
         }
-        Spacer(Modifier.height(8.dp))
-        ui.error?.let { Text("错误: $it", color = MaterialTheme.colorScheme.error) }
-        if (ui.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        Text("节点 (${filtered.size})", style = MaterialTheme.typography.labelLarge)
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+
+        Spacer(Modifier.height(10.dp))
+
+        ui.error?.let {
+            Text("错误: $it", color = pc.error, fontSize = 12.sp)
+            Spacer(Modifier.height(4.dp))
+        }
+        if (ui.loading) {
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth(),
+                color = pc.accent,
+                trackColor = pc.surface3,
+            )
+            Spacer(Modifier.height(4.dp))
+        }
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(bottom = 96.dp),
+        ) {
             items(filtered, key = { it.tag }) { node ->
-                ListItem(
-                    headlineContent = {
-                        Text(
-                            node.tag,
-                            fontWeight = if (node.active) FontWeight.Bold else FontWeight.Normal,
-                        )
-                    },
-                    supportingContent = { Text("${node.type} · ${node.server}:${node.port}") },
-                    leadingContent = {
-                        Surface(
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            shape = RoundedCornerShape(6.dp),
-                        ) {
-                            Text(
-                                node.type.uppercase(),
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        }
-                    },
-                    trailingContent = {
-                        Text(if (node.latency > 0) "${node.latency} ms" else "—")
-                    },
-                    modifier = Modifier.clickable { vm.switchTo(node.tag) },
-                )
+                NodeCard(node = node, onClick = { vm.switchTo(node.tag) })
             }
         }
     }
 }
 
-/* ---------- Rules ---------- */
+@Composable
+private fun NodeCard(node: NodeDto, onClick: () -> Unit) {
+    val pc = LocalPilottyColors.current
+    val slow = node.latency > 300
+    val cc = node.tag.take(2).uppercase()
+    Box(modifier = Modifier.fillMaxWidth()) {
+        PilottyCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick),
+            strong = node.active,
+            soft = !node.active,
+        ) {
+            Row(
+                modifier = Modifier.padding(start = 14.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                FlagChip(code = cc)
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            node.tag,
+                            color = pc.ink,
+                            fontSize = 14.sp,
+                            fontWeight = if (node.active) FontWeight.SemiBold else FontWeight.Medium,
+                            letterSpacing = (-0.05).sp,
+                        )
+                        if (node.active) LiveDot()
+                    }
+                    Spacer(Modifier.height(3.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            "${node.server}:${node.port}",
+                            color = pc.ink3,
+                            fontSize = 10.5.sp,
+                            fontFamily = FontFamily.Monospace,
+                            letterSpacing = 0.2.sp,
+                            maxLines = 1,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(3.dp))
+                                .border(1.dp, pc.hairlineStrong, RoundedCornerShape(3.dp))
+                                .padding(horizontal = 5.dp, vertical = 1.dp),
+                        ) {
+                            Text(
+                                node.type.uppercase(),
+                                color = pc.ink2,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                letterSpacing = 0.4.sp,
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = if (node.latency > 0) "${node.latency}ms" else "—",
+                    color = when {
+                        slow -> pc.error
+                        node.active -> pc.accentInk
+                        else -> pc.ink
+                    },
+                    fontSize = 12.5.sp,
+                    fontWeight = if (node.active) FontWeight.Bold else FontWeight.SemiBold,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+        }
+        if (node.active) {
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .fillMaxHeight()
+                    .padding(vertical = 10.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(pc.accent)
+                    .align(Alignment.CenterStart),
+            )
+        }
+    }
+}
+
+/* ============================= Rules (embedded in Settings) ============================= */
 
 data class RulesUi(
     val loading: Boolean = false,
@@ -390,53 +508,65 @@ class RulesViewModel : ViewModel() {
 }
 
 @Composable
-fun RulesScreen(vm: RulesViewModel = viewModel()) {
+fun RulesSection(vm: RulesViewModel = viewModel()) {
+    val pc = LocalPilottyColors.current
     val ui by vm.state.collectAsStateWithLifecycle()
-    val snackbar = remember { SnackbarHostState() }
-    LaunchedEffect(ui.toast) {
-        ui.toast?.let { snackbar.showSnackbar(it); vm.dismissToast() }
-    }
-    Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { pad ->
-        Column(modifier = Modifier.fillMaxSize().padding(pad).padding(12.dp)) {
-            ui.error?.let { Text("错误: $it", color = MaterialTheme.colorScheme.error) }
-            if (ui.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
 
-            Text("分流模板", style = MaterialTheme.typography.titleMedium)
-            LazyColumn(
-                modifier = Modifier.heightIn(max = 240.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ui.error?.let { Text("错误: $it", color = pc.error, fontSize = 12.sp) }
+
+        Kicker("Templates · ${ui.templates.size}")
+        ui.templates.forEach { t ->
+            PilottyCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { vm.applyTemplate(t.id) },
+                soft = true,
             ) {
-                items(ui.templates, key = { it.id }) { t ->
-                    ElevatedCard(
-                        modifier = Modifier.fillMaxWidth().clickable { vm.applyTemplate(t.id) },
-                    ) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text(t.name, fontWeight = FontWeight.Bold)
-                            Text(t.description, style = MaterialTheme.typography.bodySmall)
-                        }
+                Column(Modifier.padding(12.dp)) {
+                    Text(t.name, color = pc.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    if (t.description.isNotEmpty()) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(t.description, color = pc.ink3, fontSize = 12.sp)
                     }
                 }
             }
+        }
 
-            Spacer(Modifier.height(12.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(8.dp))
-            Text("当前规则 (${ui.rules.size})", style = MaterialTheme.typography.titleMedium)
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                items(ui.rules, key = { it.tag.ifEmpty { it.description } + it.outbound }) { r ->
-                    ListItem(
-                        headlineContent = { Text(r.description.ifEmpty { r.tag }) },
-                        supportingContent = {
-                            val parts = buildList {
-                                if (r.domainSuffix.isNotEmpty()) add("domain×${r.domainSuffix.size}")
-                                if (r.ipCidr.isNotEmpty()) add("ip×${r.ipCidr.size}")
-                                if (r.processName.isNotEmpty()) add("proc×${r.processName.size}")
-                            }
-                            Text("→ ${r.outbound}  ${parts.joinToString("  ")}")
-                        },
-                        trailingContent = {
-                            Text(r.source, style = MaterialTheme.typography.labelSmall)
-                        },
+        Spacer(Modifier.height(8.dp))
+        Kicker("Active rules · ${ui.rules.size}")
+        ui.rules.forEach { r ->
+            PilottyCard(modifier = Modifier.fillMaxWidth(), soft = true) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            r.description.ifEmpty { r.tag },
+                            color = pc.ink,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            r.source,
+                            color = pc.ink4,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    val parts = buildList {
+                        if (r.domainSuffix.isNotEmpty()) add("domain×${r.domainSuffix.size}")
+                        if (r.ipCidr.isNotEmpty()) add("ip×${r.ipCidr.size}")
+                        if (r.processName.isNotEmpty()) add("proc×${r.processName.size}")
+                    }
+                    Text(
+                        "→ ${r.outbound}  ${parts.joinToString("  ")}",
+                        color = pc.ink3,
+                        fontSize = 11.5.sp,
+                        fontFamily = FontFamily.Monospace,
                     )
                 }
             }

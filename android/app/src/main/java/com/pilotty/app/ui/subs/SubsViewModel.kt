@@ -1,4 +1,4 @@
-package com.pilotty.app.ui.settings
+package com.pilotty.app.ui.subs
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -12,16 +12,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-data class SettingsUi(
+data class SubsUi(
     val loading: Boolean = false,
     val subscriptions: List<SubscriptionDto> = emptyList(),
     val toast: String? = null,
     val error: String? = null,
 )
 
-class SettingsViewModel : ViewModel() {
-    private val _state = MutableStateFlow(SettingsUi())
-    val state: StateFlow<SettingsUi> = _state.asStateFlow()
+class SubsViewModel : ViewModel() {
+    private val _state = MutableStateFlow(SubsUi())
+    val state: StateFlow<SubsUi> = _state.asStateFlow()
 
     init { refresh() }
 
