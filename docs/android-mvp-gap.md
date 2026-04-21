@@ -23,6 +23,20 @@
 - **Won't-do (W)**: 本轮 v1 明确不做,写清楚理由避免后续反复争论
 
 > **协议 / 订阅格式是 must-have 的原生一部分**(2026-04-22 扩充)。 原先 M1-M9 偏 Android 外观 + 合规,没有正视"用户订阅粘贴进来能解析吗 / 节点拨出能握手吗"这条更基础的门槛。 新增 M10-M13 把这条补齐。
+>
+> **非协议功能基线也是 must-have 的一部分**(2026-04-22 二次扩充,见 Section 10)。 Per-App VPN / Kill Switch / 深链 / 配额 UI / 规则 UI 这 5 项是竞品(NekoBox / Hiddify / Karing / Clash Meta / v2rayNG)**普遍都有**的消费级 table-stakes, Pilotty 当前一个没做。
+
+### v1 可发布总工时(2026-04-22 修订版)
+
+| 类别 | 工时 | 工作日(单人) | 说明 |
+|---|---|---|---|
+| 协议基线补齐 (M10-M13) | ~25-31h | ~3 天 | TUIC / AnyTLS / ShadowTLS / Hy1 / Clash YAML 订阅 / sing-box JSON 订阅 / 回归矩阵 |
+| UI / 合规基线 (M1-M9) | ~20-26h | ~2.5 天 | 签名 / 图标 / 通知 / 隐私 / API Key / 日志 |
+| 非协议功能基线 (M14-M18, 见 Section 10) | ~24-40h | ~3-5 天 | Per-App VPN / Kill Switch / 深链 + QR / 配额 UI / 规则 UI |
+| AI 护城河 UI 强化 (见 Section 11) | ~8-16h | ~1-2 天 | 自然语言输入 Hero / 快照回滚 Safety card / Chat tool-call timeline |
+| **Android v1 可发布总和** | **~77-113h** | **~7-10 天** | 单人全职冲刺,含真机回归 |
+
+> 原计划 (M1-M9 only, 20-26h) **严重低估**了真正的缺口。真实的可发布基线按上表, 是原估计的 3-4 倍。
 
 每项条目的元数据字段:
 - **来源**: Google Play Policy / Android 平台限制 / NekoBox 对照 / 已知 Issue (#M17 等) / 用户 UX 直觉
