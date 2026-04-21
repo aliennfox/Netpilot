@@ -249,6 +249,7 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
   - [x] #H4 修复:Kotlin `ConfigMerger.ensureTunInbound` 方案 c(1c6e942)
   - [x] 真机前功能补齐(Phase 2.5,见上节)+ 文档对齐 (2026-04-21)
   - [x] 真机 `09211JEC204960` 走流量验证:Chrome/GCM 等 UID 经 TUN → libbox → 香港-1 VLESS → 上游;/connections 观测到 `api.ipify.org:443 via ['香港-1','proxy-group']` 等真连接;延迟测 香港-1 2919ms、日本-1 4786ms (2026-04-22)
+  - [x] **Android 端"真能用"闭环**(2026-04-22 同日): 订阅 UI(Settings tab 管理 add/remove/update-all) + 节点列表真数据(type/alive/latency) + 切换节点 + VpnService `ACTION_RELOAD` 热重载 + 自动延迟测速。ipdata.co 真机验证走 San-Jose VLESS 出口。
 - [ ] **3B-4** iOS NEPacketTunnelProviderExtension 从零实现(3-5 天)
 - [ ] **3B-5** 双端真机联调 + 稳定性修复(2-3 天)
 
@@ -381,6 +382,26 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - 根因: `NetPilotCore.tunRunningFlag` 原为 `@Volatile var Boolean`, 不是 StateFlow, Compose 无法订阅;`DashboardViewModel.refresh()` 只在 init 和手动刷新时读一次
 - 修复: `NetPilotCore` 改 `MutableStateFlow<Boolean>`, `DashboardViewModel.init` 里 launch 一个 collect 协程把值透到 UI state
 - 验证: 真机点"启动 VPN" 后 `TUN: 未启动` 立即变 `运行中`, 无需按刷新
+
+**#M14 — Clash API baseURL 不接受裸 host:port** ✅ **已修 (2026-04-22)**
+- 根因: Android 从 Kotlin 传 `"127.0.0.1:9090"`(无 scheme), Go `url.Parse` 按 scheme:opaque 解析, 所有 `http.Get(base+"/proxies")` 失败报 `first path segment in URL cannot contain colon`
+- 修复: `NewSingBoxAdapter` 检测若不含 `"://"` 自动前置 `http://`
+- 位置: `internal/engine/singbox_adapter.go:22-36`
+
+**#M15 — Android 嵌入模式下 `overlay.Apply()` 调 exec("sing-box") 报错** ✅ **已修 (2026-04-22)**
+- 根因: CLI 模式下 `SingBoxAdapter.Reload()` 通过 `pkill sing-box && exec sing-box run -c merged.json` 重启外部进程;Android 上没有该二进制(sing-box 嵌在 libbox 里,由 Kotlin `libbox.CommandServer.startOrReloadService()` 驱动),每次订阅导入 / 更新都撞 `exec: "sing-box": executable file not found`
+- 修复: `Reload()` 先用 `exec.LookPath("sing-box")` 探测;找不到视为嵌入模式, merged.json 已经写盘, 返回 nil。Kotlin 端 `NetPilotVpnService.ACTION_RELOAD` intent 负责通知运行中的 libbox 吃新配置
+- 位置: `internal/engine/singbox_adapter.go:269-280`, `android/.../vpn/NetPilotVpnService.kt` `reloadIfRunning()`
+
+**#M16 — Clash API `/proxies/<group>` 不含成员延迟 / 类型** ✅ **已修 (2026-04-22)**
+- 根因: 该 endpoint 只返回 `{type, now, all:[tag]}`, 无 per-proxy 的 `type`/`alive`/`history`;Nodes 列表 UI 永远显示 `—`
+- 修复: `GetProxyGroup` 额外拉一次 `/proxies` 把每个成员的 history 末尾 delay 取出来填 `ProxyInfo.Latency`;`mobile.Client.Nodes()` 再和 `overlay.ListOutbounds()` 合并拿 server/port。Kotlin 端 `NodesViewModel` 首次进页面若发现所有节点 latency=0 且 VPN 在跑, 自动触发 `test_latency_all` 然后刷新(sing-box 不 autoprobe, history 靠 `/delay` 显式填)
+- 位置: `internal/engine/singbox_adapter.go:92-155`, `mobile/netpilot.go:327-385`, `android/.../ui/Screens.kt:NodesViewModel.refresh`
+
+**#M17 — 订阅解析器对 `ss://...?type=tcp` 静默跳过**(2026-04-22 发现,未修)
+- 现象: `internal/subscription/parser.go` 的 SS URL 解析把 `server:port?type=tcp` 的 port 当成 `8388?type=tcp` 整体 parse, 失败后跳过整条。logcat 可见 "端口解析失败" 警告
+- 影响: 订阅里每个 v2ray-subscribe 格式的 SS 节点会丢失(用户当前只看到 4 个 SJ 节点 + 3 个别的,源站可能更多)
+- 修复方向: 在 parser 的 host:port 提取之前 `strings.SplitN(hostport, "?", 2)[0]`。写对应单测(对 v2subscribe / clash / sing-box 三种 SS 格式分别)
 
 ### 🟢 轻微
 
