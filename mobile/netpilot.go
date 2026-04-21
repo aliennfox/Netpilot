@@ -325,21 +325,84 @@ func (c *Client) Status() string {
 
 // Nodes 返回节点列表 JSON。
 func (c *Client) Nodes() string {
-	g, err := c.adapter.GetProxyGroup("proxy-group")
-	if err != nil {
-		return errJSON(err)
+	// 先从 overlay 拿 server/port 静态信息 (Clash API 不返回这俩)。
+	obsByTag := map[string]map[string]interface{}{}
+	for _, ob := range c.overlay.ListOutbounds() {
+		if tag, ok := ob["tag"].(string); ok {
+			obsByTag[tag] = ob
+		}
 	}
-	out := make([]map[string]interface{}, 0, len(g.All))
-	for _, p := range g.All {
+	extract := func(ob map[string]interface{}) (server string, port int) {
+		if ob == nil {
+			return
+		}
+		server, _ = ob["server"].(string)
+		switch v := ob["server_port"].(type) {
+		case float64:
+			port = int(v)
+		case int:
+			port = v
+		case int64:
+			port = int(v)
+		}
+		return
+	}
+
+	// 优先走 Clash API: 拿到 alive / latency / active 实时数据
+	if g, err := c.adapter.GetProxyGroup("proxy-group"); err == nil {
+		out := make([]map[string]interface{}, 0, len(g.All))
+		for _, p := range g.All {
+			server, port := extract(obsByTag[p.Tag])
+			if p.Server != "" {
+				server = p.Server
+			}
+			if p.Port != 0 {
+				port = p.Port
+			}
+			out = append(out, map[string]interface{}{
+				"tag":       p.Tag,
+				"type":      p.Type,
+				"server":    server,
+				"port":      port,
+				"alive":     p.Alive,
+				"latency":   p.Latency,
+				"group_tag": p.GroupTag,
+				"active":    p.Tag == g.Now,
+			})
+		}
+		return okJSON(out)
+	}
+	// Fallback: VPN 未启动时 Clash API 不可达, 从 overlay 读节点静态信息
+	// (alive/latency 未知, UI 照旧能展示、切换, 启动 VPN 后自动刷新真数据)
+	obs := c.overlay.ListOutbounds()
+	out := make([]map[string]interface{}, 0, len(obs))
+	for _, ob := range obs {
+		t, _ := ob["type"].(string)
+		// 跳过 selector / urltest / 内置 direct / block / dns
+		switch t {
+		case "", "selector", "urltest", "direct", "block", "dns":
+			continue
+		}
+		tag, _ := ob["tag"].(string)
+		server, _ := ob["server"].(string)
+		port := 0
+		switch v := ob["server_port"].(type) {
+		case float64:
+			port = int(v)
+		case int:
+			port = v
+		case int64:
+			port = int(v)
+		}
 		out = append(out, map[string]interface{}{
-			"tag":       p.Tag,
-			"type":      p.Type,
-			"server":    p.Server,
-			"port":      p.Port,
-			"alive":     p.Alive,
-			"latency":   p.Latency,
-			"group_tag": p.GroupTag,
-			"active":    p.Tag == g.Now,
+			"tag":       tag,
+			"type":      t,
+			"server":    server,
+			"port":      port,
+			"alive":     false,
+			"latency":   0,
+			"group_tag": "proxy-group",
+			"active":    false,
 		})
 	}
 	return okJSON(out)

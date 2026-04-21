@@ -20,8 +20,15 @@ type SingBoxAdapter struct {
 }
 
 func NewSingBoxAdapter(baseURL string) *SingBoxAdapter {
+	// 缺 scheme 的 host:port (如 Android 传的 "127.0.0.1:9090") 会被 url.Parse
+	// 当成 scheme:opaque, http.Get 直接报 "first path segment in URL cannot
+	// contain colon"。统一补 http:// 让两端调用者兼容。
+	addr := strings.TrimRight(baseURL, "/")
+	if !strings.Contains(addr, "://") {
+		addr = "http://" + addr
+	}
 	return &SingBoxAdapter{
-		baseURL: strings.TrimRight(baseURL, "/"),
+		baseURL: addr,
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
@@ -89,18 +96,64 @@ func (a *SingBoxAdapter) GetProxyGroup(groupTag string) (*ProxyGroup, error) {
 		return nil, fmt.Errorf("decode proxy group response: %w", err)
 	}
 
+	// 拉一次 /proxies 拿每个成员的 type/alive/history, 让 UI 能显示 latency 和节点类型。
+	// Clash API 结构: {"proxies": {"tag": {type, name, alive, history:[{delay}]}}}。
+	detailByTag := a.fetchProxyDetails()
+
 	group := &ProxyGroup{
 		Tag:  groupTag,
 		Type: raw.Type,
 		Now:  raw.Now,
 	}
 	for _, tag := range raw.All {
-		group.All = append(group.All, ProxyInfo{
-			Tag:      tag,
-			GroupTag: groupTag,
-		})
+		info := ProxyInfo{Tag: tag, GroupTag: groupTag}
+		if d, ok := detailByTag[tag]; ok {
+			info.Type = d.Type
+			info.Alive = d.Alive
+			info.Latency = d.Latency
+		}
+		group.All = append(group.All, info)
 	}
 	return group, nil
+}
+
+// proxyDetail 解析 Clash API /proxies 单条 proxy 的相关字段。
+type proxyDetail struct {
+	Type    string
+	Alive   bool
+	Latency int
+}
+
+// fetchProxyDetails 拉一次 /proxies 并把有用字段整理成 tag -> detail。
+// 失败时返回空 map, 调用方继续走 (只是 latency/alive 为空)。
+func (a *SingBoxAdapter) fetchProxyDetails() map[string]proxyDetail {
+	resp, err := a.httpClient.Get(a.baseURL + "/proxies")
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	var envelope struct {
+		Proxies map[string]struct {
+			Type    string `json:"type"`
+			Alive   bool   `json:"alive"`
+			History []struct {
+				Delay int `json:"delay"`
+			} `json:"history"`
+		} `json:"proxies"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		return nil
+	}
+	out := make(map[string]proxyDetail, len(envelope.Proxies))
+	for tag, p := range envelope.Proxies {
+		d := proxyDetail{Type: p.Type, Alive: p.Alive}
+		// 取最新一次延迟测试 (Clash 约定 history 末尾最新)
+		if n := len(p.History); n > 0 {
+			d.Latency = p.History[n-1].Delay
+		}
+		out[tag] = d
+	}
+	return out
 }
 
 func (a *SingBoxAdapter) SetActiveProxy(groupTag, proxyTag string) error {
@@ -265,9 +318,18 @@ func (a *SingBoxAdapter) Stop() error {
 // Reload 通过重启 sing-box 进程重载配置
 // sing-box v1.13+ 的 Clash API PUT /configs 不支持切换到不同配置文件，
 // 因此使用 pkill + 重新启动的方式
+//
+// 嵌入式模式 (Android/iOS, #M12 双轨) 下 sing-box 不作为独立二进制运行, 而是
+// 编进 libbox 由 Kotlin/Swift 驱动。此时 exec.LookPath("sing-box") 会失败, 返回
+// nil 让 Apply() 链成功 —— merged.json 已经写盘, 平台层负责触发 libbox 重载。
 func (a *SingBoxAdapter) Reload() error {
 	if a.configPath == "" {
 		return fmt.Errorf("未设置配置文件路径，无法重载")
+	}
+
+	if _, err := exec.LookPath("sing-box"); err != nil {
+		// 嵌入模式: merged.json 已写, 平台层自行重载 libbox
+		return nil
 	}
 
 	// 停止现有 sing-box 进程

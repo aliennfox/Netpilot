@@ -152,6 +152,22 @@ func (o *ConfigOverlay) ListRules() []RouteRule {
 	return result
 }
 
+// ListOutbounds 列出所有 overlay 外加节点 (订阅/Agent 注入的)。
+// Android/iOS 上当 VPN 未启动时 Clash API 不可达, UI 依赖此函数展示节点列表。
+func (o *ConfigOverlay) ListOutbounds() []map[string]interface{} {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	result := make([]map[string]interface{}, len(o.data.Outbounds))
+	for i, ob := range o.data.Outbounds {
+		copyOB := make(map[string]interface{}, len(ob))
+		for k, v := range ob {
+			copyOB[k] = v
+		}
+		result[i] = copyOB
+	}
+	return result
+}
+
 // AddOutbound 添加额外出站节点（完整 outbound 配置）
 func (o *ConfigOverlay) AddOutbound(ob map[string]interface{}) error {
 	o.mu.Lock()
