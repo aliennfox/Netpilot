@@ -17,10 +17,10 @@ type ConversationHistory struct {
 
 // HistoryEntry 单条对话记录
 type HistoryEntry struct {
-	Role      string    // "user" 或 "assistant"
+	Role      string // "user" 或 "assistant"
 	Content   string
 	Timestamp time.Time
-	Source    string    // "local" (Local Engine) 或 "agent" (LLM Agent)
+	Source    string // "local" (Local Engine) 或 "agent" (LLM Agent)
 }
 
 // NewConversationHistory 创建对话历史管理器

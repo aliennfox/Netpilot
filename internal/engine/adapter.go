@@ -52,10 +52,10 @@ type ProxyInfo struct {
 }
 
 type ProxyGroup struct {
-	Tag     string      `json:"tag"`
-	Type    string      `json:"type"`
-	Now     string      `json:"now"`
-	All     []ProxyInfo `json:"all"`
+	Tag  string      `json:"tag"`
+	Type string      `json:"type"`
+	Now  string      `json:"now"`
+	All  []ProxyInfo `json:"all"`
 }
 
 type LatencyResult struct {

@@ -11,7 +11,7 @@ import (
 // Orchestrator 协调多角色 Agent 完成任务。
 // 根据 ClassifyTask 的结果决定走哪些角色，按 Diagnose → Configure → Verify 顺序执行。
 type Orchestrator struct {
-	agent   *SingleAgent
+	agent    *SingleAgent
 	pipeline *tool.ToolPipeline
 }
 
@@ -19,7 +19,7 @@ func NewOrchestrator(llm *LLMClient, pipeline *tool.ToolPipeline, assembler *Pro
 	// 每个角色最多 5 次迭代
 	agent := NewSingleAgent(llm, pipeline, assembler, tools, 5)
 	return &Orchestrator{
-		agent:   agent,
+		agent:    agent,
 		pipeline: pipeline,
 	}
 }

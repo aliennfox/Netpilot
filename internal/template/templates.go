@@ -7,11 +7,11 @@ const ProxyPlaceholder = "__BEST_PROXY__"
 
 // Template 是一个预置分流模板
 type Template struct {
-	ID          string             `json:"id"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	Keywords    []string           `json:"keywords"`
-	Rules       []overlay.RouteRule `json:"rules"`
+	ID          string                   `json:"id"`
+	Name        string                   `json:"name"`
+	Description string                   `json:"description"`
+	Keywords    []string                 `json:"keywords"`
+	Rules       []overlay.RouteRule      `json:"rules"`
 	Outbounds   []map[string]interface{} `json:"outbounds,omitempty"`
 }
 
