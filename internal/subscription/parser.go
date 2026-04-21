@@ -15,14 +15,14 @@ import (
 // NodeConfig 是解析后的通用节点配置
 type NodeConfig struct {
 	Name        string
-	Type        string // "shadowsocks", "trojan", "vmess", "vless", "hysteria2"
+	Type        string // "shadowsocks", "trojan", "vmess", "vless", "hysteria2", "wireguard"
 	Server      string
 	Port        int
-	Password    string            // ss, trojan, hysteria2
-	Method      string            // ss 加密方式
-	UUID        string            // vmess, vless
-	AlterId     int               // vmess
-	Network     string            // vmess/vless 传输层 (ws, tcp, grpc...)
+	Password    string // ss, trojan, hysteria2
+	Method      string // ss 加密方式
+	UUID        string // vmess, vless
+	AlterId     int    // vmess
+	Network     string // vmess/vless 传输层 (ws, tcp, grpc...)
 	TLS         bool
 	SNI         string
 	Path        string            // ws path
@@ -46,32 +46,81 @@ func isInfoEntry(name string) bool {
 	return false
 }
 
-// FetchAndParse 下载订阅链接并解析节点列表
+// FetchAndParse 下载订阅链接并解析节点列表（向后兼容包装）
 func FetchAndParse(subURL string) ([]NodeConfig, error) {
+	nodes, _, err := FetchAndParseWithInfo(subURL)
+	return nodes, err
+}
+
+// FetchAndParseWithInfo 下载并解析订阅，同时提取 subscription-userinfo header
+func FetchAndParseWithInfo(subURL string) ([]NodeConfig, *UserInfo, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	req, err := http.NewRequest("GET", subURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("创建请求失败: %w", err)
+		return nil, nil, fmt.Errorf("创建请求失败: %w", err)
 	}
 	req.Header.Set("User-Agent", "Shadowrocket/1900 CFNetwork/1410.0.3 Darwin/22.6.0")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("下载订阅失败: %w", err)
+		return nil, nil, fmt.Errorf("下载订阅失败: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("订阅返回 HTTP %d", resp.StatusCode)
+		return nil, nil, fmt.Errorf("订阅返回 HTTP %d", resp.StatusCode)
+	}
+
+	// 提取 subscription-userinfo header
+	// 机场常见返回头之一：subscription-userinfo / Subscription-Userinfo
+	var info *UserInfo
+	if h := resp.Header.Get("subscription-userinfo"); h != "" {
+		info = ParseUserInfoHeader(h)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("读取响应失败: %w", err)
+		return nil, nil, fmt.Errorf("读取响应失败: %w", err)
 	}
 
-	return ParseSubscription(string(body))
+	nodes, err := ParseSubscription(string(body))
+	return nodes, info, err
+}
+
+// ParseUserInfoHeader 解析 "upload=1; download=2; total=10; expire=1700000000"
+func ParseUserInfoHeader(header string) *UserInfo {
+	info := &UserInfo{}
+	any := false
+	for _, part := range strings.Split(header, ";") {
+		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(kv[0]))
+		val, err := strconv.ParseInt(strings.TrimSpace(kv[1]), 10, 64)
+		if err != nil {
+			continue
+		}
+		switch key {
+		case "upload":
+			info.Upload = val
+			any = true
+		case "download":
+			info.Download = val
+			any = true
+		case "total":
+			info.Total = val
+			any = true
+		case "expire":
+			info.Expire = val
+			any = true
+		}
+	}
+	if !any {
+		return nil
+	}
+	return info
 }
 
 // ParseSubscription 解析 Base64 编码的订阅内容
@@ -142,6 +191,8 @@ func parseLine(line string) (NodeConfig, error) {
 		return parseVLess(line)
 	case strings.HasPrefix(line, "hysteria2://") || strings.HasPrefix(line, "hy2://"):
 		return parseHysteria2(line)
+	case strings.HasPrefix(line, "wireguard://") || strings.HasPrefix(line, "wg://"):
+		return parseWireGuard(line)
 	default:
 		return NodeConfig{}, fmt.Errorf("不支持的协议: %s", truncate(line, 20))
 	}
@@ -386,6 +437,9 @@ func parseVLess(uri string) (NodeConfig, error) {
 		if sid, ok := params["sid"]; ok {
 			node.Extra["short_id"] = sid
 		}
+		if spx, ok := params["spx"]; ok {
+			node.Extra["spider_x"] = decodeURIComponent(spx)
+		}
 	}
 
 	if node.Name == "" {
@@ -446,6 +500,71 @@ func parseHysteria2(uri string) (NodeConfig, error) {
 		}
 		if mport, ok := params["mport"]; ok && mport != "" {
 			node.Extra["hop_ports"] = mport
+		}
+	}
+
+	if node.Name == "" {
+		node.Name = fmt.Sprintf("%s:%d", node.Server, node.Port)
+	}
+	return node, nil
+}
+
+// parseWireGuard 解析 wireguard:// / wg:// URI
+// 格式: wireguard://privateKey@server:port?publickey=xxx&presharedkey=xxx&address=10.0.0.2/32&mtu=1420&reserved=0,0,0#name
+func parseWireGuard(uri string) (NodeConfig, error) {
+	node := NodeConfig{Type: "wireguard", Extra: map[string]string{}}
+
+	if idx := strings.LastIndex(uri, "#"); idx != -1 {
+		node.Name = decodeURIComponent(uri[idx+1:])
+		uri = uri[:idx]
+	}
+
+	body := strings.TrimPrefix(uri, "wireguard://")
+	body = strings.TrimPrefix(body, "wg://")
+
+	queryStr := ""
+	if idx := strings.Index(body, "?"); idx != -1 {
+		queryStr = body[idx+1:]
+		body = body[:idx]
+	}
+	body = strings.TrimRight(body, "/")
+
+	atIdx := strings.LastIndex(body, "@")
+	if atIdx == -1 {
+		return node, fmt.Errorf("wireguard URI 无 @")
+	}
+	// privateKey 可能是 URL-encoded base64
+	node.Extra["private_key"] = decodeURIComponent(body[:atIdx])
+
+	server, port, err := parseHostPort(body[atIdx+1:])
+	if err != nil {
+		return node, err
+	}
+	node.Server = server
+	node.Port = port
+
+	if queryStr != "" {
+		params := parseQuery(queryStr)
+		if pk, ok := params["publickey"]; ok && pk != "" {
+			node.Extra["peer_public_key"] = decodeURIComponent(pk)
+		}
+		if pk, ok := params["public_key"]; ok && pk != "" {
+			node.Extra["peer_public_key"] = decodeURIComponent(pk)
+		}
+		if psk, ok := params["presharedkey"]; ok && psk != "" {
+			node.Extra["pre_shared_key"] = decodeURIComponent(psk)
+		}
+		if addr, ok := params["address"]; ok && addr != "" {
+			node.Extra["local_address"] = decodeURIComponent(addr)
+		}
+		if addr, ok := params["ip"]; ok && addr != "" && node.Extra["local_address"] == "" {
+			node.Extra["local_address"] = decodeURIComponent(addr)
+		}
+		if mtu, ok := params["mtu"]; ok && mtu != "" {
+			node.Extra["mtu"] = mtu
+		}
+		if reserved, ok := params["reserved"]; ok && reserved != "" {
+			node.Extra["reserved"] = reserved
 		}
 	}
 

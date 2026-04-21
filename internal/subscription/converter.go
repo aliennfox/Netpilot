@@ -3,6 +3,7 @@ package subscription
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -29,6 +30,8 @@ func ConvertToSingboxOutbound(node NodeConfig) (map[string]interface{}, error) {
 		return convertVLess(node, tag)
 	case "hysteria2":
 		return convertHysteria2(node, tag)
+	case "wireguard":
+		return convertWireGuard(node, tag)
 	default:
 		return nil, fmt.Errorf("不支持的节点类型: %s", node.Type)
 	}
@@ -177,6 +180,54 @@ func convertHysteria2(node NodeConfig, tag string) (map[string]interface{}, erro
 	return ob, nil
 }
 
+func convertWireGuard(node NodeConfig, tag string) (map[string]interface{}, error) {
+	priv := node.Extra["private_key"]
+	peer := node.Extra["peer_public_key"]
+	if node.Server == "" || node.Port == 0 || priv == "" || peer == "" {
+		return nil, fmt.Errorf("WireGuard 节点缺少必要字段: server=%s port=%d private_key=%v peer_public_key=%v",
+			node.Server, node.Port, priv != "", peer != "")
+	}
+	ob := map[string]interface{}{
+		"type":            "wireguard",
+		"tag":             tag,
+		"server":          node.Server,
+		"server_port":     node.Port,
+		"private_key":     priv,
+		"peer_public_key": peer,
+	}
+	if addr := node.Extra["local_address"]; addr != "" {
+		// 支持多地址，逗号分隔
+		var list []interface{}
+		for _, a := range strings.Split(addr, ",") {
+			a = strings.TrimSpace(a)
+			if a != "" {
+				list = append(list, a)
+			}
+		}
+		ob["local_address"] = list
+	}
+	if psk := node.Extra["pre_shared_key"]; psk != "" {
+		ob["pre_shared_key"] = psk
+	}
+	if mtu := node.Extra["mtu"]; mtu != "" {
+		if n, err := strconv.Atoi(mtu); err == nil {
+			ob["mtu"] = n
+		}
+	}
+	if reserved := node.Extra["reserved"]; reserved != "" {
+		var list []interface{}
+		for _, p := range strings.Split(reserved, ",") {
+			if n, err := strconv.Atoi(strings.TrimSpace(p)); err == nil {
+				list = append(list, n)
+			}
+		}
+		if len(list) > 0 {
+			ob["reserved"] = list
+		}
+	}
+	return ob, nil
+}
+
 // addTransport 添加传输层配置（ws, grpc, h2）
 func addTransport(ob map[string]interface{}, node NodeConfig) {
 	switch node.Network {
@@ -254,8 +305,8 @@ func SummarizeNodes(nodes []NodeConfig) string {
 		}
 	}
 	var parts []string
-	order := []string{"shadowsocks", "trojan", "vmess", "vless", "hysteria2"}
-	labels := map[string]string{"shadowsocks": "SS", "trojan": "Trojan", "vmess": "VMess", "vless": "VLess", "hysteria2": "Hy2"}
+	order := []string{"shadowsocks", "trojan", "vmess", "vless", "hysteria2", "wireguard"}
+	labels := map[string]string{"shadowsocks": "SS", "trojan": "Trojan", "vmess": "VMess", "vless": "VLess", "hysteria2": "Hy2", "wireguard": "WG"}
 	for _, t := range order {
 		if c, ok := counts[t]; ok && c > 0 {
 			parts = append(parts, fmt.Sprintf("%s: %d", labels[t], c))

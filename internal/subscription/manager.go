@@ -41,7 +41,7 @@ func (m *SubscriptionManager) AddSubscription(name, url string) (int, string, er
 
 	// 下载并解析
 	fmt.Println("正在下载订阅...")
-	nodes, err := FetchAndParse(url)
+	nodes, userInfo, err := FetchAndParseWithInfo(url)
 	if err != nil {
 		return 0, "", fmt.Errorf("订阅解析失败: %v", err)
 	}
@@ -79,6 +79,9 @@ func (m *SubscriptionManager) AddSubscription(name, url string) (int, string, er
 	sub.Tags = tags
 	sub.NodeCount = len(outbounds)
 	sub.LastUpdate = time.Now()
+	if userInfo != nil {
+		sub.UserInfo = userInfo
+	}
 	_ = m.store.Update(sub)
 
 	summary := buildImportSummary(nodes, len(outbounds), skipped, sub)
@@ -123,7 +126,7 @@ func (m *SubscriptionManager) UpdateSubscription(id string) (int, string, error)
 	}
 
 	// 下载并解析
-	nodes, err := FetchAndParse(sub.URL)
+	nodes, userInfo, err := FetchAndParseWithInfo(sub.URL)
 	if err != nil {
 		return 0, "", fmt.Errorf("下载失败: %v", err)
 	}
@@ -153,6 +156,9 @@ func (m *SubscriptionManager) UpdateSubscription(id string) (int, string, error)
 	sub.Tags = newTags
 	sub.NodeCount = len(outbounds)
 	sub.LastUpdate = time.Now()
+	if userInfo != nil {
+		sub.UserInfo = userInfo
+	}
 	_ = m.store.Update(sub)
 
 	diff := len(outbounds) - oldCount
@@ -163,7 +169,11 @@ func (m *SubscriptionManager) UpdateSubscription(id string) (int, string, error)
 		diffStr = fmt.Sprintf("%d", diff)
 	}
 
-	return len(outbounds), fmt.Sprintf("%s: %d→%d 节点（%s）", sub.Name, oldCount, len(outbounds), diffStr), nil
+	msg := fmt.Sprintf("%s: %d→%d 节点（%s）", sub.Name, oldCount, len(outbounds), diffStr)
+	if quota := sub.UserInfo.Format(); quota != "" {
+		msg += "\n  📊 " + quota
+	}
+	return len(outbounds), msg, nil
 }
 
 // UpdateAll 更新所有订阅，返回汇总
@@ -302,6 +312,9 @@ func buildImportSummary(nodes []NodeConfig, imported, skipped int, sub *Subscrip
 		msg += fmt.Sprintf("\n📋 订阅信息: %s", info)
 	}
 	msg += fmt.Sprintf("\n已保存订阅: %s (%s)", sub.Name, sub.ID)
+	if quota := sub.UserInfo.Format(); quota != "" {
+		msg += "\n📊 " + quota
+	}
 	return msg
 }
 

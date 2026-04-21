@@ -9,16 +9,83 @@ import (
 	"time"
 )
 
+// UserInfo 来自 subscription-userinfo 响应头的流量配额信息
+// 字段单位：Upload/Download/Total 为字节，Expire 为 unix 秒
+type UserInfo struct {
+	Upload   int64 `json:"upload"`
+	Download int64 `json:"download"`
+	Total    int64 `json:"total"`
+	Expire   int64 `json:"expire"`
+}
+
+// Used 返回已用流量（上传+下载）字节数
+func (u *UserInfo) Used() int64 { return u.Upload + u.Download }
+
+// Remaining 返回剩余流量字节（Total - Used），<0 视为未知
+func (u *UserInfo) Remaining() int64 {
+	if u.Total <= 0 {
+		return -1
+	}
+	return u.Total - u.Used()
+}
+
+// ExpireTime 返回到期时间，零值表示未知
+func (u *UserInfo) ExpireTime() time.Time {
+	if u.Expire <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(u.Expire, 0)
+}
+
+// Format 返回人类可读的配额摘要
+func (u *UserInfo) Format() string {
+	if u == nil {
+		return ""
+	}
+	parts := []string{}
+	if u.Total > 0 {
+		parts = append(parts, fmt.Sprintf("流量 %s / %s", humanBytes(u.Used()), humanBytes(u.Total)))
+	} else if u.Used() > 0 {
+		parts = append(parts, fmt.Sprintf("已用 %s", humanBytes(u.Used())))
+	}
+	if t := u.ExpireTime(); !t.IsZero() {
+		days := int(time.Until(t).Hours() / 24)
+		parts = append(parts, fmt.Sprintf("到期 %s (剩 %d 天)", t.Format("2006-01-02"), days))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	out := parts[0]
+	for _, p := range parts[1:] {
+		out += " · " + p
+	}
+	return out
+}
+
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for n2 := n / unit; n2 >= unit; n2 /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.2f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
 // Subscription 表示一个订阅源
 type Subscription struct {
-	ID       string    `json:"id"`
-	Name     string    `json:"name"`
-	URL      string    `json:"url"`
-	NodeCount int      `json:"node_count"`
-	Tags     []string  `json:"tags"`             // 该订阅导入的 outbound tag 列表
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	URL        string    `json:"url"`
+	NodeCount  int       `json:"node_count"`
+	Tags       []string  `json:"tags"` // 该订阅导入的 outbound tag 列表
 	LastUpdate time.Time `json:"last_update"`
-	AutoUpdate bool     `json:"auto_update"`
-	Interval   int      `json:"interval_minutes"` // 自动更新间隔，默认 60
+	AutoUpdate bool      `json:"auto_update"`
+	Interval   int       `json:"interval_minutes"`    // 自动更新间隔，默认 60
+	UserInfo   *UserInfo `json:"user_info,omitempty"` // 流量配额（来自 subscription-userinfo header）
 }
 
 // SubscriptionStore 管理订阅的持久化存储
@@ -115,6 +182,14 @@ func (s *SubscriptionStore) Remove(id string) error {
 		return fmt.Errorf("订阅 %q 不存在", id)
 	}
 	s.Subscriptions = kept
+	return s.saveLocked()
+}
+
+// ReplaceAll 整体替换订阅列表并持久化。供 backup 导入使用。
+func (s *SubscriptionStore) ReplaceAll(subs []Subscription) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Subscriptions = subs
 	return s.saveLocked()
 }
 
