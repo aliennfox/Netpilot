@@ -16,6 +16,7 @@ import androidx.core.app.NotificationCompat
 import com.pilotty.app.MainActivity
 import com.pilotty.app.PilottyApp
 import com.pilotty.app.PilottyCore
+import com.pilotty.app.perapp.PerAppVpnPrefs
 import libbox.CommandServer
 import libbox.CommandServerHandler
 import libbox.Libbox
@@ -244,18 +245,22 @@ class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerH
         val tunBaseFile = File(filesDir, "configs/${PilottyApp.TUN_BASE_NAME}")
         val mergedFile = File(filesDir, "merged.json")
 
+        val perAppSnap = PerAppVpnPrefs.get(this).state.value
+
         if (mergedFile.exists() && mergedFile.length() > 0) {
             Log.i(TAG, "using config ${mergedFile.path}")
             val merged = mergedFile.readText()
-            if (tunBaseFile.exists() && tunBaseFile.length() > 0) {
-                return ConfigMerger.ensureTunInbound(merged, tunBaseFile.readText())
+            val withTun = if (tunBaseFile.exists() && tunBaseFile.length() > 0) {
+                ConfigMerger.ensureTunInbound(merged, tunBaseFile.readText())
+            } else {
+                Log.w(TAG, "tun base asset missing, merged.json used as-is (may lack tun inbound!)")
+                merged
             }
-            Log.w(TAG, "tun base asset missing, merged.json used as-is (may lack tun inbound!)")
-            return merged
+            return ConfigMerger.injectPerAppRules(withTun, perAppSnap)
         }
         if (tunBaseFile.exists() && tunBaseFile.length() > 0) {
             Log.i(TAG, "using config ${tunBaseFile.path} (no merged.json)")
-            return tunBaseFile.readText()
+            return ConfigMerger.injectPerAppRules(tunBaseFile.readText(), perAppSnap)
         }
         error("no sing-box config found; expected ${mergedFile.path} or ${tunBaseFile.path}")
     }

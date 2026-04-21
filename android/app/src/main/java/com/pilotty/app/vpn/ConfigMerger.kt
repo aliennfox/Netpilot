@@ -1,6 +1,7 @@
 package com.pilotty.app.vpn
 
 import android.util.Log
+import com.pilotty.app.perapp.PerAppVpnPrefs
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -41,6 +42,57 @@ object ConfigMerger {
     } catch (t: Throwable) {
         Log.w(TAG, "merge failed, using merged.json as-is", t)
         mergedJson
+    }
+
+    /**
+     * 把 Per-App VPN 偏好 (M14) 写到 tun inbound 的 include_package / exclude_package 字段。
+     *
+     * 说明:
+     *  - Off 模式 → 清掉两个字段 (全量代理)
+     *  - Allow(白名单) → 写 include_package = [...], 清空 exclude_package
+     *  - Deny(黑名单) → 写 exclude_package = [...], 清空 include_package
+     *
+     * libbox 走 sing-box 配置 → TunOptions → VpnService.Builder.addAllowedApplication
+     * /addDisallowedApplication 兜底。 `excludePackage` 里不加 "自家 package" 由
+     * `PilottyVpnService.openTun` 兜底处理 (行 97-98 硬写 packageName), 保证 TUN 流量
+     * 不回环。
+     */
+    fun injectPerAppRules(configJson: String, snapshot: PerAppVpnPrefs.Snapshot): String {
+        return try {
+            val root = JSONObject(configJson)
+            val inbounds = root.optJSONArray("inbounds") ?: return configJson
+            var tun: JSONObject? = null
+            for (i in 0 until inbounds.length()) {
+                val inb = inbounds.optJSONObject(i) ?: continue
+                if (inb.optString("type") == "tun") {
+                    tun = inb
+                    break
+                }
+            }
+            if (tun == null) {
+                Log.w(TAG, "injectPerAppRules: no tun inbound, per-app 规则写不进去")
+                return configJson
+            }
+
+            tun.remove("include_package")
+            tun.remove("exclude_package")
+            when (snapshot.mode) {
+                PerAppVpnPrefs.Mode.Off -> {
+                    // 两个字段都已 remove, 完事
+                }
+                PerAppVpnPrefs.Mode.Allow -> if (snapshot.packages.isNotEmpty()) {
+                    tun.put("include_package", JSONArray(snapshot.packages.toList()))
+                }
+                PerAppVpnPrefs.Mode.Deny -> if (snapshot.packages.isNotEmpty()) {
+                    tun.put("exclude_package", JSONArray(snapshot.packages.toList()))
+                }
+            }
+            Log.i(TAG, "injectPerAppRules mode=${snapshot.mode} pkgs=${snapshot.packages.size}")
+            root.toString()
+        } catch (t: Throwable) {
+            Log.w(TAG, "injectPerAppRules failed, config unchanged", t)
+            configJson
+        }
     }
 
     private fun mergeInbounds(merged: JSONObject, base: JSONObject) {
