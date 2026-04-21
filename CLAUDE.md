@@ -274,8 +274,10 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
   - [x] 真机 `09211JEC204960` 走流量验证:Chrome/GCM 等 UID 经 TUN → libbox → 香港-1 VLESS → 上游;/connections 观测到 `api.ipify.org:443 via ['香港-1','proxy-group']` 等真连接;延迟测 香港-1 2919ms、日本-1 4786ms (2026-04-22)
   - [x] **Android 端"真能用"闭环**(2026-04-22 同日): 订阅 UI(Settings tab 管理 add/remove/update-all) + 节点列表真数据(type/alive/latency) + 切换节点 + VpnService `ACTION_RELOAD` 热重载 + 自动延迟测速。ipdata.co 真机验证走 San-Jose VLESS 出口。
 - [ ] **3B-4** **Android 抛光到可发布 (Polish-to-Shippable)** — 原 iOS NE 任务已 DEFERRED
-  - 范围:`docs/android-mvp-gap.md` 中的 M1-M9 Must-have 项 (~20-26h 工时)
-  - 交付:签名 release APK + Google Play Data Safety 就绪 + 订阅 M4 数据正确 + LLM API Key UI + 最小日志导出 + 异常通知
+  - 范围(2026-04-22 扩充):`docs/android-mvp-gap.md` 中的 M1-M13 Must-have 项 (~45-57h 工时 ≈ 6 天)
+    - M1-M9 (UI/合规/日志):原计划,~20-26h
+    - **M10-M13 (协议 + 订阅格式基线,新增):~25-31h** — 对应 Known Issues #M18 #M19,对齐 Karing/NekoBox 消费级门槛
+  - 交付:签名 release APK + Google Play Data Safety 就绪 + 主流协议覆盖(TUIC/AnyTLS/ShadowTLS/Hy1/VLESS-flow)+ Clash/sing-box 订阅格式解析 + LLM API Key UI + 最小日志导出 + 异常通知
   - 原 iOS NEPacketTunnelProviderExtension 实现计划见 `docs/phase-3b-4-plan.md` (整本冻结, 顶部已标注 DEFERRED)
 - [ ] **3B-5** **iOS (DEFERRED, 无排期)** — Android v1 发布并观察稳定性 30 天后重评估
   - 触发信号:v1 无 P0 崩溃 + DAU > 50 + 用户明确要 iOS
@@ -428,10 +430,22 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - 修复: `GetProxyGroup` 额外拉一次 `/proxies` 把每个成员的 history 末尾 delay 取出来填 `ProxyInfo.Latency`;`mobile.Client.Nodes()` 再和 `overlay.ListOutbounds()` 合并拿 server/port。Kotlin 端 `NodesViewModel` 首次进页面若发现所有节点 latency=0 且 VPN 在跑, 自动触发 `test_latency_all` 然后刷新(sing-box 不 autoprobe, history 靠 `/delay` 显式填)
 - 位置: `internal/engine/singbox_adapter.go:92-155`, `mobile/netpilot.go:327-385`, `android/.../ui/Screens.kt:NodesViewModel.refresh`
 
-**#M17 — 订阅解析器对 `ss://...?type=tcp` 静默跳过**(2026-04-22 发现,未修)
-- 现象: `internal/subscription/parser.go` 的 SS URL 解析把 `server:port?type=tcp` 的 port 当成 `8388?type=tcp` 整体 parse, 失败后跳过整条。logcat 可见 "端口解析失败" 警告
-- 影响: 订阅里每个 v2ray-subscribe 格式的 SS 节点会丢失(用户当前只看到 4 个 SJ 节点 + 3 个别的,源站可能更多)
-- 修复方向: 在 parser 的 host:port 提取之前 `strings.SplitN(hostport, "?", 2)[0]`。写对应单测(对 v2subscribe / clash / sing-box 三种 SS 格式分别)
+**#M17 — 订阅解析器对 `ss://...?type=tcp` 静默跳过** ✅ **已修 + 已加测试(2026-04-22 当日)**
+- 修复: `internal/subscription/parser.go:209-291` 进 `parseHostPort` 之前先 `strings.Index(body, "?")` 剥 query,query 参数回填 `node.Extra` / `node.Network`
+- 测试: `internal/subscription/parser_test.go` 加 5 个 case(sip002 basic / `?type=tcp` 回归 / `?plugin=obfs-local;obfs=tls` / legacy all-base64 / malformed),覆盖 SIP002 主要格式
+- 遗留: 其他 parser(vmess/vless/trojan/hysteria2/wg)同类单测尚未写 —— 归入 `docs/android-mvp-gap.md` M4 的"剩余"项,不在 #M17 本身
+
+**#M18 — 协议 URI 解析器覆盖低于消费级基线**(2026-04-22 经 Karing/NekoBox 四方对照识别)
+- 现象: `internal/subscription/parser.go:182-198` 的 `parseLine` switch 只识别 6 个 scheme:`ss / trojan / vmess / vless / hysteria2|hy2 / wireguard|wg`。Karing/NekoBox/Hiddify **均支持**的 `tuic://` / `anytls://` / `shadowtls://` / `hysteria://`(v1) 全部静默丢弃。注:VLESS Reality `flow` 字段已在 converter.go:116-117 映射到 outbound.flow(本次核对修正),剩 `fp`/`spx` 二字段仅进 Extra 未 write-through,需验证 sing-box 是否期望这些
+- 影响: 用户粘贴 2024 年后新机场订阅, 每条不支持的 URI 都被 `parseLine` 默默 skip(跟 #M17 表现一模一样 "明明 20 节点只剩 8 个")
+- 修复: `docs/android-mvp-gap.md` M10 (~8-12h),在 Phase 3B-4 内完成。参考 `~/References/nekobox/app/src/main/java/io/nekohasekai/sagernet/fmt/` 各子目录 + `moe/matsuri/nb4a/proxy/anytls|shadowtls/`
+- 关联: 明确延期的 SSR/Mieru/Naive/SSH/Trojan-Go 见 gap 文档 W11-W15
+
+**#M19 — 订阅格式仅支持 Base64-URI 列表, 不识别 Clash YAML**(2026-04-22 对照识别)
+- 现象: `internal/subscription/parser.go:127-154` `ParseSubscription` 只走 `tryBase64Decode` → 按行 URI 解析。 `proxies:` 顶层 YAML(Clash / Clash.Meta / Mihomo 订阅)直接报"Base64 解码失败"。 sing-box 自家 JSON 订阅也不识别
+- 影响: 国内机场生态"Clash 优先, v2ray/sing-box 其次", 约 50%+ 的消费级机场**只**给 Clash 订阅。用户粘贴进来立刻被拒, 是 Karing 相对我们的最大 UX 护城河
+- 修复: `docs/android-mvp-gap.md` M11 (~8-10h Clash YAML) + M12 (~4-6h sing-box JSON)。参考 NekoBox `~/References/nekobox/app/src/main/java/io/nekohasekai/sagernet/group/RawUpdater.kt:227-243` 的 SnakeYAML 方案, Go 侧等价用 `gopkg.in/yaml.v3`;记得修完 rebuild aar(#M8 纪律)
+- 关联: M13 系统回归矩阵把 M10+M11+M12 的交叉组合拉回归
 
 ### 🟢 轻微
 

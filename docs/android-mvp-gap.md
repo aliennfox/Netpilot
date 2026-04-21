@@ -1,7 +1,15 @@
 # Android MVP Gap — v1 发布路径
 
-> **生成日期**: 2026-04-22 · 对应战略转向:iOS 暂停,Android 单平台推到可发布状态
-> **基线比对**: NekoBox for Android (`~/References/nekobox/`) 的发布形态
+> **生成日期**: 2026-04-22 · **最后扩充**: 2026-04-22(加入 Karing / Hiddify / v2rayNG / Clash Meta 四方对照 + 协议/订阅格式基线)
+> **战略对照**: iOS 暂停,Android 单平台推到可发布状态
+> **基线比对**:
+>
+> - **NekoBox for Android** (`~/References/nekobox/`) —— sing-box 同核权威功能全集,UI 发布形态参考
+> - **Karing** ([karing.app](https://karing.app)) —— **用户重合度最高的直接竞品**(sing-box + 消费级 UX + 多核 + 多订阅格式)
+> - **Hiddify-Next** (`~/References/hiddify-app/`) —— sing-box 跨平台中间态
+> - **Clash Meta / Mihomo** —— 中文主流,走自研内核,占据大量机场默认订阅格式
+> - **v2rayNG** —— Xray-core 老牌,很多老机场唯一出的就是这个订阅
+>
 > **当前版本**: `versionCode=1 / versionName=0.1.0`, debug APK 60MB, 真机走流量验证通过 (Pixel 4a, 2026-04-22)
 
 ---
@@ -10,9 +18,11 @@
 
 本文档把"还差什么才能把 APK 发给人用"拆成三档:
 
-- **Must-have (M)**: 不做就不能叫 v1 发布,会被 Google Play 拒审、或会在第一次安装时就让用户装不上 / 用不了
+- **Must-have (M)**: 不做就不能叫 v1 发布,会被 Google Play 拒审、或会在第一次安装时就让用户装不上 / 用不了 / 关键场景(订阅导入、主流协议握手)就失败
 - **Should-have (S)**: 做了明显第一印象更好,NekoBox 这类竞品默认都有。不做也能塞进一个熟人群的小范围内测
 - **Won't-do (W)**: 本轮 v1 明确不做,写清楚理由避免后续反复争论
+
+> **协议 / 订阅格式是 must-have 的原生一部分**(2026-04-22 扩充)。 原先 M1-M9 偏 Android 外观 + 合规,没有正视"用户订阅粘贴进来能解析吗 / 节点拨出能握手吗"这条更基础的门槛。 新增 M10-M13 把这条补齐。
 
 每项条目的元数据字段:
 - **来源**: Google Play Policy / Android 平台限制 / NekoBox 对照 / 已知 Issue (#M17 等) / 用户 UX 直觉
@@ -44,12 +54,68 @@
 - **工时**: 2h
 - **用户影响**: 不做 → 用户在通知栏看到"VPN 已连接" 但不知道节点是哪个,想停 VPN 必须掏 App
 
-### M4. #M17 订阅解析器 SS URL 丢节点
-- **现状**: Known Issue #M17。 `internal/subscription/parser.go` 的 SS `ss://...?type=tcp` 情况把 port 当成 `8388?type=tcp` 解析失败, 整条 node 被跳过。实际观察到用户订阅里的 SS 节点大量丢失
-- **需要**: 在 parser 的 host:port 提取之前 `strings.SplitN(hostport, "?", 2)[0]`;单测覆盖 v2subscribe / clash / sing-box 三种 SS 格式
-- **来源**: CLAUDE.md Known Issues #M17 (今天才识别)
-- **工时**: 1h 修复 + 1h 测试
-- **用户影响**: 不做 → 用户感觉"订阅里明明有 20 个节点,到 App 里只剩 3 个"。当成 bug 找我们
+### M4. #M17 订阅解析器 SS URL 丢节点 ✅ 已修(2026-04-22 晚)
+- **状态**: fix 已落在 `internal/subscription/parser.go:209-291` —— 进 `parseHostPort` 之前先 `strings.Index(body, "?")` 剥 query,query 参数回填 `node.Extra` / `node.Network`。`parser_test.go` 已加 5 个 case(sip002 basic / `?type=tcp` 回归 / `?plugin=obfs-local;obfs=tls` / legacy all-base64 / malformed)覆盖 SIP002 三种 SS 格式
+- **剩余**: (a) 其他 parser(vmess/vless/trojan/hysteria2/wg)同步写表驱动单测,同一类 bug 不要靠"下次 logcat 见"才发现; (b) CLAUDE.md #M17 条目应更新为"已修,已覆盖测试"
+- **工时**: fix+单测 ~ 1h 已花;其它 parser 单测补齐另计 2-3h
+- **用户影响**: 已消除"订阅 20 个节点只显示 3 个"的问题
+
+### M10. 协议解析器扩充 (TUIC v5 / AnyTLS / ShadowTLS / Hysteria v1 / VLESS Reality full)
+- **现状**: `internal/subscription/parser.go:182-198` 的 `parseLine` switch 只识别 6 个 scheme:`ss / trojan / vmess / vless / hysteria2|hy2 / wireguard|wg`。机场常见但我们**直接丢弃**的 URI 有:
+  - `tuic://` —— TUIC v5,基于 QUIC,2024 年后新机场标配(Karing / Hiddify / NekoBox 全支持,NekoBox 位置:`~/References/nekobox/app/src/main/java/io/nekohasekai/sagernet/fmt/tuic/` + `TuicSettingsActivity.kt`)
+  - `anytls://` —— AnyTLS,mRIYIlTv 等小众但上升中协议(NekoBox:`~/References/nekobox/app/src/main/java/moe/matsuri/nb4a/proxy/anytls/AnyTLSFmt.kt` + `AnyTLSBean.java`;sing-box 官方 outbound 支持)
+  - `shadowtls://` —— ShadowTLS,专门对抗 SNI 嗅探的抗审查协议(NekoBox:`~/References/nekobox/app/src/main/java/moe/matsuri/nb4a/proxy/shadowtls/ShadowTLSFmt.kt`)
+  - `hysteria://` —— Hysteria v1(**非** hysteria2),仍部署在大量旧机场,不等于 hy2 向后兼容(NekoBox:`~/References/nekobox/app/src/main/java/io/nekohasekai/sagernet/fmt/hysteria/HysteriaBean.kt` 单 bean 同时承载 v1/v2,scheme 分别是 `hysteria://` / `hysteria2://`)
+  - **VLESS Reality 全量字段**:我们的 `parseVLess` (parser.go:401-474) 已捕获 `pbk / sid / fp / flow / spx / security=reality`,converter.go:127-135 映射到 sing-box `tls.reality.{public_key, short_id}`,converter.go:116-117 已把 `node.Extra["flow"]` 写入 outbound `flow` 字段。**解析 + 映射已齐**,剩下的只是:(a) 表驱动单测覆盖 `flow=xtls-rprx-vision`;(b) 真机回归(目前真机走通的是 VLESS+Reality 香港-1,需确认该节点原订阅有 `flow` 字段才证完整链);(c) `fp / spx` 两个字段当前只进 Extra,未见 converter 写入 outbound(需 verify sing-box 是否期望这些在 `tls.reality.fingerprint` 等位置)
+- **需要**:
+  - [ ] `parseTuic()` + `convertTuic()` + sing-box outbound `type=tuic`(字段:uuid, password, congestion_control, udp_relay_mode, alpn, sni)
+  - [ ] `parseAnyTLS()` + `convertAnyTLS()` + sing-box outbound `type=anytls`
+  - [ ] `parseShadowTLS()` + `convertShadowTLS()` + sing-box outbound `type=shadowtls`(注意:ShadowTLS 常作为 SS 的前置,可能要两段 outbound 链)
+  - [ ] `parseHysteria1()` + `convertHysteria()` + sing-box outbound `type=hysteria`(注意参数和 hy2 不一样:`auth_str` vs hy2 的 `password`,`up_mbps/down_mbps` 必填)
+  - [ ] `convertVLess` 加 `flow` 字段透传 + 单测覆盖 `flow=xtls-rprx-vision`
+- **来源**:
+  - Karing 官网 feature list 声明 "All sing-box protocols"(含 TUIC / AnyTLS / ShadowTLS / Hysteria)
+  - NekoBox 协议全集:上述 `fmt/` 各子目录 + `moe/matsuri/nb4a/proxy/`
+  - sing-box 官方 outbound 类型清单:[sing-box.sagernet.org/configuration/outbound](https://sing-box.sagernet.org/configuration/outbound/)(我们已 aar 嵌入 libbox 支持这些 outbound type,只差订阅侧 URI 解析)
+- **工时**: 5 个 parser × 1-2h URI 解析 + converter 映射 + 表驱动单测 ≈ 8-12h,集中做可压到 1.5 天
+- **用户影响**: 不做 → 用户粘贴机场订阅,**每条不支持的 URI 都被 `parseLine` 静默 skip**,跟 #M17 表现一模一样("明明 20 节点只剩 8 个")。在 TUIC 普及的机场上更严重,可能从"丢 20%"变成"丢 70%"
+- **验证方式**: (a) 每个 parser 加表驱动测试;(b) 找 3 家已知机场做真机粘贴回归,比对"机场网页公布节点数"与"Pilotty 列表节点数"
+
+### M11. 订阅格式扩充 — Clash / Clash.Meta YAML
+- **现状**: `internal/subscription/parser.go:127-154` 的 `ParseSubscription` **只接受 base64-encoded URI 列表**。`tryBase64Decode` 失败就返回"Base64 解码失败"。 我们当前连 `proxies:` 开头的纯 YAML 订阅(Clash 家族)都不尝试解析,更别说对应的节点 map → `NodeConfig`
+- **为什么关键**:国内机场生态是"Clash 优先,v2ray/sing-box 其次"。 很多机场**只**给 Clash 订阅链接,连 base64 URI 列表都不给。NekoBox `group/RawUpdater.kt:227-243` 的做法是:HTTP 拿原文后 `if (text.contains("proxies:"))` 走 SnakeYAML → 遍历 `yaml["proxies"]` 的 List<Map<String, Any?>>,逐个映射到内部 Bean。 Karing 的公开 feature list 把"支持 Clash/Clash.Meta 订阅"列在首位就是因为这是消费级用户的**入场门票**。粘贴进来被拒 = 用户流失
+- **需要**:
+  - [ ] `ParseSubscription` 入口先探测:文本 TrimSpace 后 `HasPrefix("proxies:")` 或 `Contains("\nproxies:")`(YAML 顶层 key 检测)→ 走 Clash 路径;否则走现有 base64
+  - [ ] 新增 `internal/subscription/clash.go`:`ParseClashYAML([]byte) ([]NodeConfig, error)`,用 `gopkg.in/yaml.v3` 把 `proxies` 数组反序列化成 `[]map[string]any`,分 type(`type: ss / vmess / vless / trojan / hysteria2 / tuic / anytls / wireguard...`)映射到 `NodeConfig`
+  - [ ] Clash 特有字段覆盖: `cipher → Method`, `plugin-opts` (ss), `ws-opts.path/headers.Host` (vmess/vless), `reality-opts.{public-key,short-id}` (vless reality)
+  - [ ] 表驱动单测:挑 3 家主流机场的 sample yaml(脱敏后)回归
+  - [ ] `go.mod` 增 `gopkg.in/yaml.v3` 依赖;注意 rebuild aar (#M8 纪律)
+- **来源**:
+  - NekoBox `~/References/nekobox/app/src/main/java/io/nekohasekai/sagernet/group/RawUpdater.kt:231-243`(SnakeYAML 方案)
+  - Clash.Meta 订阅示例:[wiki.metacubex.one/config/proxies](https://wiki.metacubex.one/config/proxies/)
+  - sing-box 官方没有"clash 订阅"概念(只有自家 JSON 订阅),但嵌入式 libbox 不关心 URI 层,parser 输出 `NodeConfig` → 现有 converter 即可
+- **工时**: 8-10h(依赖接入 + 映射 + 测试 + 真机回归)≈ 1 天
+- **用户影响**: 不做 → 10 个机场里可能 5 个粘贴进来立刻报"Base64 解码失败",完全无法使用。这是 **Karing 相对我们的最大 UX 护城河**,不抹平就别谈消费化
+
+### M12. sing-box 原生订阅格式(自家 JSON)回归验证
+- **现状**: `ParseSubscription` 走 base64 → 按行拆 → 每行当 URI 解析。实际上 sing-box 官方订阅格式是"一个 JSON 顶层含 `outbounds` 数组",不是 URI 列表。我们从没验证过粘贴一个纯 sing-box JSON 订阅会发生什么(预期:base64 解码失败就退出)
+- **需要**:
+  - [ ] `ParseSubscription` 格式探测里加分支:`HasPrefix("{")` 且能 Unmarshal 出 `{"outbounds":[...]}` → 走 sing-box native 路径
+  - [ ] 新增 `ParseSingBoxJSON`:直接把每个 outbound 元素映射回 `NodeConfig`(含 vless/vmess/tuic/anytls/shadowtls 所有 sing-box 原生支持类型)
+  - [ ] 边界:多 outbound / selector 嵌套 / detour 链该怎么展开成扁平节点列表,需要设计决策
+- **来源**: sing-box 官方 [Configuration Format](https://sing-box.sagernet.org/configuration/)
+- **工时**: 4-6h
+- **用户影响**: 不做 → 少数 sing-box 原生机场粘贴失败。比 Clash 影响小,但排到 must 是因为"我们是 sing-box 客户端"这件事用户有心理期待
+
+### M13. 协议 + 订阅格式真机回归矩阵
+- **现状**: M10-M12 做完后,缺系统回归:给定(3 家真实机场)× (2 种订阅格式 Clash / base64)× (支持的 10+ 种 outbound type),实际能跑通的组合有多少?目前只靠 `scripts/smoke.sh` 跑一条路径,盲点大
+- **需要**:
+  - [ ] 在 `scripts/` 下加 `subscription-matrix-test.sh`:对每个脱敏 fixture 文件跑 `parse → convert → sing-box config validate → 启动 → ping` 全链
+  - [ ] 失败 case 自动归档到 `testdata/failed/`
+  - [ ] 把通过率写进 release checklist
+- **来源**: 没有直接参考,自造。理由:M10 M11 引入的代码面太大,不自动化回归 = 下一个 #M17 在路上
+- **工时**: 3-4h 搭架子 + 收 fixture 1-2h + 持续维护
+- **用户影响**: 不做 → "发布时测过 OK,两周后新机场订阅格式微调就挂"
 
 ### M5. 启动空状态引导
 - **现状**: `SettingsScreen.kt:62-66` 只有一句"还没有订阅。点右上「添加」粘贴 URL 导入"。 Dashboard 首屏在没订阅时显示节点名 "—",模式 "rule",连接数 0。 没有强引导告诉新用户第一步是什么
@@ -167,6 +233,21 @@
 - **工时**: 3h
 - **用户影响**: 不做 → 用户想自己看日志要 `adb logcat`,几乎不可能
 
+### S12. 基础协议补完 — SOCKS 4/5 & HTTP(S)
+- **现状**: `parseLine` switch 不识别 `socks://` / `socks5://` / `http://` / `https://`。NekoBox 的 `fmt/socks/SOCKSBean` + `fmt/http/HttpBean` 都有,是"一切代理的起点"
+- **为什么不是 Must-have**:现代机场很少以 SOCKS/HTTP URL 形式派发订阅,通常是"主协议 + 回退 SOCKS 本地链";用户遇到的情境多是手动配置跳板机
+- **需要**: (a) `parseSocks` / `parseHttp` 两个 parser + 同名 converter(sing-box outbound `type: socks / http`,几乎零映射成本,直接 host/port/user/password);(b) 对 `socks5+tls` / `https` 握手 TLS 字段透传
+- **来源**: NekoBox `~/References/nekobox/app/src/main/java/io/nekohasekai/sagernet/fmt/socks/` + `fmt/http/`;sing-box 官方 [socks outbound](https://sing-box.sagernet.org/configuration/outbound/socks/) + [http outbound](https://sing-box.sagernet.org/configuration/outbound/http/)
+- **工时**: 3-4h(两个协议合做,大量代码可共享 `parseHostPort`)
+- **用户影响**: 不做 → 企业用户想配"走公司跳板机然后再去机场"的链式分流,当前只能用 Agent `create_chain` + 手改 overlay,消费级用户就放弃了
+
+### S13. 节点手工单条粘贴(非订阅 URL)
+- **现状**: Settings 只接受 http(s):// 订阅 URL;不接受直接粘贴 `vless://...#HK` 单条
+- **需要**: 添加订阅对话框文本变化监听:若是 `ss:// / vmess:// / vless:// / trojan:// / tuic://...` 等 scheme,直接当单节点 import(复用 parser 层)
+- **来源**: Karing / NekoBox / v2rayNG 都支持。 零星分享节点场景(朋友丢一条节点给你)
+- **工时**: 1h(UI 分支)
+- **用户影响**: 不做 → 用户必须找地方挂个 http server 把单节点包成订阅再粘,根本没人会这样做 → 放弃本 App
+
 ---
 
 ## 3. Won't-Do for v1 (显式延期)
@@ -212,22 +293,80 @@
 - **理由**: S10 只做基础设施 (字符串抽到 resources)。英文 / 繁体 / 日文翻译不做
 - **触发重启信号**: 海外分发准备
 
+### W11. SSR (ShadowsocksR)
+- **理由**: 纯 legacy 协议,核心机场 2023 年后基本弃用。sing-box **不原生支持** SSR outbound(需要 SS-Rust + ssr-local 插件),抄实现意味着引入外部二进制/插件系统(见 W5)。NekoBox 也是靠插件支持,不是内核直支持
+- **来源**: sing-box issue 列表 + [sing-box outbound 官方清单](https://sing-box.sagernet.org/configuration/outbound/)不含 ssr
+- **触发重启信号**: 出现 >10 用户反馈"只有 SSR 订阅可用"
+
+### W12. Mieru
+- **理由**: 2024 年出现的新协议,绝对用户量极小;sing-box v1.13 支持 `mieru` outbound 但稳定性存疑(社区反馈较少);NekoBox 给了 `MieruSettingsActivity.kt` 专门适配其配置复杂度。投 ROI 不合算
+- **触发重启信号**: sing-box 社区确认 mieru 稳定 + 机场开始默认分发
+
+### W13. NaiveProxy
+- **理由**: NaiveProxy 走 Chrome 网络栈,sing-box 原生不支持(NekoBox 用独立二进制插件:`naive_preferences.xml`);绝对用户量极小,主要是老 clash 生态残留
+- **来源**: sing-box outbound 清单不含 naive;NekoBox `PluginManager.kt` 走插件路径
+- **触发重启信号**: 需求量 > TUIC
+
+### W14. SSH as proxy
+- **理由**: Hiddify 独有特性,主要服务伊朗等绕过场景;sing-box 虽有 `ssh` outbound,但中文消费级市场几乎零需求。投入 ROI 最差
+- **来源**: sing-box [ssh outbound](https://sing-box.sagernet.org/configuration/outbound/ssh/)
+- **触发重启信号**: Pilotty 进入 Hiddify 主用户区(伊朗 / 俄语区)
+
+### W15. Trojan-Go
+- **理由**: 基于 Trojan 的延伸协议,sing-box 不原生支持(NekoBox 用 `fmt/trojan_go/` + 独立插件进程);标准 Trojan 已覆盖 95% 场景,Trojan-Go 的 ws-fallback 等差异化对用户不可见
+- **触发重启信号**: 大面积 Trojan-Go only 机场出现(极不可能)
+
 ---
 
-## 4. 汇总表
+## 4. 竞争定位(2026-04-22 扩充)
+
+Pilotty 的目标用户画像**重合度最高的是 Karing**(消费级 UX / 多订阅格式容忍 / 主流 GPT-aware 用户),而不是 NekoBox(幂级用户)或 Hiddify(抗审查重灾区用户)。
+
+**匹配 Karing 的协议 + 订阅基线是"入场门票"**(M10-M13 覆盖)。不抹平这条基线,Pilotty 永远是 NekoBox 的功能子集 + 一个看起来很酷但实际没法用的 Chat tab。
+
+**AI Agent 层(自然语言指令 / tool-call 可观测性 / 自动快照 + 回滚)是真正的护城河**,5 家竞品(NekoBox / Hiddify / Karing / Clash Meta / v2rayNG)无一具备:
+
+| 能力 | NekoBox | Hiddify | Karing | Clash Meta | v2rayNG | Pilotty |
+|---|---|---|---|---|---|---|
+| sing-box 内核 | ✅ | ✅ | ✅(多核) | ❌(自研) | ❌(Xray) | ✅ |
+| Clash YAML 订阅 | ✅ | ✅ | ✅ | ✅ | ❌ | **❌(M11)** |
+| sing-box JSON 订阅 | ✅ | ✅ | ✅ | ❌ | ❌ | **部分(M12)** |
+| TUIC v5 | ✅ | ✅ | ✅ | ✅ | ❌ | **❌(M10)** |
+| AnyTLS | ✅ | ❌ | ✅ | ⚠️(部分) | ❌ | **❌(M10)** |
+| ShadowTLS | ✅ | ✅ | ✅ | ✅ | ❌ | **❌(M10)** |
+| Hysteria v1 | ✅ | ✅ | ✅ | ✅ | ❌ | **❌(M10)** |
+| VLESS Reality Vision | ✅ | ✅ | ✅ | ✅ | ✅ | **部分(M10)** |
+| 自然语言 Agent | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Tool-call 可审计 | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| 自动快照 + 回滚 | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| 中文 LLM 原生接入 | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+
+**战略推论**:
+
+1. **3B-4 阶段 必须包含协议 + 订阅格式基线**(M10-M13),不只是 UI 抛光。不补这一条,v1 发布即"比 Karing 少 4 种协议、少 1 种订阅格式",用户看完 protocol 列表就劝退
+2. 补完基线的额外成本约 **3 天**(见 section 5 新增项),是 must-have 总工时的 ~50% 增量。收益是把"无法使用"变成"功能对齐 + Agent 差异化"
+3. 未来所有"我们要不要加 XX 协议"的决策,先查 Karing 是否支持;Karing 有 = 用户会问,必须排进路线;Karing 无 = 延后
+
+---
+
+## 5. 汇总表
 
 | 档 | 条目 | 工时 | 关键阻塞? |
 |---|---|---|---|
 | M1 | 签名 + 可发布构建 | 3-4h | **是** |
 | M2 | 应用图标 + 应用名 | 1-2h | **是** |
 | M3 | 通知文案 + 图标 | 2h | 否 但低成本 |
-| M4 | #M17 SS 解析丢节点 | 2h | **是** (数据正确性) |
+| M4 | #M17 SS 解析丢节点 ✅ 已修 | 已花 ~1h | (数据正确性,已消) |
 | M5 | 启动空状态引导 | 2-3h | 否 但砸留存 |
 | M6 | 隐私政策 + 权限说明 | 2-3h | **是** (Play policy) |
 | M7 | 最小日志导出 | 3h | 否 但砸支持 |
 | M8 | LLM API Key 配置 | 3-4h | **是** (Chat tab 否则废) |
 | M9 | VPN 异常反馈 | 2-3h | 否 但砸信任 |
-| **M 合计** | | **20-26h** | |
+| **M10** | **协议解析器 TUIC/AnyTLS/ShadowTLS/Hy1/VLESS-flow** | **8-12h** | **是(消费级对齐)** |
+| **M11** | **Clash / Clash.Meta YAML 订阅格式** | **8-10h** | **是(消费级入场券)** |
+| **M12** | **sing-box native JSON 订阅** | **4-6h** | 是(品牌一致性) |
+| **M13** | **订阅 × 协议真机回归矩阵** | **4-6h** | 否(自我保护) |
+| **M 合计** | | **~45-57h(原 20-26h + 新增 ~25-31h)** | |
 | S1 | Dark Theme | 2-3h | |
 | S2 | 流量图 / 连接列表 | 6-8h | |
 | S3 | Quick Settings Tile | 3h | |
@@ -239,23 +378,31 @@
 | S9 | 路由规则编辑器 | 6-8h | |
 | S10 | i18n 基础设施 | 3-4h | |
 | S11 | In-App 日志 Viewer | 3h | |
-| **S 合计** | | **43-56h** | |
+| **S12** | **SOCKS 4/5 + HTTP(S) 基础协议** | **3-4h** | |
+| **S13** | **单条节点 URI 粘贴导入** | **1h** | |
+| **S 合计** | | **47-61h** | |
 
-**建议打包**:
-- v1.0 发布 = M1-M9 (~3 天专注工作)
-- v1.1 "抛光" = S1 + S3 + S8 (低成本高回报 ≈ 1 天)
+**建议打包**(2026-04-22 新版):
+- **v1.0 基线追平** = M1-M13 (~6 天专注工作,比原计划 +3 天)
+  - 其中 **M10-M13 协议 + 订阅格式基线(~3 天)是 Karing/NekoBox 已做的,我们补的是欠的账,不是加分项**
+- v1.1 "抛光" = S1 + S3 + S8 + S13 (低成本高回报 ≈ 1 天)
 - v1.2 "可见性" = S2 + S7 + S11 (≈ 2 天)
-- v1.3 "高级特性" = S4 + S5 + S9 (≈ 2-3 天)
+- v1.3 "分流能力" = S4 + S5 + S9 + S12 (≈ 3 天)
 - v1.4 "出海准备" = S6 + S10 + 实际翻译 (按需)
 
-## 5. 依赖关系 / 顺序建议
+## 6. 依赖关系 / 顺序建议
 
 ```
 M1 签名 ──┐
          ├─→ 必须最先,否则后面的 release 验证都做不了
 M2 图标 ──┘
 
-M4 #M17 ──→ 独立, 可并行 (Go 侧 bug)
+M10 协议 ──┐
+M11 Clash ─┼─→ 基础层,都是 Go 侧 + 单测, Android 侧零动
+M12 JSON ──┘   └─→ M10 和 M11 可并行 (不同 parser 文件), M12 依赖 M10
+                  └─→ 完成后 M13 串起来做回归矩阵
+
+M4 #M17 ──→ 已完成 ✅
 
 M6 隐私 ──→ 独立, 可和 docs 团队/本人分头做
 
@@ -266,10 +413,23 @@ M5 空状态 ──→ 在 M8 之后才能给出"Chat 需配 Key"的准确引导
 
 M3 通知 / M7 日志 / M9 异常反馈 ──→ 独立, 穿插
 
-之后依次 S1 → S3 → S8 → S2 → ...
+S12 SOCKS/HTTP ←── 推荐搭 M10 一起做 (同一代码区,一次 review 省事)
+
+之后依次 S1 → S3 → S8 → S13 → S2 → ...
 ```
 
-## 6. 不在本文档管辖范围的事项
+**推荐推进顺序(单人 6 天冲刺版)**:
+
+| Day | 上午 | 下午 |
+|---|---|---|
+| 1 | M10 TUIC + Hysteria1 parser | M10 AnyTLS + ShadowTLS parser |
+| 2 | M10 VLESS flow 映射 + 单测齐 | M11 Clash YAML parser (含 yaml.v3 依赖) |
+| 3 | M11 Clash 协议映射 + 真机 3 家机场回归 | M12 sing-box JSON 订阅 |
+| 4 | M13 回归脚本 + S12 SOCKS/HTTP 搭车 | M1 签名 + M2 图标 |
+| 5 | M6 隐私政策 + M8 API Key UI | M5 空状态 + M3 通知 |
+| 6 | M7 日志导出 + M9 异常反馈 | 真机端到端 + buffer |
+
+## 7. 不在本文档管辖范围的事项
 
 以下与 Android MVP 无直接关联, 但 **Android v1 发布之前必须同步解决**:
 
@@ -277,14 +437,15 @@ M3 通知 / M7 日志 / M9 异常反馈 ──→ 独立, 穿插
 - **#H3 零 go test**: 订阅解析器 1648 行无单测, #M17 漏掉就是这种欠债的表现。 M4 修复时一并补 `parser_test.go`
 - **#M8 aar 同步纪律**: Phase 3B 高频改 `mobile/*.go`, 忘 rebuild aar 会导致 Kotlin Unresolved reference。 Android polish 阶段触及 mobile/ API 的次数会上升, 建议加 pre-commit hook 或 Gradle task mtime check
 
-## 7. 与 NekoBox 的对照总结
+## 8. 与 NekoBox 的对照总结
 
 | 维度 | NekoBox 现状 | Pilotty v1 目标 | 差距 |
 |---|---|---|---|
 | 图标 / 品牌 | 完整 mipmap 6 档 + monochrome | M2 完成即达 | 小 |
 | 主题 | Light + Dark + 20+ 语言 | S1 + S10 基础设施 | 中 (翻译不做) |
-| 协议支持 | SS/Trojan/VMess/VLess/Hy/Hy2/TUIC/WG/SSH/Naive/Mieru/AnyTLS | 订阅解析侧全有 (Phase 2.5) | 对齐 |
-| 节点管理 | Group 隔离 + 手工编辑 + QR 导入导出 + 扫码 | S4 + S6 + 单 overlay | 显式收窄 |
+| 协议支持(URI 解析层) | SS/Trojan/VMess/VLess/Hy/Hy2/TUIC/WG/SSH/Naive/Mieru/AnyTLS/ShadowTLS/Trojan-Go | SS/Trojan/VMess/VLess/Hy2/WG + **M10 补齐 TUIC/AnyTLS/ShadowTLS/Hy1/VLESS-flow** | **原报告错写"对齐",实际差 5 个协议(W11-W15 显式不做)** |
+| 订阅格式 | Base64-URI / Clash YAML / sing-box JSON / 纯文本 | 当前**仅 Base64-URI**;M11 补 Clash YAML;M12 补 sing-box JSON | **消费级入场券** |
+| 节点管理 | Group 隔离 + 手工编辑 + QR 导入导出 + 扫码 | S4 + S6 + S13 + 单 overlay | 显式收窄 |
 | 路由 | Route editor + 模板 + App 分流 | S5 + S9 + 已有模板 | 对齐 |
 | 监控 | 流量图 + 连接列表 + logcat | S2 + S11 | 对齐 |
 | 开关 | Tile + 快捷方式 + BootReceiver | S3 | 对齐 |
@@ -292,4 +453,27 @@ M3 通知 / M7 日志 / M9 异常反馈 ──→ 独立, 穿插
 | Agent / LLM | ❌ | Chat tab + 硅基流动 | Pilotty 独有 |
 | Clash API 兼容 | 内置面板 + yacd 选项 | 内置 Compose UI (S2) | 显式收窄 |
 
-**结论**: Must-have 做完后 = NekoBox 功能覆盖率 ~55%, 但 Pilotty 在 "Agent 驱动 + 中文自然语言 + tool-use 闭环" 这条差异化轴上是 NekoBox 没有的。v1 定位 **不是 NekoBox 克隆**, 是 "NekoBox 的 60% 功能 + Agent 的 100%"。
+**结论(2026-04-22 修正)**: 原结论"NekoBox 功能覆盖率 ~55%"**过于乐观** —— 协议 URI 解析和订阅格式**没补齐前**实际覆盖不到 35%。M10-M13 落地后才回到 55%。
+v1 定位仍是 "**NekoBox / Karing 的 60% 功能 + Agent 的 100%**",但那 60% 里有相当一部分是本轮(M10-M13)必须现场补完的欠账,不是"已有"。
+
+## 9. 与 Karing 的对照总结(2026-04-22 新增)
+
+Karing 是**本项目真正的对手**(同 sing-box 核、同消费级定位、同多订阅格式容忍)。 NekoBox 对比更多是"功能全集参考"。
+
+| 维度 | Karing | Pilotty v1 目标 | 差距 |
+|---|---|---|---|
+| 协议覆盖 | sing-box 全量 + 多核 | sing-box(单核)+ M10 补齐 | 近平(我们不做多核) |
+| 订阅格式 | Clash / sing-box / Surge / URI | **Clash + sing-box(M11 M12 后)** | 近平(不做 Surge) |
+| UX 抛光度 | 成熟,图标/主题/多语言完整 | M1-M9 补齐后,50% 水准 | 中 |
+| 订阅管理 | 多订阅 + 分组 + 自动更新 | 多订阅 + S8 自动更新 + **不做分组(W2)** | 显式收窄 |
+| 节点分享 | QR + URI 全套 | S6 + S13 | 近平 |
+| 分流 | 规则模板 + App 分流 + Process | 模板 + S5 App 分流 | 近平 |
+| 内核切换 | sing-box / Clash / Xray 可选 | sing-box 独占 | 显式收窄 |
+| 自然语言 Agent | ❌ | ✅ | **我们独有** |
+| Tool-call 可审计 | ❌ | ✅ | **我们独有** |
+| 自动快照 + 回滚 | ❌ | ✅ | **我们独有** |
+
+**Karing 的护城河**:多核 + Surge 兼容 + UX 成熟度
+**我们的护城河**:Agent 层(三项)
+
+**Must-have 缺的不是特性,是门槛** —— 不进门,Agent 层用户根本看不到。

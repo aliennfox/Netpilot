@@ -38,7 +38,12 @@ fun SubsScreen(vm: SubsViewModel = viewModel()) {
     }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = {
+            // 抬升 96dp, 让 snackbar 落在 floating nav 上方, 否则被导航栏遮挡
+            Box(modifier = Modifier.padding(bottom = 96.dp)) {
+                SnackbarHost(snackbar)
+            }
+        },
         containerColor = pc.bg,
     ) { pad ->
         Column(
