@@ -2,7 +2,7 @@
 
 > LLM-Agent 驱动的智能网络代理客户端。sing-box 内核 + Go 后端 + Android/iOS 双端。
 >
-> **最后更新日期**: 2026-04-21 · 详见本文末尾 Known Issues 节
+> **最后更新日期**: 2026-04-22 · 详见本文末尾 Known Issues 节
 
 ## 项目概述
 
@@ -244,11 +244,11 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 里程碑拆解:
 - [x] **3B-1** 引入 sing-box + 编出含 libbox 的 aar ✅ (2026-04-17, 0.5 天含两轮阻塞预研)
 - [x] **3B-2** ~~改造 SingBoxAdapter,新增"嵌入式模式"~~ → **显式接受双轨**,见 Known Issue #M12 (2026-04-17)
-- [~] **3B-3** Android VpnService 接入 libbox
+- [x] **3B-3** Android VpnService 接入 libbox ✅ (2026-04-22 真机验证通过)
   - [x] Kotlin CommandServer + PlatformInterface 代码硬化 (2026-04-17)
   - [x] #H4 修复:Kotlin `ConfigMerger.ensureTunInbound` 方案 c(1c6e942)
   - [x] 真机前功能补齐(Phase 2.5,见上节)+ 文档对齐 (2026-04-21)
-  - [ ] 真机 `09211JEC204960` 走流量验证(下一步)
+  - [x] 真机 `09211JEC204960` 走流量验证:Chrome/GCM 等 UID 经 TUN → libbox → 香港-1 VLESS → 上游;/connections 观测到 `api.ipify.org:443 via ['香港-1','proxy-group']` 等真连接;延迟测 香港-1 2919ms、日本-1 4786ms (2026-04-22)
 - [ ] **3B-4** iOS NEPacketTunnelProviderExtension 从零实现(3-5 天)
 - [ ] **3B-5** 双端真机联调 + 稳定性修复(2-3 天)
 
@@ -287,7 +287,7 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 | Android 工程能 gradle build 出 APK | ✅ (2026-04-17) |
 | netpilot.aar 含嵌入式 sing-box libbox + gvisor/quic/wg/utls/clash_api | ✅ 3B-1 (2026-04-17, 40MB 4-arch aar) |
 | Android APK (含 libbox) 能 `assembleDebug` | ✅ 3B-1 (60MB debug) |
-| Android 真机走代理 | ❌ Phase 3B-3 |
+| Android 真机走代理 | ✅ 3B-3 (2026-04-22, Pixel 4a `09211JEC204960`, 香港-1 VLESS 走通) |
 | iOS 真机走代理 | ❌ Phase 3B-4 |
 
 ## Known Issues(已知缺陷)
@@ -303,19 +303,12 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
   - 选 (c) 而非 (a)(Go NewClient 加 platform hint)的理由:不触发 aar 重建,避开 #M8 同步纪律
 - 遗留:iOS 3B-4 需要复刻同等合并逻辑(或改走方案 a 统一收敛)
 
-**#H1 — libbox 数据面真机验证** → 🟡 **代码完成,今天插机 `09211JEC204960` 验证**
-- 状态变更: Kotlin 侧直接驱动 libbox (见 #M12 双轨决策); Go 侧 `libcore.BoxInstance` 保留占位但不调用
-- 进展 (2026-04-17): 
-  - Kotlin `NetPilotVpnService` 完整实现 libbox CommandServer 生命周期 + PlatformInterface.openTun
-  - 路由 / DNS / per-app VPN / HTTP proxy / configureIntent 全量处理
-  - `Libbox.checkConfig` 预校验, 早失败
-  - `assets/android_tun_base.json` 首次启动拷到 `filesDir/configs/`, fallback 链: `merged.json` → `android_tun_base.json`
-  - `./gradlew :app:assembleDebug` 成功, APK 85MB
-- 剩余 (硬依赖真机):
-  - loadLibrary + VPN 权限对话框 + 实跑流量验证
-  - `InterfaceUpdateListener` 接真 `ConnectivityManager.NetworkCallback` (网络切换事件)
-  - `getInterfaces()` 返回真接口列表 (当前空迭代器)
-- 计划: 构建 aar + APK → adb install → 真机跑 → 3B-5 阶段补稳定性
+**#H1 — libbox 数据面真机验证** ✅ **已完成 (2026-04-22)**
+- Kotlin `NetPilotVpnService` + `NetPilotPlatformInterface` + `DefaultNetworkMonitor` 全量接通 libbox
+- 关键踩坑: Android P+ `registerDefaultNetworkCallback` 会把 VPN 自己当默认网络返回, 导致 sing-box 上游回环 (表现: UI 已连接但 ping 超时)。修复: API 31+ 用 `registerBestMatchingNetworkCallback(NetworkRequest)`, API 28-30 用 `requestNetwork`, request 不含 VPN capability (需 `CHANGE_NETWORK_STATE` 权限)。抄作业来源: NekoBoxForAndroid `DefaultNetworkListener.kt`
+- `getInterfaces()` / `startDefaultInterfaceMonitor` / `closeDefaultInterfaceMonitor` 改为真实现 (原 stub 导致同样的回环)
+- 验证数据: `/proxies/香港-1/delay` 2919ms、日本-1 4786ms;`/connections` 观测到 Chrome / GCM / Safe Browsing 全部经 proxy-group
+- 遗留: iOS 3B-4 需复刻同等 PlatformInterface 真实现 (NE 侧用 `nw_path_monitor`)
 
 **#H2 — Orchestrator 自动回滚路径名存实亡**
 - 位置: `internal/agent/orchestrator.go:86` 调用 `pipeline.Execute(ctx, "rollback", nil)`,但 `internal/tool/tools.go:282-291` 中 rollback tool 是占位实现
@@ -383,6 +376,13 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
   - 无需维护 Go 侧嵌入式 adapter 代码, 减 2-3 天工作量
   - 风险: CLI 路径与移动端在 sing-box 行为上可能漂移, 需用一致的 `configs/*.json` + `merged.json` 作为"配置层契约"兜底
 - 位置: `internal/engine/singbox_adapter.go` (保持原样); `mobile/netpilot.go:197-252` StartTun/StopTun/TunRunning 空壳; `libcore/box.go` BoxInstance stub; `android/.../NetPilotVpnService.kt` Kotlin 直接驱动 libbox
+
+**#M13 — Android UI 连接状态不随 tunRunning 刷新**(Phase 3B-3 真机发现, 2026-04-22)
+- 现象: `NetPilotVpnService.startService()` 成功 (openTun fd 建立, libbox 跑起来, tun0 拿到地址, /connections 显示真流量走 proxy-group) 后 UI 仍显示"未连接"
+- 根因待查: `NetPilotCore.markTunRunning(true)` 是被调用了, 但 Composable 读的那个 state flow 没刷新 —— 推测是 MutableStateFlow / Jetpack Compose 的观测链路断了
+- 影响: 仅 UI 视觉, 不影响真流量;用户体验坏 (以为点了没生效, 会反复点触发 startService 重入 —— 幂等保护已覆盖这一副作用)
+- 位置: `android/app/src/main/java/com/foxnetpilot/netpilot/NetPilotCore.kt` + 对应 Composable
+- 修复方向: 查 markTunRunning 改的是哪个 state, 观测侧是不是同一个实例;若不是, 改用 StateFlow 全局单例
 
 ### 🟢 轻微
 
