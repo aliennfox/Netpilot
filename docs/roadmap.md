@@ -79,7 +79,25 @@ sing-box 不在 App 内运行，Go Agent Core 连接 Mac 上运行的 sing-box�
 
 ---
 
-### Phase 3B: iOS VPN 集成 (~20-35 小时，需要真机)
+### Phase 3A-Android: Android App（优先）~8-15 小时
+
+- [ ] Android Studio 项目初始化（Jetpack Compose + Kotlin）
+- [ ] Go Agent Core 编译为 .aar (gomobile bind -target android)
+- [ ] Go ↔ Kotlin 桥接（同进程直调，不需要 HTTP server）
+- [ ] Jetpack Compose UI（暗色主题，参照 docs/ui-design-spec.md）
+- [ ] VpnService 集成（同进程，不需要 NE 拆分）
+- [ ] 真机测试（USB 调试，APK 直装）
+- [ ] 内测分发（APK 直接分享）
+
+优势：
+- VpnService 和 App 在同一个进程，不需要跨进程通信
+- 无内存限制（不像 iOS NE 的 50MB）
+- 无需开发者账号、无需审批
+- APK 直接安装测试
+
+---
+
+### Phase 3B-iOS: iOS VPN 集成（需要付费开发者账号）~20-35 小时
 
 > **这一段必须真机调试，无法完全自动化。**
 
@@ -162,3 +180,37 @@ sing-box 不在 App 内运行，Go Agent Core 连接 Mac 上运行的 sing-box�
 | **总计** | **~50-75h** | | **可测试产品** |
 
 按集中投入（每天 5-8 小时）：约 **8-15 个工作日**。
+
+---
+
+## 真机测试前功能补全计划（基于业务功能矩阵审查）
+
+### 第一批：Go 后端补功能（CLI 验证）~16h
+
+| # | 任务 | 说明 | 工时 |
+|---|------|------|------|
+| 1 | Reality 协议解析 | VLESS+Reality 是当前使用率最高的协议组合 | 4h |
+| 2 | WireGuard 协议解析 | 机场常见协议 | 4h |
+| 3 | 链式代理 (detour chain) | Agent 核心卖点："串联 HK+JP 节点" | 3h |
+| 4 | Permission 系统 | Agent 写操作前用户确认 | 3h |
+| 5 | 订阅流量配额解析 (subscription-userinfo) | HTTP header 解析到期时间/剩余流量 | 2h |
+
+### 第二批：Android 集成 ~23h
+
+| # | 任务 | 说明 | 工时 |
+|---|------|------|------|
+| 6 | gomobile 编译 Go core 为 .aar | -androidapi 21 | 3h |
+| 7 | Android Studio 项目初始化 | Compose + Kotlin | 2h |
+| 8 | Go ↔ Kotlin 桥接 | 同进程直调 | 4h |
+| 9 | VpnService 集成 | TUN fd + 路由表 + DNS | 6h |
+| 10 | Compose UI（4 页面对齐 iOS） | Dashboard/Chat/Nodes/Rules/Settings | 8h |
+
+### 第三批：收尾 ~13h
+
+| # | 任务 | 说明 | 工时 |
+|---|------|------|------|
+| 11 | 故障自动切换 (URLTest) | 节点不通自动跳下一个 | 6h |
+| 12 | 配置备份/导出 | JSON 导出导入 | 3h |
+| 13 | 冒烟测试脚本 | 导入→切节点→开VPN→ping | 4h |
+
+总计：~52h

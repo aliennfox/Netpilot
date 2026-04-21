@@ -2,7 +2,7 @@
 
 > LLM-Agent 驱动的智能网络代理客户端。sing-box 内核 + Go 后端 + Android/iOS 双端。
 >
-> **最后更新日期**: 2026-04-17 · 详见本文末尾 Known Issues 节
+> **最后更新日期**: 2026-04-21 · 详见本文末尾 Known Issues 节
 
 ## 项目概述
 
@@ -181,30 +181,49 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 
 ## 当前进度
 
-### Phase 1 — CLI 原型 ✅ 已完成(任务 10 除外)
+### Phase 1 — CLI 原型 ✅ 已完成
 
 | # | 任务 | 状态 | 实现位置 |
 |---|------|------|---------|
 | 1 | EngineAdapter + SingBoxAdapter + CLI REPL | ✅ | `internal/engine/`, `cmd/netpilot/` |
 | 2 | Intent Router + Local Engine(实际 22 个 Action,超原计划 7 个) | ✅ | `internal/router/`, `internal/local/` |
-| 3 | Tool Pipeline + Hook + Snapshot/Rollback + Telemetry | ✅ | `internal/tool/` |
+| 3 | Tool Pipeline + Hook + Snapshot/Rollback + Telemetry + Permission | ✅ | `internal/tool/` |
 | 4 | LLM Agent(DeepSeek via 硅基流动, tool-use 闭环) | ✅ | `internal/agent/` |
 | 5 | Config Overlay + 路由规则修改 + 4 个内置模板 | ✅ | `internal/overlay/`, `internal/template/` |
 | 6 | 修复 Agent 二轮调用 bug(纯文本消息格式绕过硅基流动校验) | ✅ | `internal/agent/single_agent.go:40-46, 123-135` |
 | 7 | Agent 角色分工(Diagnose/Configure/Verify Orchestrator) | ⚠️ | `internal/agent/roles.go`, `orchestrator.go`(自动回滚路径失效,见 Issue #H2) |
 | 8 | 对话历史 + 多轮上下文(摘要注入 system prompt) | ✅ | `internal/agent/history.go`, `prompt.go` |
-| 9 | 订阅解析(SS/Trojan/VMess/VLess + Hysteria2/WireGuard)+ overlay 集成 | ⚠️ | `internal/subscription/`(selector 注册依赖 base config,见 Issue #M6) |
-| 10 | 自动化测试 | ❌ 未开始 | 仅有 `scripts/smoke.sh` 冒烟脚本 |
+| 9 | 订阅解析(SS/Trojan/VMess/VLess+Reality/Hysteria2/WireGuard)+ overlay 集成 | ⚠️ | `internal/subscription/`(selector 注册依赖 base config,见 Issue #M6) |
+| 10 | 自动化测试 | 🟡 部分 | `scripts/smoke.sh` 端到端冒烟已接通;go test 仍空(#H3) |
 
 ### Phase 2 — 超出原计划的交付物
 
 | 模块 | 说明 | 位置 |
 |------|------|------|
-| HTTP Server | 给移动端 UI 提供控制面 API | `cmd/netpilot-server/` (816 行) |
-| Backup | 配置备份导入导出 | `internal/backup/` |
-| Failover | 故障自动切换 | `internal/failover/` |
-| Monitor | 终端连接监控 | `internal/monitor/` |
+| HTTP Server | 给移动端 UI 提供控制面 API | `cmd/netpilot-server/` (~900 行) |
+| Backup | Overlay + 订阅的 JSON 导出/导入,带 version 兜底 | `internal/backup/backup.go` |
+| Failover | 节点健康探测 + 连续失败自动切换(Cooldown) | `internal/failover/monitor.go` |
+| Monitor | 终端连接监控(darwin raw termios) | `internal/monitor/` |
 | Mobile Binding | gomobile 绑定层(JSON in/out) | `mobile/netpilot.go` (474 行) |
+| Permission | Agent 写操作的 ask/auto/strict 信任模式 + CLI `/trust` | `internal/tool/permission.go` |
+| Chain Proxy | detour 链式代理 `create_chain` tool | `internal/tool/overlay_tools.go:toolCreateChain` |
+
+### Phase 2.5 — 真机前功能补齐 ✅ 已完成(2026-04-21)
+
+在 3B-3 真机测试前一次性补齐的功能矩阵(对应 `docs/roadmap.md` 真机测试前功能补全计划第一/第三批):
+
+| # | 任务 | 位置 |
+|---|------|------|
+| 1 | VLESS+Reality(spider_x)URI 解析 | `internal/subscription/parser.go:441` + `converter.go:127-135` |
+| 2 | WireGuard URI 解析 + sing-box outbound 产出 | `internal/subscription/parser.go:parseWireGuard` + `converter.go:convertWireGuard` |
+| 3 | 链式代理 detour chain(`create_chain` tool) | `internal/tool/overlay_tools.go:toolCreateChain` |
+| 4 | Permission 系统 + CLI `/trust` 命令 | `internal/tool/permission.go`, `pipeline.go`, `cmd/netpilot/main.go` |
+| 5 | 订阅流量配额 `subscription-userinfo` 头解析 | `internal/subscription/parser.go:ParseUserInfoHeader`, `store.go:UserInfo` |
+| 11 | 故障自动切换(URLTest + Cooldown) | `internal/failover/monitor.go` + server endpoints |
+| 12 | 配置备份/导出(JSON + version) | `internal/backup/backup.go` + server endpoints |
+| 13 | 端到端冒烟脚本 | `scripts/smoke.sh` |
+
+第二批(Android 侧)由 Phase 3A 工程化 + 3B-1/3B-3 代码硬化合并消化。
 
 ### Phase 3A — Android/iOS 控制面 🟡 冻结中
 
@@ -218,14 +237,18 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - iOS SwiftUI 5 页面 + APIClient ✅(无 VPN 能力)
 - iOS NEPacketTunnelProvider ❌ Phase 3B 任务
 
-### Phase 3B — libbox 嵌入式集成 🟡 **3B-1 已完成, 下一步 3B-2/3B-3**
+### Phase 3B — libbox 嵌入式集成 🟡 **3B-3 真机验证今天进行**
 
 **这是 iOS 可用性的必经关卡,也是 Android 从"壳"变"可用 App"的关键**。
 
 里程碑拆解:
-- [x] **3B-1** 引入 sing-box + 编出含 libbox 的 aar ✅ (2026-04-17 完成, 实际 0.5 天含两轮阻塞预研)
+- [x] **3B-1** 引入 sing-box + 编出含 libbox 的 aar ✅ (2026-04-17, 0.5 天含两轮阻塞预研)
 - [x] **3B-2** ~~改造 SingBoxAdapter,新增"嵌入式模式"~~ → **显式接受双轨**,见 Known Issue #M12 (2026-04-17)
-- [~] **3B-3** Android VpnService 接入 libbox — 代码硬化完成 (2026-04-17), 真机验证待用户明天做
+- [~] **3B-3** Android VpnService 接入 libbox
+  - [x] Kotlin CommandServer + PlatformInterface 代码硬化 (2026-04-17)
+  - [x] 真机前功能补齐(Phase 2.5,见上节)+ 文档对齐 (2026-04-21)
+  - [ ] #H4 overlay 缺 tun inbound 修复(真机前阻塞,当前最紧要)
+  - [ ] 真机 `09211JEC204960` 走流量验证
 - [ ] **3B-4** iOS NEPacketTunnelProviderExtension 从零实现(3-5 天)
 - [ ] **3B-5** 双端真机联调 + 稳定性修复(2-3 天)
 
@@ -253,7 +276,13 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 | Agent 三角色分工 + Orchestrator 编排 | ⚠️ Verify 失败自动回滚路径失效(#H2) |
 | Config Overlay 路由规则增删 + 模板 | ✅ |
 | 多轮对话上下文 + /clear /history 命令 | ✅ |
-| 订阅解析 + 节点导入 | ✅ |
+| 订阅解析 + 节点导入(SS/Trojan/VMess/VLess+Reality/Hysteria2/WireGuard) | ✅ (2026-04-21) |
+| 订阅流量配额展示(subscription-userinfo) | ✅ (2026-04-21) |
+| 链式代理 detour chain(`create_chain` tool) | ✅ (2026-04-21) |
+| 写操作 permission 确认(ask/auto/strict) | ✅ (2026-04-21) |
+| 节点故障自动切换(URLTest + Cooldown) | ✅ (2026-04-21) |
+| 用户数据备份/导出/导入(JSON) | ✅ (2026-04-21) |
+| 端到端冒烟脚本(导订阅 → 切节点 → 走代理 → ping) | ✅ (2026-04-21) |
 | selector 动态注册导入节点 | ❓ 待验证(#M6) |
 | Android 工程能 gradle build 出 APK | ✅ (2026-04-17) |
 | netpilot.aar 含嵌入式 sing-box libbox + gvisor/quic/wg/utls/clash_api | ✅ 3B-1 (2026-04-17, 40MB 4-arch aar) |
@@ -265,21 +294,7 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 
 ### 🔴 高优先级
 
-**#H1 — libbox 数据面未集成** → 🟡 **3B-3 代码完成 (2026-04-17), 真机验证待用户**
-- 状态变更: Kotlin 侧直接驱动 libbox (见 #M12 双轨决策); Go 侧 `libcore.BoxInstance` 保留占位但不调用
-- 进展 (2026-04-17): 
-  - Kotlin `NetPilotVpnService` 完整实现 libbox CommandServer 生命周期 + PlatformInterface.openTun
-  - 路由 / DNS / per-app VPN / HTTP proxy / configureIntent 全量处理
-  - `Libbox.checkConfig` 预校验, 早失败
-  - `assets/android_tun_base.json` 首次启动拷到 `filesDir/configs/`, fallback 链: `merged.json` → `android_tun_base.json`
-  - `./gradlew :app:assembleDebug` 成功, APK 85MB
-- 剩余 (硬依赖真机):
-  - loadLibrary + VPN 权限对话框 + 实跑流量验证
-  - `InterfaceUpdateListener` 接真 `ConnectivityManager.NetworkCallback` (网络切换事件)
-  - `getInterfaces()` 返回真接口列表 (当前空迭代器)
-- 计划: 用户明天插机验证 → 3B-5 阶段补稳定性
-
-**#H4 — overlay merged.json 在 Android 上缺 tun inbound** (3B-3 代码 review 发现)
+**#H4 — overlay merged.json 在 Android 上缺 tun inbound** 🔥 **下一步就修**
 - 位置: `mobile/netpilot.go:79` NewClient 用 `configs/minimal.json` 作 base; `internal/overlay/overlay.go:268` Apply() 合并出的 `merged.json` 继承 base 的 `mixed` inbound, 没有 tun inbound
 - 影响: 用户导入订阅 / 应用模板 → overlay.Apply 生成 merged.json → VpnService 加载 merged.json → sing-box libbox 看到没有 tun inbound, **永不会回调 openTun**, TUN 数据面不动
 - 当前缓解: 3B-3 VpnService.loadConfigJson 优先 merged.json, 不存在时回退 android_tun_base.json —— 但用户一旦动 overlay, merged.json 就被写入, 问题触发
@@ -289,14 +304,28 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
   - (c) Kotlin 侧加载 merged.json 后二次合并 tun inbound (Kotlin 持有 tun 配置权威)
 - ROI: 12 (阻塞真机第一次导订阅测试), **3B-3 真机测试前必须修**
 
+**#H1 — libbox 数据面真机验证** → 🟡 **代码完成,今天插机 `09211JEC204960` 验证**
+- 状态变更: Kotlin 侧直接驱动 libbox (见 #M12 双轨决策); Go 侧 `libcore.BoxInstance` 保留占位但不调用
+- 进展 (2026-04-17): 
+  - Kotlin `NetPilotVpnService` 完整实现 libbox CommandServer 生命周期 + PlatformInterface.openTun
+  - 路由 / DNS / per-app VPN / HTTP proxy / configureIntent 全量处理
+  - `Libbox.checkConfig` 预校验, 早失败
+  - `assets/android_tun_base.json` 首次启动拷到 `filesDir/configs/`, fallback 链: `merged.json` → `android_tun_base.json`
+  - `./gradlew :app:assembleDebug` 成功, APK 85MB
+- 剩余 (硬依赖真机):
+  - 修 #H4(阻塞顶层) → loadLibrary + VPN 权限对话框 + 实跑流量验证
+  - `InterfaceUpdateListener` 接真 `ConnectivityManager.NetworkCallback` (网络切换事件)
+  - `getInterfaces()` 返回真接口列表 (当前空迭代器)
+- 计划: #H4 修完 → 构建 aar + APK → adb install → 真机跑 → 3B-5 阶段补稳定性
+
 **#H2 — Orchestrator 自动回滚路径名存实亡**
 - 位置: `internal/agent/orchestrator.go:86` 调用 `pipeline.Execute(ctx, "rollback", nil)`,但 `internal/tool/tools.go:282-291` 中 rollback tool 是占位实现
 - 影响: Verify 阶段失败时,以为系统会自动回滚,实际不会
 - 修复方向: 改为 `o.pipeline.ManualRollback("")`,并加集成测试覆盖
 
-**#H3 — 零自动化测试**
-- 位置: 全仓库无 `_test.go` 文件
-- 影响: 所有"已完成"功能无回归保护;订阅解析器(1648 行)格式兼容性风险最高
+**#H3 — 零 go test**(已部分缓解,仍成立)
+- 状态: `scripts/smoke.sh` 已接通端到端关键路径(status/sub/switch/latency/proxy-ping/failover/backup),真机前回归有兜底
+- 剩余缺口: 全仓库仍无 `_test.go` 文件,订阅解析器(1648 行)格式兼容性回归无保护
 - 修复方向: 优先给 `subscription/parser.go`、`overlay/merger.go`、`tool/snapshot.go`、`router/intent_router.go` 写表驱动单测
 
 ### 🟡 中优先级
@@ -311,8 +340,10 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 **#M4 — 订阅节点 outbound 不走 `_agent:` 前缀**
 - 位置: `internal/subscription/converter.go`
 
-**#M5 — ask 模式下缺失 approver 时静默拒绝**
+**#M5 — ask 模式下缺失 approver 时静默拒绝**(文档化,非 bug)
 - 位置: `internal/tool/permission.go:79-82`
+- 现状: CLI 已注入 `CLIApprover`;server 侧显式使用默认 `TrustAuto` 全放行。真正会撞到的只有"未接 approver 的 ask 模式"边界,目前代码注释已说明"安全失败"语义
+- 修复方向: 若未来暴露为 SDK,需在构造函数校验 approver,避免误用
 
 **#M6 — selector 节点注册是静态依赖,不是动态**
 - 位置: `internal/subscription/manager.go`
