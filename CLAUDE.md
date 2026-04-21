@@ -482,7 +482,7 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 
 ### 🟢 轻微
 
-- **#L1** gofmt 13 文件违规,`gofmt -w .` 一次性可修复
+- **#L1** ✅ 已修(2026-04-22 commit 8dc4576): `gofmt -w .` 清零了最后 5 个违规文件
 - **#L2** `SingBoxAdapter.IsRunning()` 永远返回 false
 - **#L3** `history.go` 40 条上限、2000 字符摘要限制硬编码
 - **#L4** `classifier.go:78` 未分类请求默认走完整三角色流水线,成本未必合理
