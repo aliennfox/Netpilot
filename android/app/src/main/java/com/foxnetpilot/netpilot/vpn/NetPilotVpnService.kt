@@ -159,6 +159,14 @@ class NetPilotVpnService : VpnService(), NetPilotPlatformInterface, CommandServe
     }
 
     private fun startService() {
+        // 幂等保护: 第二次 onStartCommand 进来时 (用户双击 / Android 重复投递 intent),
+        // 不要再开一个 libbox instance —— 否则新旧 libbox 都会抢 9090, 导致失败路径 stopSelf()
+        // 把第一个正常运行的 instance 也一起拖死。
+        if (commandServer != null) {
+            Log.i(TAG, "startService re-entered, already running; ignoring")
+            startForeground(NOTIF_ID, buildNotification())
+            return
+        }
         startForeground(NOTIF_ID, buildNotification())
         try {
             val configJson = loadConfigJson()
@@ -191,6 +199,7 @@ class NetPilotVpnService : VpnService(), NetPilotPlatformInterface, CommandServe
         commandServer = null
         runCatching { pfd?.close() }
         pfd = null
+        runCatching { DefaultNetworkMonitor.unregister() }
         NetPilotCore.markTunRunning(false)
     }
 
@@ -206,13 +215,13 @@ class NetPilotVpnService : VpnService(), NetPilotPlatformInterface, CommandServe
 
     /**
      * 配置来源优先级:
-     *  1) filesDir/configs/merged.json —— Go overlay.Apply() 生成; 经 ConfigMerger 二次注入
-     *     tun inbound / dns-out / route 系统规则 (详见 ConfigMerger 文档 + Known Issue #H4)
+     *  1) filesDir/merged.json —— Go overlay.Apply() 生成 (mobile.Client dataDir=filesDir);
+     *     经 ConfigMerger 二次注入 tun inbound / route 系统规则 (详见 ConfigMerger 文档 + Known Issue #H4)
      *  2) filesDir/configs/android_tun_base.json —— NetPilotApp.onCreate() 从 assets 拷出
      */
     private fun loadConfigJson(): String {
         val tunBaseFile = File(filesDir, "configs/${NetPilotApp.TUN_BASE_NAME}")
-        val mergedFile = File(filesDir, "configs/merged.json")
+        val mergedFile = File(filesDir, "merged.json")
 
         if (mergedFile.exists() && mergedFile.length() > 0) {
             Log.i(TAG, "using config ${mergedFile.path}")

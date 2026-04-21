@@ -1,12 +1,14 @@
 package com.foxnetpilot.netpilot.vpn
 
-import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
+import android.system.OsConstants
 import android.util.Base64
 import androidx.annotation.RequiresApi
 import com.foxnetpilot.netpilot.NetPilotApp
 import libbox.ConnectionOwner
 import libbox.InterfaceUpdateListener
+import libbox.Libbox
 import libbox.LocalDNSTransport
 import libbox.NetworkInterface as LibboxNetworkInterface
 import libbox.NetworkInterfaceIterator
@@ -15,20 +17,21 @@ import libbox.PlatformInterface
 import libbox.StringIterator
 import libbox.TunOptions
 import libbox.WIFIState
+import java.net.Inet6Address
 import java.net.InetSocketAddress
-import java.security.KeyStore
+import java.net.NetworkInterface
 
 /**
  * libbox.PlatformInterface 的 Kotlin interface-with-defaults 实现。
- * 抄作业来源: ~/References/ 及 sing-box-for-android 的 PlatformInterfaceWrapper.kt (204 行).
+ * 抄作业来源: hiddify-app/.../PlatformInterfaceWrapper.kt + sing-box-for-android。
  *
  * 设计要点:
- *  - 所有 15 个 libbox 要求的方法都给"合理默认实现", 子类 (NetPilotVpnService) 只需 override
+ *  - 所有 libbox 要求的方法都给"合理默认实现", 子类 (NetPilotVpnService) 只需 override
  *    openTun / autoDetectInterfaceControl 两个 VpnService 相关方法
  *  - 多继承模拟: NetPilotVpnService : VpnService(), NetPilotPlatformInterface 同时满足
  *    framework 要求 + Go 侧回调契约
- *  - 3B-3 初版: 若 sing-box 调到未实现的方法(例如 getInterfaces / findConnectionOwner), 返回
- *    最简 stub, 不崩溃为前提; 3B-5 稳定性阶段按需补充真实现
+ *  - getInterfaces / startDefaultInterfaceMonitor 真实实现 ——
+ *    没有真数据 sing-box 的上游连接会回环进自己的 TUN, 导致 "UI 已连接但 ping 超时"
  */
 interface NetPilotPlatformInterface : PlatformInterface {
 
@@ -46,21 +49,81 @@ interface NetPilotPlatformInterface : PlatformInterface {
     override fun clearDNSCache() {}
     override fun localDNSTransport(): LocalDNSTransport? = null
 
-    // 默认网络监听 (3B-5 接真 ConnectivityManager.NetworkCallback; 当前无 op 不影响 TUN 建立)
-    override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener?) {}
-    override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener?) {}
+    // 默认网络监听: 真实现, 否则 sing-box 上游连接会无限回环进 TUN (Known Issue #H1)
+    override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener?) {
+        DefaultNetworkMonitor.setListener(listener)
+    }
+    override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener?) {
+        DefaultNetworkMonitor.setListener(null)
+    }
 
-    // 接口列表 (sing-box 启动时调用;空迭代器让内核走默认路径)
-    override fun getInterfaces(): NetworkInterfaceIterator = emptyInterfaceIterator()
+    /**
+     * 枚举所有活动的物理网络接口, 供 sing-box 选择上游出口。
+     * 对 VpnService 尤其关键: 没有真数据 sing-box 无法识别 wlan0/cellular, 会把上游连接
+     * 错误地又发回 TUN, 造成无限回环。
+     */
+    override fun getInterfaces(): NetworkInterfaceIterator {
+        val cm = NetPilotApp.connectivity
+            ?: return InterfaceArray(emptyList())
+        val jInterfaces = runCatching { NetworkInterface.getNetworkInterfaces()?.toList() }
+            .getOrNull() ?: emptyList()
+        val result = mutableListOf<LibboxNetworkInterface>()
+        for (network in cm.allNetworks) {
+            val lp = cm.getLinkProperties(network) ?: continue
+            val caps = cm.getNetworkCapabilities(network) ?: continue
+            val name = lp.interfaceName ?: continue
+            val jIf = jInterfaces.find { it.name == name } ?: continue
 
-    // WIFI 状态 (3B-5 接 WifiManager.connectionInfo)
+            val iface = LibboxNetworkInterface()
+            iface.name = name
+            iface.index = jIf.index
+            runCatching { iface.mtu = jIf.mtu }
+
+            iface.type = when {
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> Libbox.InterfaceTypeWIFI
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> Libbox.InterfaceTypeCellular
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> Libbox.InterfaceTypeEthernet
+                else -> Libbox.InterfaceTypeOther
+            }
+
+            iface.addresses = StringArray(
+                jIf.interfaceAddresses.map { ia ->
+                    val a = ia.address
+                    val host = if (a is Inet6Address) {
+                        Inet6Address.getByAddress(a.address).hostAddress
+                    } else {
+                        a.hostAddress
+                    }
+                    "$host/${ia.networkPrefixLength}"
+                }
+            )
+            iface.dnsServer = StringArray(
+                lp.dnsServers.mapNotNull { it.hostAddress }
+            )
+
+            var flags = 0
+            if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                flags = OsConstants.IFF_UP or OsConstants.IFF_RUNNING
+            }
+            if (jIf.isLoopback) flags = flags or OsConstants.IFF_LOOPBACK
+            if (jIf.isPointToPoint) flags = flags or OsConstants.IFF_POINTOPOINT
+            if (jIf.supportsMulticast()) flags = flags or OsConstants.IFF_MULTICAST
+            iface.flags = flags
+
+            iface.metered = !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+            result.add(iface)
+        }
+        return InterfaceArray(result)
+    }
+
+    // WIFI 状态 (3B-5 接 WifiManager.connectionInfo, 当前 null 不影响 TUN)
     override fun readWIFIState(): WIFIState? = null
 
     // 系统根证书
     override fun systemCertificates(): StringIterator {
         val certificates = mutableListOf<String>()
         try {
-            val keyStore = KeyStore.getInstance("AndroidCAStore")
+            val keyStore = java.security.KeyStore.getInstance("AndroidCAStore")
             keyStore.load(null, null)
             val aliases = keyStore.aliases()
             while (aliases.hasMoreElements()) {
@@ -104,20 +167,19 @@ interface NetPilotPlatformInterface : PlatformInterface {
     // 通知回调 (sing-box 发诊断通知时调用;当前 no-op, UI 后续接)
     override fun sendNotification(notification: LibboxNotification?) {}
 
-    /** StringIterator 最小实现,供 systemCertificates / package names 使用 */
+    /** StringIterator 最小实现 */
     class StringArray(private val list: List<String>) : StringIterator {
         private val iter = list.iterator()
         override fun hasNext(): Boolean = iter.hasNext()
         override fun next(): String = iter.next()
-        override fun len(): Int = list.size.toLong().toInt()
+        override fun len(): Int = list.size
     }
 
-    companion object {
-        /** 空 NetworkInterface 迭代器,让 sing-box fallback 到默认策略 */
-        private fun emptyInterfaceIterator() = object : NetworkInterfaceIterator {
-            override fun hasNext(): Boolean = false
-            override fun next(): LibboxNetworkInterface =
-                throw NoSuchElementException("empty iterator")
-        }
+    /** NetworkInterfaceIterator 最小实现 */
+    class InterfaceArray(private val list: List<LibboxNetworkInterface>) : NetworkInterfaceIterator {
+        private val iter = list.iterator()
+        override fun hasNext(): Boolean = iter.hasNext()
+        override fun next(): LibboxNetworkInterface = iter.next()
     }
+
 }
