@@ -153,9 +153,30 @@ class NetPilotVpnService : VpnService(), NetPilotPlatformInterface, CommandServe
                 stopSelf()
                 return START_NOT_STICKY
             }
+            ACTION_RELOAD -> {
+                reloadIfRunning()
+                return START_STICKY
+            }
             else -> startService()
         }
         return START_STICKY
+    }
+
+    /** 订阅/overlay 变更后触发: 若 libbox 已在跑, 让它吃新的 merged.json。 */
+    private fun reloadIfRunning() {
+        val server = commandServer ?: run {
+            Log.i(TAG, "reload: service not running, ignoring")
+            return
+        }
+        try {
+            val configJson = loadConfigJson()
+            runCatching { Libbox.checkConfig(configJson) }
+                .onFailure { throw IllegalStateException("reload config invalid: ${it.message}", it) }
+            server.startOrReloadService(configJson, OverrideOptions())
+            Log.i(TAG, "libbox config reloaded (${configJson.length} bytes)")
+        } catch (t: Throwable) {
+            Log.e(TAG, "reload failed", t)
+        }
     }
 
     private fun startService() {
@@ -299,5 +320,14 @@ class NetPilotVpnService : VpnService(), NetPilotPlatformInterface, CommandServe
         private const val CHANNEL_ID = "netpilot_vpn"
         private const val NOTIF_ID = 1001
         const val ACTION_STOP = "com.foxnetpilot.netpilot.STOP_VPN"
+        const val ACTION_RELOAD = "com.foxnetpilot.netpilot.RELOAD_VPN"
+
+        /** 订阅/规则变更后请求 VpnService 重载 libbox 配置;未运行时为 no-op。 */
+        fun requestReload(ctx: Context) {
+            val intent = Intent(ctx, NetPilotVpnService::class.java).apply {
+                action = ACTION_RELOAD
+            }
+            runCatching { ctx.startService(intent) }
+        }
     }
 }

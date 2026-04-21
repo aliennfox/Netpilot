@@ -72,5 +72,7 @@ class NetPilotApp : Application() {
 
         val packageManager: PackageManager?
             get() = instance?.packageManager
+
+        val appContext: Context? get() = instance
     }
 }

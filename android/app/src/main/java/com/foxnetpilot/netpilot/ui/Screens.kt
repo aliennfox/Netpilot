@@ -251,6 +251,7 @@ data class NodesUi(
 class NodesViewModel : ViewModel() {
     private val _state = MutableStateFlow(NodesUi())
     val state: StateFlow<NodesUi> = _state.asStateFlow()
+    @Volatile private var autoTestedOnce = false
 
     init { refresh() }
 
@@ -259,6 +260,16 @@ class NodesViewModel : ViewModel() {
         try {
             val n = NetPilotRepository.nodes()
             _state.value = _state.value.copy(loading = false, nodes = n)
+            // Clash API 的 history 只在显式 /proxies/{tag}/delay 后才填充, 所以首次拿到节点
+            // 列表时若延迟都是 0 且 VPN 在跑, 自动触发一次测速 (~3-5s), 测完再刷新一次 UI。
+            if (!autoTestedOnce &&
+                com.foxnetpilot.netpilot.NetPilotCore.tunRunning.value &&
+                n.isNotEmpty() && n.all { it.latency == 0 }) {
+                autoTestedOnce = true
+                runCatching { NetPilotRepository.testLatencyAll() }
+                val n2 = runCatching { NetPilotRepository.nodes() }.getOrNull()
+                if (n2 != null) _state.value = _state.value.copy(nodes = n2)
+            }
         } catch (e: Throwable) {
             _state.value = _state.value.copy(loading = false, error = e.message)
         }
