@@ -455,10 +455,19 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - Android: 不需要 rebuild aar —— 订阅解析走 subscription 包, mobile/netpilot.go 只持有 SubscriptionManager 句柄,新 parser 自动生效
 - 遗留: Clash `proxy-providers:` 外部 URL 拉取暂不解析(W 档,非 must);真实机场 fixture 应持续补充 testdata/fixtures/
 
-**#M20 — Per-App VPN UI 缺失**(2026-04-22 对照识别)
-- 现象: `android/.../vpn/PilottyVpnService.kt:91-103` 已读取 libbox `TunOptions.includePackage/excludePackage`,但 overlay 这两个字段无 UI 编辑入口;实际"全局接管"
-- 影响: 国内高频诉求"微信直连 / 浏览器走代理"完全做不到;NekoBox / Hiddify / Karing / Clash Meta / v2rayNG 均有此功能
-- 修复: `docs/android-mvp-gap.md` M14 (~6-8h)。 参考 `~/References/nekobox/app/src/main/java/io/nekohasekai/sagernet/ui/AppManagerActivity.kt` + `AppListActivity.kt`
+**#M20 — Per-App VPN UI 缺失** ⚠️ **UI 已实现,真机验证未做(2026-04-22 commit 0848f85)**
+- 实现:
+  - `android/.../perapp/PerAppVpnPrefs.kt`(Mode: Off/Allow/Deny + Set<String>)
+  - `android/.../perapp/InstalledAppsLoader.kt`(PackageManager.getInstalledApplications + 图标)
+  - `android/.../ui/settings/PerAppVpnSection.kt`(卡片 + 全屏 Dialog + 搜索 + 多选)
+  - `ConfigMerger.injectPerAppRules`(改 tun inbound 的 include_package/exclude_package)
+  - `PilottyVpnService.loadConfigJson`(走一次 injectPerAppRules)
+  - AndroidManifest.xml `QUERY_ALL_PACKAGES` (API 30+ 必需)
+- 未验证:
+  - 真机下 QUERY_ALL_PACKAGES 是否确实返回全部 app (Google Play 对该权限要专审, 国内分发 OK)
+  - libbox TunOptions.includePackage 是否被 sing-box 1.13.8 正确解析并通过 openTun 下发到 VpnService.Builder.addAllowedApplication (代码链全接通但没跑实流量)
+  - Allow 空列表 / Deny 空列表的兜底行为 (当前清空两个字段走全局, 与预期一致)
+- 下一步: 真机回归(Pixel 4a)开"白名单 + 只选 Chrome"→ 确认微信/QQ 走直连, Chrome 走代理;配合 `/connections` Clash API 观测 per-app 标签
 
 **#M21 — Kill Switch 缺失**(2026-04-22 对照识别)
 - 现象: VPN 断开 / 崩溃时无阻断,流量明文回到物理网络
