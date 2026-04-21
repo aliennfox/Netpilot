@@ -246,9 +246,9 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - [x] **3B-2** ~~改造 SingBoxAdapter,新增"嵌入式模式"~~ → **显式接受双轨**,见 Known Issue #M12 (2026-04-17)
 - [~] **3B-3** Android VpnService 接入 libbox
   - [x] Kotlin CommandServer + PlatformInterface 代码硬化 (2026-04-17)
+  - [x] #H4 修复:Kotlin `ConfigMerger.ensureTunInbound` 方案 c(1c6e942)
   - [x] 真机前功能补齐(Phase 2.5,见上节)+ 文档对齐 (2026-04-21)
-  - [ ] #H4 overlay 缺 tun inbound 修复(真机前阻塞,当前最紧要)
-  - [ ] 真机 `09211JEC204960` 走流量验证
+  - [ ] 真机 `09211JEC204960` 走流量验证(下一步)
 - [ ] **3B-4** iOS NEPacketTunnelProviderExtension 从零实现(3-5 天)
 - [ ] **3B-5** 双端真机联调 + 稳定性修复(2-3 天)
 
@@ -294,15 +294,14 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 
 ### 🔴 高优先级
 
-**#H4 — overlay merged.json 在 Android 上缺 tun inbound** 🔥 **下一步就修**
-- 位置: `mobile/netpilot.go:79` NewClient 用 `configs/minimal.json` 作 base; `internal/overlay/overlay.go:268` Apply() 合并出的 `merged.json` 继承 base 的 `mixed` inbound, 没有 tun inbound
-- 影响: 用户导入订阅 / 应用模板 → overlay.Apply 生成 merged.json → VpnService 加载 merged.json → sing-box libbox 看到没有 tun inbound, **永不会回调 openTun**, TUN 数据面不动
-- 当前缓解: 3B-3 VpnService.loadConfigJson 优先 merged.json, 不存在时回退 android_tun_base.json —— 但用户一旦动 overlay, merged.json 就被写入, 问题触发
-- 修复方向 (候选):
-  - (a) Go NewClient 接受 platform hint, Android 进程传 "android" → base 改指 `android_tun_base.json`
-  - (b) overlay.Apply 检查 merged 结果, 若无 tun inbound 且 platform=android, 自动注入
-  - (c) Kotlin 侧加载 merged.json 后二次合并 tun inbound (Kotlin 持有 tun 配置权威)
-- ROI: 12 (阻塞真机第一次导订阅测试), **3B-3 真机测试前必须修**
+**#H4 — overlay merged.json 在 Android 上缺 tun inbound** ✅ **已修(方案 c,1c6e942)**
+- 问题: `mobile/netpilot.go:79` NewClient 用 `configs/minimal.json` 作 base(mixed inbound),`internal/overlay/overlay.go:270` Apply() 合出的 `merged.json` 没有 tun inbound,libbox 永不回调 openTun
+- 修复: `android/.../vpn/ConfigMerger.kt:ensureTunInbound` 采用**方案 (c) Kotlin 二次合并**
+  - `loadConfigJson()` 读 merged.json 后再与 `android_tun_base.json` 合并
+  - 注入缺失的 `inbounds[type=tun]` / `outbounds[type=dns]` / `route.auto_detect_interface`
+  - **关键细节**:base 的系统级 route rules(`protocol=dns`、`ip_is_private`)prepend 到 merged.rules 前,否则用户规则("抖音 direct")会拦截 DNS 流量,导致 dns-out 失效
+  - 选 (c) 而非 (a)(Go NewClient 加 platform hint)的理由:不触发 aar 重建,避开 #M8 同步纪律
+- 遗留:iOS 3B-4 需要复刻同等合并逻辑(或改走方案 a 统一收敛)
 
 **#H1 — libbox 数据面真机验证** → 🟡 **代码完成,今天插机 `09211JEC204960` 验证**
 - 状态变更: Kotlin 侧直接驱动 libbox (见 #M12 双轨决策); Go 侧 `libcore.BoxInstance` 保留占位但不调用
@@ -313,10 +312,10 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
   - `assets/android_tun_base.json` 首次启动拷到 `filesDir/configs/`, fallback 链: `merged.json` → `android_tun_base.json`
   - `./gradlew :app:assembleDebug` 成功, APK 85MB
 - 剩余 (硬依赖真机):
-  - 修 #H4(阻塞顶层) → loadLibrary + VPN 权限对话框 + 实跑流量验证
+  - loadLibrary + VPN 权限对话框 + 实跑流量验证
   - `InterfaceUpdateListener` 接真 `ConnectivityManager.NetworkCallback` (网络切换事件)
   - `getInterfaces()` 返回真接口列表 (当前空迭代器)
-- 计划: #H4 修完 → 构建 aar + APK → adb install → 真机跑 → 3B-5 阶段补稳定性
+- 计划: 构建 aar + APK → adb install → 真机跑 → 3B-5 阶段补稳定性
 
 **#H2 — Orchestrator 自动回滚路径名存实亡**
 - 位置: `internal/agent/orchestrator.go:86` 调用 `pipeline.Execute(ctx, "rollback", nil)`,但 `internal/tool/tools.go:282-291` 中 rollback tool 是占位实现
