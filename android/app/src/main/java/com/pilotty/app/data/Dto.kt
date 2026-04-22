@@ -42,6 +42,22 @@ data class NodeDto(
 data class ChatDto(
     val reply: String = "",
     val source: String = "",
+    val events: List<ToolEventDto> = emptyList(),
+)
+
+/**
+ * D3 Chat Tool-Call Timeline。 对应 Go 侧 [agent.ToolEvent], 记录一次 tool 调用的可观测细节。
+ * source="local" 时 events 为空 (IntentRouter 不经 orchestrator)。
+ */
+@Serializable
+data class ToolEventDto(
+    val name: String = "",
+    @SerialName("args_summary") val argsSummary: String = "",
+    @SerialName("duration_ms") val durationMs: Long = 0,
+    @SerialName("output_preview") val outputPreview: String = "",
+    val error: String = "",
+    /** Diagnose / Configure / Verify (多角色流水线阶段), 单角色快速路径时也会填 */
+    val role: String = "",
 )
 
 @Serializable

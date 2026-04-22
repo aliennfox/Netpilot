@@ -35,7 +35,12 @@ import kotlinx.coroutines.launch
 
 /* ============================= Chat ============================= */
 
-data class ChatMessage(val role: String, val text: String, val source: String = "")
+data class ChatMessage(
+    val role: String,
+    val text: String,
+    val source: String = "",
+    val events: List<ToolEventDto> = emptyList(),
+)
 
 data class ChatUi(
     val sending: Boolean = false,
@@ -60,7 +65,12 @@ class ChatViewModel : ViewModel() {
                 val r = PilottyRepository.chat(text)
                 _state.value = _state.value.copy(
                     sending = false,
-                    messages = _state.value.messages + ChatMessage("assistant", r.reply, r.source),
+                    messages = _state.value.messages + ChatMessage(
+                        role = "assistant",
+                        text = r.reply,
+                        source = r.source,
+                        events = r.events,
+                    ),
                 )
             } catch (e: Throwable) {
                 _state.value = _state.value.copy(sending = false, error = e.message)
@@ -72,6 +82,89 @@ class ChatViewModel : ViewModel() {
         PilottyRepository.clearHistory()
         _state.value = ChatUi()
     }
+}
+
+/**
+ * D3 Tool-Call Timeline: 在 agent 回复气泡下方渲染一行折叠头, 点开展开 per-tool 详情。
+ * local 来源 events 为空 → 不渲染 (优雅降级: 只显示 "via local")。
+ */
+@Composable
+private fun ToolCallTimeline(events: List<ToolEventDto>) {
+    if (events.isEmpty()) return
+    val pc = LocalPilottyColors.current
+    var expanded by remember { mutableStateOf(false) }
+    val totalMs = events.sumOf { it.durationMs }
+    val failedCount = events.count { it.error.isNotEmpty() }
+    Column(modifier = Modifier.padding(top = 6.dp)) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .clickable { expanded = !expanded }
+                .padding(vertical = 3.dp, horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Text(
+                if (expanded) "▾" else "▸",
+                color = pc.ink4,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+            Text(
+                buildString {
+                    append("调用 ${events.size} 个工具 · ${formatDurationMs(totalMs)}")
+                    if (failedCount > 0) append(" · ⚠ ${failedCount} 失败")
+                },
+                color = if (failedCount > 0) pc.error else pc.ink3,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+        if (expanded) {
+            Column(
+                modifier = Modifier.padding(start = 12.dp, top = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                events.forEach { e ->
+                    val ok = e.error.isEmpty()
+                    val badge = if (ok) "✓" else "✗"
+                    val badgeColor = if (ok) pc.accentInk else pc.error
+                    val detail = buildString {
+                        append(e.name)
+                        if (e.role.isNotEmpty()) append(" · ").append(e.role)
+                        append(" · ").append(formatDurationMs(e.durationMs))
+                        val extra = if (ok) e.outputPreview else e.error
+                        if (extra.isNotEmpty()) {
+                            append("\n").append(extra.take(140))
+                            if (extra.length > 140) append("…")
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            badge,
+                            color = badgeColor,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                        Text(
+                            detail,
+                            color = if (ok) pc.ink3 else pc.error,
+                            fontSize = 10.5.sp,
+                            fontFamily = FontFamily.Monospace,
+                            lineHeight = 14.sp,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatDurationMs(ms: Long): String = when {
+    ms <= 0 -> "0ms"
+    ms < 1000 -> "${ms}ms"
+    ms < 10_000 -> "%.1fs".format(ms / 1000.0)
+    else -> "${ms / 1000}s"
 }
 
 @Composable
@@ -161,11 +254,12 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                             if (!isUser && msg.source.isNotEmpty()) {
                                 Spacer(Modifier.height(4.dp))
                                 Text(
-                                    "via ${msg.source}",
+                                    "via ${msg.source}${if (msg.source == "local") " · 未调 Agent" else ""}",
                                     color = pc.ink4,
                                     fontSize = 10.sp,
                                     fontFamily = FontFamily.Monospace,
                                 )
+                                ToolCallTimeline(msg.events)
                             }
                         }
                     }
