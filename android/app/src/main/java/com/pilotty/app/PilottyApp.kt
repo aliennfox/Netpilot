@@ -35,6 +35,9 @@ class PilottyApp : Application() {
         val apiKey = ApiKeyPrefs.get(this).key
         Log.i(TAG, "PilottyCore.init apiKey=${if (apiKey.isBlank()) "<empty>" else "sk-***${apiKey.takeLast(4)}"}")
         PilottyCore.init(this, clashAPIAddr = "127.0.0.1:9090", apiKey = apiKey)
+        // Phase 8: 让 Agent 的 start_vpn/stop_vpn/vpn_status tools 能驱动 VpnService。
+        // 必须在 PilottyCore.init 之后, 这样 client 已构造好, setVpnControl 才有 receiver。
+        PilottyCore.setVpnControl(com.pilotty.app.vpn.VpnControlImpl)
     }
 
     /**

@@ -76,22 +76,13 @@ class ChatViewModel : ViewModel() {
     }
 
     /**
-     * Phase 7.3: 流式发送。 TextDelta 涌出时逐字追加到末尾 assistant 气泡, Tool 事件实时
-     * append 到 events 列表, Done 终结并持久化。 本地路由命中 (source=local) 没 stream, 会
-     * 直接跳到 Done 事件, 与非流式体验一致。
-     *
-     * Phase 7.5 (2026-04-23): VPN 生命周期快捷命令在入口拦截, 不走 Go Chat ——
-     * VpnService.prepare 要 Activity 权限, Go 根本调不到, 让 LLM 去"想办法"只会撞鸡生蛋死锁
-     * (#用户反馈: Agent 想半天说 Clash 未启动)。 直接走 StartVpnBus/StopVpnBus 旁路。
+     * Phase 7.3 + 8: 流式发送, 全部走 Go Agent。 VPN 生命周期通过 Agent 的 start_vpn/stop_vpn/
+     * vpn_status tools 掌控 (Phase 8, 对齐 "Agent 全局掌控" 原则), 不在 Kotlin 层做关键词拦截。
+     * TextDelta 涌出时逐字追加到末尾 assistant 气泡, Tool 事件实时 append 到 events 列表,
+     * Done 终结并持久化。 本地 IntentRouter 命中 (source=local) 没 stream, 直接跳 Done 事件。
      */
     fun send(text: String) {
         if (text.isBlank()) return
-        val trimmed = text.trim()
-        val intent = classifyVpnIntent(trimmed)
-        if (intent != VpnIntent.None) {
-            handleVpnIntent(trimmed, intent)
-            return
-        }
         val u = ChatMessage("user", text)
         _state.value = _state.value.copy(
             sending = true,
@@ -185,76 +176,6 @@ class ChatViewModel : ViewModel() {
         PilottyRepository.clearHistory()
         _state.value = ChatUi()
         prefs?.clear()
-    }
-
-    private enum class VpnIntent { None, Start, Stop, Status }
-
-    /**
-     * 两步检查: 必须提 "vpn" + 匹配一组动词才算意图命中。
-     * 避免 "打开xxx" 单纯因为有 "打开" 就误伤, 且让 "turn on the vpn"/"start vpn please"/
-     * "把 VPN 关掉" 等自然语序都能命中。
-     */
-    private fun classifyVpnIntent(s: String): VpnIntent {
-        val lower = s.lowercase()
-        if (!lower.contains("vpn")) return VpnIntent.None
-
-        // Start: 启动/连接意图。 中文动词 + 英文常见说法全收
-        val startVerbs = listOf(
-            "打开", "启动", "开启", "连接", "连上", "激活", "拉起", "开一下", "启动一下", "打开一下", "连一下",
-            "turn on", "turn it on", "turn the vpn on", "open the vpn",
-            "start", "connect", "enable", "activate", "bring up", "power on",
-            "switch on", "fire up", "launch", "boot",
-        )
-        // Stop: 关闭/断开意图
-        val stopVerbs = listOf(
-            "关闭", "停止", "关掉", "断开", "下线", "停掉", "关一下", "停一下", "关了", "断了",
-            "turn off", "turn it off", "turn the vpn off", "close the vpn",
-            "stop", "disconnect", "disable", "deactivate",
-            "shut down", "shutdown", "kill", "bring down", "power off", "switch off",
-        )
-        // Status: 只查询状态, 不动作
-        val statusWords = listOf(
-            "vpn状态", "vpn 状态", "在运行吗", "在跑吗", "开了吗", "连了吗",
-            "vpn running", "vpn status", "is vpn on", "is vpn running", "is the vpn",
-        )
-        // 紧耦合单字 (如 "开VPN"/"关VPN"): 单字 "开/关/停/上" 单独不算, 必须紧挨 vpn
-        val tightStart = listOf("开vpn", "开 vpn", "上vpn", "上 vpn")
-        val tightStop = listOf("关vpn", "关 vpn", "停vpn", "停 vpn", "断vpn", "断 vpn")
-
-        if (startVerbs.any { lower.contains(it) } || tightStart.any { lower.contains(it) }) return VpnIntent.Start
-        if (stopVerbs.any { lower.contains(it) } || tightStop.any { lower.contains(it) }) return VpnIntent.Stop
-        if (statusWords.any { lower.contains(it) }) return VpnIntent.Status
-        return VpnIntent.None
-    }
-
-    /** 本地合成 assistant 气泡 (source="local"), 不走 Go Chat, 不占 LLM 额度。 */
-    private fun handleVpnIntent(userText: String, intent: VpnIntent) {
-        val user = ChatMessage("user", userText)
-        val reply = when (intent) {
-            VpnIntent.Start -> {
-                val running = com.pilotty.app.PilottyCore.tunRunning.value
-                if (running) "VPN 已在运行。" else {
-                    com.pilotty.app.vpn.StartVpnBus.request()
-                    "正在启动 VPN。 首次启动会弹系统授权对话框, 同意后即连接。"
-                }
-            }
-            VpnIntent.Stop -> {
-                val running = com.pilotty.app.PilottyCore.tunRunning.value
-                if (!running) "VPN 未在运行。" else {
-                    com.pilotty.app.vpn.StopVpnBus.request()
-                    "已请求停止 VPN。"
-                }
-            }
-            VpnIntent.Status -> {
-                val running = com.pilotty.app.PilottyCore.tunRunning.value
-                if (running) "VPN 运行中。" else "VPN 未启动。"
-            }
-            VpnIntent.None -> return
-        }
-        val assistant = ChatMessage(role = "assistant", text = reply, source = "local", events = emptyList())
-        val updated = _state.value.messages + user + assistant
-        _state.value = _state.value.copy(messages = updated, sending = false, error = null, streamingPhase = "")
-        persist(updated)
     }
 }
 

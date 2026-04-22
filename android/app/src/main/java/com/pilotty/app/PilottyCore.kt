@@ -16,6 +16,7 @@ import kotlinx.serialization.json.Json
 import mobile.ChatStreamCallback
 import mobile.Client
 import mobile.Mobile
+import mobile.VpnControlCallback
 
 /**
  * Go core 单例。封装 gomobile 生成的 [mobile.Client]，
@@ -98,6 +99,8 @@ object PilottyCore {
     )
     /** M8 热重载: 用户在 Settings 改 apiKey 后立即调这个, 无需重启 App。 空字符串 = 关 Agent。 */
     fun setApiKey(key: String): String            = require().setAPIKey(key)
+    /** Phase 8: Kotlin 在 PilottyApp.onCreate 注入 VpnControlImpl, 让 Agent tool 能控制 VPN。 */
+    fun setVpnControl(cb: VpnControlCallback)     = require().setVpnControl(cb)
     fun clearHistory()                            = require().clearHistory()
     fun subscriptions(): String                   = require().subscriptions()
     fun addSubscription(name: String, url: String): String = require().addSubscription(name, url)
