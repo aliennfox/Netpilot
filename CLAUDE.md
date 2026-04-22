@@ -549,6 +549,7 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - 中文注释 / 英文代码 / 英文 commit message
 - **参考优先**: sing-box 集成相关工程问题必须抄 `~/References/` 的作业,commit 里注明参考来源
 - **自规划协议**: 完成里程碑任务后,按 Self-Planning Protocol 自主输出 Step 1-4,不等用户下指令
+- **本地路由 substring match**: 写 chip / 快捷 query 前先 grep `internal/router/keywords.go`,substring 必须命中才会走 local action,否则回落到 LLM(apiKey 空时报"Agent 未启用")
 
 ## Reference 资源清单
 
