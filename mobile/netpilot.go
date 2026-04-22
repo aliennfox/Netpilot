@@ -27,6 +27,7 @@ import (
 	"github.com/foxnetpilot/netpilot/internal/engine"
 	"github.com/foxnetpilot/netpilot/internal/failover"
 	"github.com/foxnetpilot/netpilot/internal/local"
+	"github.com/foxnetpilot/netpilot/internal/observe"
 	"github.com/foxnetpilot/netpilot/internal/overlay"
 	"github.com/foxnetpilot/netpilot/internal/router"
 	"github.com/foxnetpilot/netpilot/internal/subscription"
@@ -62,6 +63,12 @@ type Client struct {
 	// Kotlin 在 PilottyApp.onCreate 注入实现 (VpnControlImpl), 触发 StartVpnBus/StopVpnBus。
 	// 注入前调用走 clientVpnAdapter 的 nil-guard, 返回可读错误而非 panic。
 	vpnControl VpnControlCallback
+
+	// Phase 9 B1: 流量实时采样 ring buffer。 Client 后台 goroutine 每秒 poll GetTrafficStats
+	// 填入, UI 通过 TrafficHistory 拿近 N 秒数据画图。 VPN 未运行时 Clash API 不可达, 采样跳过。
+	traffic     *observe.TrafficRing
+	trafficStop chan struct{}
+	trafficOnce sync.Once
 }
 
 // VpnControlCallback 是 Kotlin 侧实现的 gomobile reverse-binding 接口, 让 Go Agent Tool
@@ -113,6 +120,12 @@ func (a *clientVpnAdapter) IsRunning() bool {
 		return false
 	}
 	return cb.IsRunning()
+}
+
+// init 幂等启动日志捕获, 让 Go 侧 log.Println 复制进 observe.DefaultLogRing,
+// mobile.Client.RecentLogs 可暴露给 UI 做日志面板。
+func init() {
+	observe.AttachDefault()
 }
 
 // NewClient 创建一个新的 Pilotty 客户端。
@@ -193,12 +206,39 @@ func NewClient(dataDir, clashAPIAddr, apiKey string) *Client {
 		historyPath:  historyPath,
 		intentRouter: intentRouter,
 		failover:     fo,
+		traffic:      observe.NewTrafficRing(300), // 最多 5 分钟窗口
+		trafficStop:  make(chan struct{}),
 	}
 	// Phase 8: 注册 VPN 生命周期 tools, 用 clientVpnAdapter 间接读 c.vpnControl。
 	// Kotlin 在 PilottyApp.onCreate 里 SetVpnControl 注入真实 callback, 之前这些 tool 调用
 	// 会返回 "VPN 控制未接入" 错误 (nil-guard)。
 	pipeline.RegisterExtraTools(tool.RegisterVpnTools(&clientVpnAdapter{client: c}))
+
+	// Phase 9 B1: 启动流量采样 goroutine。 1Hz poll, VPN 未运行/Clash API 不可达时静默跳过。
+	c.trafficOnce.Do(func() {
+		go c.trafficSamplerLoop()
+	})
+
 	return c
+}
+
+// trafficSamplerLoop 每秒 poll adapter.GetTrafficStats(), 结果推 traffic ring buffer。
+// VPN 未启动时 GetTrafficStats 会报 "代理控制通道不可达" error, 静默忽略该 tick。
+func (c *Client) trafficSamplerLoop() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.trafficStop:
+			return
+		case <-ticker.C:
+			stats, err := c.adapter.GetTrafficStats()
+			if err != nil || stats == nil {
+				continue
+			}
+			c.traffic.Append(stats.Upload, stats.Download)
+		}
+	}
 }
 
 // StartFailover 启动后台节点健康监控与自动故障切换。
@@ -363,6 +403,69 @@ func (c *Client) Shutdown() {
 		_ = c.box.Close()
 		c.box = nil
 	}
+	// Phase 9 B1: 停止流量采样 goroutine
+	select {
+	case <-c.trafficStop:
+		// already closed
+	default:
+		close(c.trafficStop)
+	}
+}
+
+// TrafficHistory Phase 9 B1: 返回最近 N 秒流量采样的 JSON 数组。
+// n<=0 或 n>buffer 容量 (300s) 则返回全量。
+// 返回格式: [{"t":1745312100, "up":累计, "down":累计, "up_rate":增量/s, "down_rate":增量/s}, ...]
+func (c *Client) TrafficHistory(n int) string {
+	return c.traffic.RecentJSON(n)
+}
+
+// Connections Phase 9 B2: 返回活跃连接列表的 JSON 数组, 每条加 duration_ms (距 start 的毫秒数)。
+// 返回格式: [{id, destination, protocol, process_name, upload, download, start_time, duration_ms, chain, rule}, ...]
+// VPN 未启动 → 返回空数组 (error 成功 Envelope but empty, UI 不崩)。
+func (c *Client) Connections() string {
+	conns, err := c.adapter.GetConnections()
+	if err != nil {
+		// 包括 "代理控制通道不可达 (VPN 未启动)" 这类 error, 返回空列表而非崩
+		return okJSON([]interface{}{})
+	}
+	now := time.Now()
+	out := make([]map[string]interface{}, 0, len(conns))
+	for _, c := range conns {
+		durationMs := int64(0)
+		if c.StartTime != "" {
+			// Clash API 的 start 是 RFC3339 带 Z 后缀
+			if t, err := time.Parse(time.RFC3339Nano, c.StartTime); err == nil {
+				durationMs = now.Sub(t).Milliseconds()
+				if durationMs < 0 {
+					durationMs = 0
+				}
+			}
+		}
+		out = append(out, map[string]interface{}{
+			"id":           c.ID,
+			"destination":  c.Destination,
+			"protocol":     c.Protocol,
+			"process_name": c.ProcessName,
+			"upload":       c.Upload,
+			"download":     c.Download,
+			"start_time":   c.StartTime,
+			"duration_ms":  durationMs,
+			"chain":        c.Chain,
+			"rule":         c.Rule,
+		})
+	}
+	return okJSON(out)
+}
+
+// ClearTrafficHistory 清空采样 buffer (如 VPN 停止后可选调用以免显示旧数据)。
+func (c *Client) ClearTrafficHistory() {
+	c.traffic.Clear()
+}
+
+// RecentLogs Phase 9 B4: 返回最近 N 条 Go 侧运行时日志 (JSON 数组)。 n<=0 → 全量 (500 上限)。
+// 格式: [{"ts":1745312100000,"level":"I","msg":"..."}, ...]
+func (c *Client) RecentLogs(n int) string {
+	return observe.DefaultLogRing.RecentJSON(n)
 }
 
 // AgentReady 返回 LLM Agent 是否可用。
