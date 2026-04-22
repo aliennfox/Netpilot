@@ -397,12 +397,16 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                                 else RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp),
                     ) {
                         Column(Modifier.padding(horizontal = 13.dp, vertical = 9.dp)) {
+                            // 用户气泡用常规字体, assistant 气泡用 Monospace ——
+                            // 贴合 "资深网络运维工程师" 人设, 且让 "- tag : value" 形式的列表/ms
+                            // 数字对齐更稳。 中英混排下 Chinese 仍是全角, 但比 sans-serif 的不定宽好
                             Text(
                                 msg.text,
                                 color = if (isUser) pc.bg else pc.ink,
-                                fontSize = 14.sp,
-                                lineHeight = 20.sp,
-                                letterSpacing = (-0.07).sp,
+                                fontSize = if (isUser) 14.sp else 13.sp,
+                                lineHeight = if (isUser) 20.sp else 19.sp,
+                                letterSpacing = if (isUser) (-0.07).sp else 0.sp,
+                                fontFamily = if (isUser) FontFamily.Default else FontFamily.Monospace,
                             )
                             if (!isUser && msg.source.isNotEmpty()) {
                                 Spacer(Modifier.height(4.dp))
