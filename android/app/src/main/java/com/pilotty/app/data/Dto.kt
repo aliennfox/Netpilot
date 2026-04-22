@@ -86,3 +86,10 @@ data class TemplateDto(
     val description: String = "",
     val keywords: List<String> = emptyList(),
 )
+
+@Serializable
+data class SnapshotDto(
+    val id: String = "",
+    val timestamp: String = "",
+    @SerialName("active_proxies") val activeProxies: Map<String, String> = emptyMap(),
+)

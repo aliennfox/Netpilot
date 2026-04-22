@@ -15,6 +15,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pilotty.app.data.SubscriptionDto
@@ -22,6 +23,7 @@ import com.pilotty.app.data.UserInfoDto
 import com.pilotty.app.ui.components.PilottyButton
 import com.pilotty.app.ui.components.PilottyButtonVariant
 import com.pilotty.app.ui.components.PilottyCard
+import com.pilotty.app.ui.import_.ImportBus
 import com.pilotty.app.ui.theme.LocalPilottyColors
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -32,6 +34,9 @@ fun SubsScreen(vm: SubsViewModel = viewModel()) {
     val snackbar = remember { SnackbarHostState() }
     var addDialogOpen by remember { mutableStateOf(false) }
     var removeTarget by remember { mutableStateOf<SubscriptionDto?>(null) }
+
+    // M16 Deep Link: 有 pending URI 时弹确认 dialog
+    val pendingImport by ImportBus.pending.collectAsStateWithLifecycle()
 
     LaunchedEffect(ui.toast) {
         ui.toast?.let { snackbar.showSnackbar(it); vm.dismissToast() }
@@ -157,6 +162,54 @@ fun SubsScreen(vm: SubsViewModel = viewModel()) {
             },
         )
     }
+
+    pendingImport?.let { item ->
+        ImportConfirmDialog(
+            uri = item.uri,
+            onDismiss = { ImportBus.consume() },
+            onConfirm = {
+                vm.importNodeURI(item.uri)
+                ImportBus.consume()
+            },
+        )
+    }
+}
+
+@Composable
+private fun ImportConfirmDialog(
+    uri: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val pc = LocalPilottyColors.current
+    val scheme = uri.substringBefore("://", missingDelimiterValue = "?").uppercase()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = pc.surface,
+        title = { Text("导入节点 · $scheme", color = pc.ink) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "检测到外部 App 分享的节点 URI, 是否导入?",
+                    color = pc.ink2,
+                    fontSize = 13.sp,
+                )
+                Text(
+                    uri,
+                    color = pc.ink3,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 3,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("导入", color = pc.accentInk, fontWeight = FontWeight.SemiBold) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("忽略", color = pc.ink3) }
+        },
+    )
 }
 
 @Composable
@@ -257,20 +310,46 @@ private fun formatTimestamp(epochSec: Long): String {
     return f.format(java.util.Date(ms))
 }
 
+/** 剪贴板若含协议 URI 或 http(s) 订阅 URL, 返回清洗后的文本。 */
+private fun pickImportableFromClipboard(ctx: android.content.Context): String? {
+    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+        as? android.content.ClipboardManager ?: return null
+    val clip = cm.primaryClip ?: return null
+    if (clip.itemCount == 0) return null
+    val text = clip.getItemAt(0).coerceToText(ctx)?.toString()?.trim() ?: return null
+    if (text.isEmpty()) return null
+    val schemes = listOf(
+        "ss://", "vmess://", "vless://", "trojan://", "tuic://",
+        "hysteria://", "hysteria2://", "hy2://", "wireguard://", "wg://",
+        "anytls://", "shadowtls://", "http://", "https://",
+    )
+    return if (schemes.any { text.startsWith(it, ignoreCase = true) }) text else null
+}
+
 @Composable
 private fun AddSubscriptionDialog(
     onDismiss: () -> Unit,
     onConfirm: (name: String, url: String) -> Unit,
 ) {
     val pc = LocalPilottyColors.current
+    val ctx = LocalContext.current
     var name by remember { mutableStateOf("") }
     var url by remember { mutableStateOf("") }
+    val clipboardHit = remember { pickImportableFromClipboard(ctx) }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = pc.surface,
         title = { Text("添加订阅", color = pc.ink) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (clipboardHit != null && url.isBlank()) {
+                    PilottyButton(
+                        text = "使用剪贴板: " + clipboardHit.take(40) + if (clipboardHit.length > 40) "..." else "",
+                        onClick = { url = clipboardHit },
+                        variant = PilottyButtonVariant.Outline,
+                        small = true,
+                    )
+                }
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -284,13 +363,19 @@ private fun AddSubscriptionDialog(
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
-                    label = { Text("订阅 URL") },
+                    label = { Text("订阅 URL / 节点 URI") },
                     singleLine = true,
-                    placeholder = { Text("https://...") },
+                    placeholder = { Text("https:// 或 vmess:// / ss:// / ...") },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = pc.ink,
                         unfocusedBorderColor = pc.hairlineStrong,
                     ),
+                )
+                Text(
+                    "提示: 粘贴 http(s) 订阅 URL 将拉取节点列表; 粘贴 vmess:// 等单节点 URI 将直接导入单个节点。",
+                    color = pc.ink4,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
                 )
             }
         },

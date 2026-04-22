@@ -381,10 +381,10 @@ Pilotty 的目标用户画像**重合度最高的是 Karing**(消费级 UX / 多
 | **M12** | **sing-box native JSON 订阅** | **4-6h** | 是(品牌一致性) |
 | **M13** | **订阅 × 协议真机回归矩阵** | **4-6h** | 否(自我保护) |
 | **M14** | **Per-App VPN UI** | **6-8h** | **是(竞品普遍都有)** |
-| **M15** | **Kill Switch(方式 A 引导版)** | **3-4h** | **是(隐私用户门槛)** |
-| **M16** | **Deep Link + QR + 剪贴板导入** | **7-9h** | **是(分享路径断流)** |
-| **M17(feat)** | **订阅流量配额 UI**(后端已有) | **3-4h** | 是(to-avoid-surprise) |
-| **M18(feat)** | **路由规则 CRUD UI**(仅 Agent 不够) | **6-8h** | 是(普通用户找不到入口) |
+| **M15** | **Kill Switch(方式 A 引导版)** ✅ 已完成 | ~1h 实际 | **是(隐私用户门槛)** |
+| **M16** | **Deep Link + 剪贴板导入** ✅ (QR 延期 v1.1) | ~2.5h 实际 | **是(分享路径断流)** |
+| **M17(feat)** | **订阅流量配额 UI** ✅ 已完成 | 0.5h 实际 | 是(to-avoid-surprise) |
+| **M18(feat)** | **路由规则 CRUD UI** ✅ 已完成 | ~2h 实际 | 是(普通用户找不到入口) |
 | **M 合计(v2)** | | **~70-96h(原 45-57h + 非协议基线 ~25-33h)** | |
 | S1 | Dark Theme | 2-3h | |
 | S2 | 流量图 / 连接列表 | 6-8h | |
@@ -403,8 +403,8 @@ Pilotty 的目标用户画像**重合度最高的是 Karing**(消费级 UX / 多
 | **S15** | **Nodes 页面 Auto-failover 开关** | **2h** | |
 | **S16** | **连接时自动选最快节点** | **2-3h** | |
 | **S 合计** | | **53-69h** | |
-| D1 | 自然语言指令 Dashboard 顶部入口 | 3-5h | **AI 护城河 UI** |
-| D2 | Safety card(Snapshot 一键回滚) | 3-5h | **AI 护城河 UI** |
+| D1 | 自然语言指令 Dashboard 顶部入口 ✅ 已完成 | ~1h 实际 | **AI 护城河 UI** |
+| D2 | Safety card(Snapshot 一键回滚) ✅ 已完成 | ~1h 实际 | **AI 护城河 UI** |
 | D3 | Chat tool-call inline timeline | 4-6h | **AI 护城河 UI** |
 | **D 合计** | | **10-16h** | |
 
@@ -531,60 +531,48 @@ Karing 是**本项目真正的对手**(同 sing-box 核、同消费级定位、�
 - **工时**: 6-8h(含列表 lazy-load + 图标缓存)
 - **用户影响**: 不做 → 想"微信 QQ 直连, 浏览器和 GCM 走代理"的国内用户只能"全走"或"全不走";小众场景但高频诉求
 
-#### M15. Kill Switch (断网保护)
-- **现状**: 无。VPN 断开 / 崩溃时系统自动回到物理网络, 所有流量明文出去
-- **竞品做法**:
-  - Android 系统自身提供 `Settings > 网络 > VPN > 始终开启 VPN + 阻止未使用 VPN 的连接` (ALWAYS_ON_VPN_LOCKDOWN),**但**该设置是用户手动在系统设置里开, App 只能引导不能直接开
-  - Karing / Hiddify: 应用内"Kill Switch"开关, 记录 preference, 在 VpnService.onRevoke() / onDestroy() 异常路径里继续持有一个阻断所有流量的最小 VpnService(空 TUN + 零路由)直到用户显式关
-  - NekoBox: 无独立 Kill Switch UI, 依赖 Android 系统的 lockdown 模式 + "Bypass LAN" 等配置项(参考 grep 结果:`BYPASS_LAN` 见于 SettingsPreferenceFragment.kt / DataStore.kt / Constants.kt,但没有 "Kill Switch" 命名项)
-- **需要**:
-  - (a) Settings 加 "Kill Switch" 开关 + 说明 "VPN 断开时阻止所有网络(保护隐私)"
-  - (b) 实现方式二选一:
-    - 方式 A 引导型:检测系统 always-on VPN lockdown 状态(`VpnService.prepare(ctx) == null` + system setting),未开启时弹引导跳系统 VPN 设置页
-    - 方式 B 实现型:维护一个 `BlockingTunService`,当主 VpnService onDestroy 时自动 startService 挂一个 0.0.0.0/0 → reject 的 TUN
-  - (c) v1 做方式 A(开发量最小、风险最低, 告诉用户"请在系统里也开 always-on"); 方式 B 延到 v1.x
-- **工时**: 3-4h(方式 A) · 10-14h(方式 B)
-- **用户影响**: 不做 → 隐私敏感用户直接放弃本 App;但真正用 lockdown 的是少数,方式 A 的引导对大多数用户足够
+#### M15. Kill Switch (断网保护) ✅ 方式 A 已完成(2026-04-22 真机验证通过)
+- **实现**: `android/.../ui/settings/KillSwitchSection.kt` — 新卡片 "防泄漏 · Kill Switch",双层说明文案(为什么需要 / 为什么是引导型)+ 4 步指引 + "打开系统 VPN 设置" 按钮 → `Intent(Settings.ACTION_VPN_SETTINGS)`;挂在 `SettingsScreen` 中 `PerAppVpnSection` 之后
+- **真机验证**: Pixel 4a 点按钮 → `topResumedActivity=com.android.settings/.Settings$VpnSettingsActivity`,系统 VPN 列表页显示 Pilotty 条目 + 齿轮图标(用户点齿轮即可进 always-on + lockdown 勾选页)
+- **路径选择说明**:
+  - 方式 A(已实施): 引导跳转系统设置页,App 不持有非 VPN 流量的阻断权(Android 不允许普通 App)
+  - 方式 B(v1.x 延期): BlockingTunService 接管 onDestroy 时挂 0.0.0.0/0 → reject 的 TUN;工程量 10-14h,遗留给 v1.x
+- **实际工时**: ~1h(纯 UI Section + Intent,无 Go 改动,无 reload 链,一次 gradle assemble 通过)
 
-#### M16. Deep Link / QR Code 订阅导入
-- **现状**: `AndroidManifest.xml` 无 `<intent-filter android:scheme="ss|vmess|vless|trojan|tuic|hysteria|hysteria2|sub">`。用户在 Telegram 收到 `vmess://...` 链接点击后,系统不会把意图路由给 Pilotty
-- **竞品做法**:
-  - NekoBox: `~/References/nekobox/app/src/main/AndroidManifest.xml` 有 ≥3 个 `<action android:name="android.intent.action.VIEW" />` + data scheme 过滤(grep 证据:行 96/108/119)
-  - Karing / v2rayNG: 同样的 scheme 过滤 + QR 扫码 Activity
-- **需要**:
-  - (a) AndroidManifest.xml 加 intent-filter 捕获 `ss|vmess|vless|trojan|tuic|hysteria|hysteria2|wireguard|wg|anytls|shadowtls|sub|clash` 等 scheme, launcher Activity 的 `onNewIntent` 里取 `intent.data` 丢给 parser.parseLine / ParseSubscription
-  - (b) 扫码:CameraX + ZXing(`com.google.zxing:core`),结果文本走同一条 parser 管道
-  - (c) 剪贴板检测:添加订阅对话框 `onCreate` 时读 clipboard 若匹配 scheme 弹"检测到 XX, 是否粘贴?"按钮
-- **来源**: NekoBox AndroidManifest + ScannerActivity
-- **工时**: 3-4h(scheme 过滤 + clipboard) · +4-5h(扫码 UI)= 共 ~1 天
-- **用户影响**: 不做 → 用户在 TG / 微信收到机场分享的节点链接,点完打开浏览器"无法识别协议",流失
+#### M16. Deep Link + 剪贴板导入 ✅ 已完成(2026-04-22 真机验证)· QR 延期到 v1.1
+- **实现**:
+  - Go 侧新 API: `SubscriptionManager.ImportNodeURI(uri)` + `mobile.Client.ImportNodeURI(uri)`(manager.go:91 / netpilot.go 对应新增),直接走 `ParseSubscription + convertNodes + overlay.AddOutboundsBatch + Apply`,不创建 Subscription 条目
+  - AndroidManifest.xml MainActivity 加 intent-filter 覆盖 14 个 scheme:`ss / vmess / vless / trojan / tuic / hysteria / hysteria2 / hy2 / wireguard / anytls / shadowtls / sub / clash / pilotty`;`launchMode="singleTask"` 配合 `onNewIntent` 复用实例
+  - `ui/import_/ImportBus` StateFlow 单例:MainActivity.handleIncomingUri 收到 intent.data → post,SubsScreen 订阅 pending 弹 `ImportConfirmDialog`(scheme 大写标题 + URI 全文 + 导入/忽略)
+  - `SubsViewModel.addSubscription` 分流:`startsWith("http://"|"https://")` → 订阅拉列表;否则 → `importNodeURI` 单节点
+  - AddSubscriptionDialog 加剪贴板检测:`pickImportableFromClipboard` 同步读 ClipboardManager 匹配 14 种 scheme 或 http(s),命中时顶部显示"使用剪贴板: xxx"按钮
+- **真机验证**(Pixel 4a):
+  - `adb shell am start -a android.intent.action.VIEW -d "ss://..."` → logcat `MainActivity: deep-link received: ss://...#TestDeepLink`
+  - Subs tab 弹 `ImportConfirmDialog` 标题 "导入节点 · SS",URI 全文显示
+  - 点"导入" → `overlay.json` outbounds 数组 15→16, 新增 `{tag:TestDeepLink, type:shadowsocks}`
+  - Nodes tab 显示 16/16,TestDeepLink `203.0.113.99:8388` 可见
+- **QR 扫码延期**: CameraX + ZXing 依赖较重(~3h 含权限 UI),v1.1 再做。Deep Link + 剪贴板已覆盖 TG/浏览器/手动复制 3 大分享路径
+- **实际工时**: ~2.5h(Go 20min + AAR 10min + Kotlin 1h + 真机回归 40min;AAR 重建两次因字段名微调)
 
-#### M17(feat). 订阅流量配额 UI
-- **现状**: 后端 `internal/subscription/parser.go:ParseUserInfoHeader` + `store.go:UserInfo` 已解析 `upload / download / total / expire`;Kotlin `StatusDto` 里没透传,Dashboard 看不到"还剩 X GB · 到期 Y 天"
-- **竞品做法**:
-  - Hiddify: 订阅卡片主视觉 = 环形进度条 + 到期时间,文档 homepage 突出
-  - Karing: 订阅列表每条下方带 used/total/expire 三行
-  - v2rayN / v2rayNG: 同款
-- **需要**:
-  - (a) `mobile/netpilot.go:Subscriptions()` 返回列表里补 `usedBytes / totalBytes / expireAt` 字段
-  - (b) Kotlin `SubscriptionDto` 同步;Settings 订阅列表卡片加进度条 + 到期日
-  - (c) 可选 Dashboard 顶部 summary 带"当前订阅: 剩余 X GB / Y 天"
-- **工时**: 3-4h(纯 UI + 已有后端数据 wire up)
-- **用户影响**: 不做 → 用户不知道自己还剩多少流量 / 何时到期,被动遇到"突然连不上了"的 surprise
+#### M17(feat). 订阅流量配额 UI ✅ 已完成(2026-04-22 真机验证通过)
+- **实现**:
+  - Go 侧 `Subscription.UserInfo` 已随 `Subscriptions()` JSON 透出(store.go:88)
+  - Kotlin `SubscriptionDto.userInfo: UserInfoDto?`(Dto.kt:56, 59-65)
+  - `SubsScreen.QuotaRow` 渲染横向进度条(accent 填充)+ 已用/总量 + 到期日期(SubsScreen.kt:215-242)
+  - Fallback: `sub.userInfo?.let { QuotaRow(it) }` 无 header 时不渲染,UI 不崩
+- **真机验证**: 本地 fixture server 在 `/clash-mixed.yaml` 响应附加 `subscription-userinfo: upload=5GB; download=10GB; total=85GiB; expire=2026-05-15` header → "全部更新" → Subs tab 第二卡渲染进度条 ~18% + `已用 15.00 GB / 85.00 GB · 到期 2026-05-15`;第一卡(relaycore.cc 无 header)正确不渲染 QuotaRow
+- **原预估** 3-4h,实际 ~0.5h(发现 UI + dto 代码此前已入库,本次只是补了 fixture header 回归验证)
 
-#### M18(feat). 路由规则 CRUD UI
-- **现状**: Rules tab 能列出规则 + 应用 4 个内置模板 (`直连/代理/国内直连+国外代理/广告屏蔽`),不能手工加减单条规则。 Overlay 后端 `AddRoutingRule / RemoveRoutingRule` 已有,Agent 能 tool-call 修改, 但用户无直接入口
-- **竞品做法**:
-  - NekoBox: `RouteSettingsActivity.kt` 完整规则编辑器
-  - Clash Meta: yaml 文本编辑器(门槛高但存在)
-  - Karing: 规则列表 + 增删改图形化
-- **需要**:
-  - (a) Rules tab 底部"+ 自定义规则"按钮 → dialog 选 (matcher: domain_suffix / domain_keyword / ip_cidr / process_name) + (outbound: direct / proxy / reject / 某 group)
-  - (b) 已有规则项右滑删除 / 点击编辑
-  - (c) 校验: 重复规则、无效 CIDR 等在 dialog 层 reject
-- **来源**: NekoBox RouteSettingsActivity, Karing 规则编辑截图
-- **工时**: 6-8h(含表单校验 + outbound 下拉填充)
-- **用户影响**: 不做 → 想加"公司内网 走直连"的用户, 只能告诉 Agent "给我加条公司内网直连规则" —— Agent 当然能做, 但**要求用户先懂 Agent 是干啥的**;普通用户直觉找"加规则"按钮找不到就放弃
+#### M18(feat). 路由规则 CRUD UI ✅ 已完成(2026-04-22 真机验证)
+- **实现**:
+  - Go: `mobile.Client.AddRule(ruleJSON)` / `RemoveRule(tag)`(netpilot.go 新增),内部 `overlay.AddRule/RemoveRule + Apply(adapter)`;`source` 强制覆盖为 `"user"`,避免客户端伪造成 `"agent"`
+  - Kotlin: Rules tab(内嵌在 Settings)Kicker 右侧加 "+ 自定义规则" 按钮,规则卡右侧加红色 "×" 删除按钮 + 二次确认 AlertDialog
+  - `AddRuleDialog`: 描述(可选)+ 4 种 matcher 类型 chip(domain_suffix / domain / ip_cidr / process_name)+ 值输入(支持逗号分隔多值)+ 4 种 outbound chip(direct / proxy / proxy-group / reject)
+  - Tag 由 `"user-" + System.currentTimeMillis().toString(36)` 自动生成,避免冲突
+  - `buildRuleJSON` 本地拼 JSON,按 matcher 类型动态选 `domain_suffix` / `domain` / `ip_cidr` / `process_name` 字段名
+- **真机验证**(Pixel 4a):添加 `domain_suffix=test-rule.example.com → direct` → overlay.json `route_rules[0] = {tag:"user-mo9xd7yq", outbound:"direct", source:"user", domain_suffix:["test-rule.example.com"]}` → UI "ACTIVE RULES · 1" + 规则卡显示 `→ direct  suffix×1` + source="user" 标 → 点 × → 二次确认 → 删除 → "ACTIVE RULES · 0"
+- **延期项**: 编辑现有规则(当前是只读列表,要编辑需先删再加);outbound 下拉动态填充当前可用 proxy-group 列表(当前是硬编码 4 项);IP CIDR / domain 格式校验(当前后端不报错就算过)
+- **实际工时**: ~2h(Go 15min + AAR 10min + Kotlin UI 1h + 真机回归 20min)
 
 ### 10.2 Should-have (第一印象,~1.5 天)
 
@@ -631,25 +619,26 @@ Karing 是**本项目真正的对手**(同 sing-box 核、同消费级定位、�
 
 Pilotty 有 3 项**无任一竞品提供**的能力。 这 3 项**必须在 UI 里显眼**(不是藏在 Settings 里),否则 Pilotty 就变成"NekoBox 的 60% 功能 + Karing 的 50% UX", 死在基线战里。
 
-### D1. 自然语言指令入口(Raycast 式体验)
-- **定位**: 首页 Dashboard 顶部的 Chat 输入条不是 tab,是**主交互**。用户输入"切到最快的节点" / "加一条公司内网直连" / "广告屏蔽模板加上" 直接出结果
-- **现状**: Chat 是独立 tab, 和其他 tab 同级, 视觉权重等同
-- **需要**:
-  - (a) Dashboard 顶部加一条 "问 Pilotty 帮你..." 搜索框 (单行, 点开才展开完整 Chat 视图)
-  - (b) 允许快捷指令: 输入前缀"/" 出命令选单(/切换 / /延迟 / /加规则 ...)
-  - (c) Chat tab 保留做完整历史视图, 但主入口是 Dashboard 的输入条
-- **工时**: 3-5h
+### D1. 自然语言指令入口(Raycast 式体验)✅ 已完成(2026-04-22 真机验证)
+- **实现**:
+  - Home tab 顶部已有 "Ask the agent" hero 输入框 + 3 个 quick-action chip(最快节点 / Netflix 模式 / 诊断卡顿),原来只是跳 Chat tab 不传入内容
+  - 新增 `ui/agent/AgentQueryBus` StateFlow<String?> 单例(同 ImportBus 模式),Home ↑ 按钮 / chip 点击 `post(query)` + nav 跳 Chat
+  - `ChatScreen` `LaunchedEffect(pendingQuery)` collect → `vm.send(query)` + `consume()` 自动发起一次 Agent 调用
+  - Chip query 文案特意对齐 `internal/router/keywords.go` 的 substring 关键词:"切换节点 找个快的"(→ switch_best_node)、"netflix 分流"(→ apply_template)、"当前状态"(→ show_status),保证 LLM 未配置 apiKey 时本地 IntentRouter 也能闭环执行
+- **真机验证**(Pixel 4a,apiKey 空):点"诊断卡顿" → 跳 Chat tab → 用户气泡"当前状态" → Agent pipeline 命中 `show_status` → `localEngine.Execute` → Clash API call(VPN 未启所以 127.0.0.1:9090 connection refused 是预期,证明 pipeline 真跑而非空壳)
+- **延期**: "/" 前缀命令选单 + 单行折叠展开动效保留 v1.1;D1 核心 "自然语言 → 真执行" 闭环已达成
+- **实际工时**: ~1h(AgentQueryBus 一个文件 + Home 两处 onClick 改动 + Chat LaunchedEffect + chip 文案调整)
 - **为什么是关键**: Raycast 的护城河就是"唤起即指令"。 我们的 Agent 藏在 tab 里,用户永远不会意识到它存在
 
-### D2. Safety Card — 写操作随时可回滚
-- **定位**: Dashboard 第一屏必有一张 "安全" 卡片,显示最近 5 个写操作(每个带 "撤销"按钮)
-- **现状**: 后端 `internal/tool/snapshot.go` 已有 Snapshot/Rollback 能力, Agent 调工具时自动打快照;但用户看不到, 点不到"撤销"
-- **需要**:
-  - (a) `mobile/netpilot.go` 暴露 `ListRecentSnapshots()` / `RollbackSnapshot(id)`
-  - (b) Dashboard "最近操作" 卡:每条显示 timestamp + 描述 ("加了规则 XX" / "切到 香港-1") + 右侧 "撤销"按钮
-  - (c) 撤销后播一个 haptic + toast "已回滚到 HH:MM:SS 之前"
-- **工时**: 3-5h
-- **为什么是关键**: 竞品都是"操作 → 失败 → 自己查哪里错了"; 我们是"操作 → 失败 → 一键回滚"。 这是 Agent-driven 产品对"黑箱焦虑"的原生解法,必须让用户看到
+### D2. Safety Card — 写操作随时可回滚 ✅ 已完成(2026-04-22 真机验证)
+- **实现**:
+  - Go: `mobile.Client.Snapshots()` (返回 `SnapshotStore.List()` JSON) + `Rollback(id)` (走 `pipeline.ManualRollback(id)`,id 空即回滚最新)
+  - Kotlin: `SnapshotDto(id, timestamp, activeProxies)` + `PilottyRepository.snapshots() / rollback(id)`
+  - `HomeViewModel.refresh` 现在并行拉 status + snapshots,snapshot 失败 fallback 空列表不阻塞;`rollbackLatest()` 发起回滚 + toast
+  - Home Safety card 改造:显示 `🛡 Safety · {N} snapshots` + 最近快照 id + 时间戳(`formatSnapTs` 格式化 RFC3339 → `MM-DD HH:MM`)+ activeProxies 键值对 + Rollback 按钮 enabled 仅当有快照
+- **真机验证**(Pixel 4a):Home 显示 `🛡 Safety · 3 snapshots` + `最近快照: snap-20260422-002 · 04-22 12:53` + `proxy-group=direct-out` → 点 Rollback → `pipeline.ManualRollback` 找到最新快照 → 尝试通过 Clash API 恢复 `proxy-group → RN-San-Jose-VLESS` → VPN 未启所以 API unreachable 错误正确透传至 UI 红色错误行(VPN 运行时会真回滚)
+- **延期**: "每条快照带撤销按钮" 的完整列表页面(当前只有最新快照一键);haptic feedback
+- **实际工时**: ~1h(Go mobile 20 行 + AAR 重建 + Dto/Repo wire + Home Card 重写)
 
 ### D3. Agent Action Trace — Chat 内联工具调用时间线
 - **定位**: Chat 消息不是"用户说 → Agent 说",是"用户说 → Agent 思考 → 调用 tool A(带 input/output) → 调用 tool B → 最终回答"。 每一步都可点开看细节

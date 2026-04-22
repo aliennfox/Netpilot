@@ -155,6 +155,24 @@ func (c *Client) FailoverStatus() string {
 	return okJSON(c.failover.Status())
 }
 
+// Snapshots 返回最近的快照列表 (D2 Safety card)。
+// 按时间倒序,最新的在前。每项含 id / timestamp / active_proxies (group→tag)。
+func (c *Client) Snapshots() string {
+	return okJSON(c.pipeline.Snapshots().List())
+}
+
+// Rollback 手动回滚到指定快照 id;id 为空时回滚到最新快照 (D2 Safety card)。
+func (c *Client) Rollback(id string) string {
+	r := c.pipeline.ManualRollback(id)
+	if r == nil {
+		return errStr("rollback returned nil result")
+	}
+	if !r.Success {
+		return errJSON(fmt.Errorf("%s", r.Message))
+	}
+	return okJSON(map[string]string{"message": r.Message})
+}
+
 // ExportBackup 导出当前用户数据为 JSON 字符串（overlay + subscriptions）。
 func (c *Client) ExportBackup() string {
 	mgr := backup.NewManager(c.overlay, c.subMgr.Store())
@@ -526,11 +544,61 @@ func (c *Client) UpdateAllSubscriptions() string {
 	return okJSON(map[string]string{"message": stripANSI(c.subMgr.UpdateAll())})
 }
 
+// ImportNodeURI 从单个 proxy URI (vmess://, ss://, vless://, trojan://, tuic://, hysteria2://, ...)
+// 解析并导入节点。 Kotlin 侧 MainActivity.onNewIntent / 剪贴板自动检测都走这个入口。
+// 返回 { success, data: { node_count, message } }, Kotlin 侧 MessageDto 只看 message。
+func (c *Client) ImportNodeURI(uri string) string {
+	count, summary, err := c.subMgr.ImportNodeURI(uri)
+	if err != nil {
+		return errJSON(err)
+	}
+	return okJSON(map[string]interface{}{
+		"node_count": count,
+		"message":    summary,
+	})
+}
+
 // --- Rules / Templates ---
 
 // Rules 返回当前路由规则列表。
 func (c *Client) Rules() string {
 	return okJSON(c.overlay.ListRules())
+}
+
+// AddRule 添加一条路由规则 (M18)。
+// ruleJSON 是 overlay.RouteRule 的 JSON 序列化,格式:
+//   {"tag":"my-rule","domain_suffix":["example.com"],"outbound":"proxy","description":"..."}
+// 字段 source 由服务端固定填 "user", 避免被客户端伪造成 "agent"。
+func (c *Client) AddRule(ruleJSON string) string {
+	var rule overlay.RouteRule
+	if err := json.Unmarshal([]byte(ruleJSON), &rule); err != nil {
+		return errJSON(fmt.Errorf("规则 JSON 解析失败: %v", err))
+	}
+	if rule.Tag == "" || rule.Outbound == "" {
+		return errStr("tag and outbound are required")
+	}
+	rule.Source = "user" // 强制覆盖, 用户 UI 创建的规则永远是 user 来源
+	if err := c.overlay.AddRule(rule); err != nil {
+		return errJSON(err)
+	}
+	if err := c.overlay.Apply(c.adapter); err != nil {
+		return errJSON(fmt.Errorf("应用规则失败: %v", err))
+	}
+	return okJSON(map[string]string{"message": "规则已添加"})
+}
+
+// RemoveRule 按 tag 删除一条路由规则 (M18)。
+func (c *Client) RemoveRule(tag string) string {
+	if tag == "" {
+		return errStr("tag is required")
+	}
+	if err := c.overlay.RemoveRule(tag); err != nil {
+		return errJSON(err)
+	}
+	if err := c.overlay.Apply(c.adapter); err != nil {
+		return errJSON(fmt.Errorf("应用规则失败: %v", err))
+	}
+	return okJSON(map[string]string{"message": "规则已删除"})
 }
 
 // Templates 返回内置模板列表。

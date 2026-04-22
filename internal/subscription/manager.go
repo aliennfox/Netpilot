@@ -88,6 +88,50 @@ func (m *SubscriptionManager) AddSubscription(name, url string) (int, string, er
 	return len(outbounds), summary, nil
 }
 
+// ImportNodeURI 从单个 proxy URI (vmess://, ss://, vless://, trojan://, ...) 解析并导入节点
+// 不创建 Subscription 条目, 节点直接写到 overlay outbounds
+// 这是 M16 Deep Link 的后端: 用户点 TG/微信里的节点链接 → Pilotty → 此函数
+func (m *SubscriptionManager) ImportNodeURI(uri string) (int, string, error) {
+	nodes, err := ParseSubscription(uri)
+	if err != nil {
+		return 0, "", fmt.Errorf("URI 解析失败: %v", err)
+	}
+	if len(nodes) == 0 {
+		return 0, "", fmt.Errorf("URI 里没有可导入的节点")
+	}
+	outbounds, tags, skipped := m.convertNodes(nodes)
+	if len(outbounds) == 0 {
+		return 0, "", fmt.Errorf("所有节点转换失败 (跳过 %d)", skipped)
+	}
+	if err := m.overlay.AddOutboundsBatch(outbounds); err != nil {
+		return 0, "", fmt.Errorf("写入 overlay 失败: %v", err)
+	}
+	if err := m.overlay.Apply(m.adapter); err != nil {
+		return 0, "", fmt.Errorf("应用配置失败: %v", err)
+	}
+	summary := fmt.Sprintf("已导入 %d 个节点: %s", len(outbounds), joinTags(tags))
+	return len(outbounds), summary, nil
+}
+
+// joinTags 逗号拼接 tag 列表, 超过 5 个只显示前 5 个 + "..."
+func joinTags(tags []string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	if len(tags) <= 5 {
+		s := tags[0]
+		for i := 1; i < len(tags); i++ {
+			s += ", " + tags[i]
+		}
+		return s
+	}
+	s := tags[0]
+	for i := 1; i < 5; i++ {
+		s += ", " + tags[i]
+	}
+	return fmt.Sprintf("%s, ... (共 %d)", s, len(tags))
+}
+
 // RemoveSubscription 删除订阅及其所有节点
 func (m *SubscriptionManager) RemoveSubscription(id string) (string, error) {
 	sub := m.store.Get(id)

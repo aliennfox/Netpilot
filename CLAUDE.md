@@ -472,25 +472,37 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
   - merged.json 保持 "include_package NOT SET" 直到 VPN 启动(因为 injectPerAppRules 只在 `loadConfigJson` 时跑 —— 冷路径注入不引入漂移)
 - 唯一未验证: **VPN 运行状态下实际流量分流**(Chrome 走代理 / WeChat 直连)—— 需要真实能用的代理节点 + 发流量观测 `/connections`。 用户的 relaycore 订阅可完成此步, 但属下一次真机回归范围
 
-**#M21 — Kill Switch 缺失**(2026-04-22 对照识别)
-- 现象: VPN 断开 / 崩溃时无阻断,流量明文回到物理网络
-- 影响: 隐私敏感用户直接劝退。Android 系统自带 `Settings > 网络 > VPN > 始终开启` (lockdown), App 不能直接开但可引导
-- 修复: `docs/android-mvp-gap.md` M15 方式 A (~3-4h 引导型) · 方式 B (~10-14h 实现型 BlockingTunService) v1 用方式 A
+**#M21 — Kill Switch** ✅ **方式 A 已完成(2026-04-22 Pixel 4a 真机验证)**
+- 实现: `android/.../ui/settings/KillSwitchSection.kt` — 挂在 `SettingsScreen` 中 `PerAppVpnSection` 之后。卡片含双层说明 + 4 步指引 + "打开系统 VPN 设置" 按钮 → `Intent(Settings.ACTION_VPN_SETTINGS)`
+- 真机验证: 点按钮 → `topResumedActivity=com.android.settings/.Settings$VpnSettingsActivity`,系统 VPN 列表显示 Pilotty 条目 + 齿轮图标,用户点齿轮即可进 always-on + lockdown 勾选页
+- 方式 A 设计理由: Android 不允许普通 App 持有"阻断非 VPN 流量"的权限,真正阻断由 SystemUI 的 lockdown 模式维护(VPN 崩溃/切换/重启均兜底)
+- 方式 B 延期: BlockingTunService(空 TUN + 零路由)实现型保留给 v1.x,工程量 10-14h
+- 实际工时: ~1h(纯 UI Section + Intent,无 Go 改动,无 reload 链)
 
-**#M22 — Deep Link / QR Code 订阅导入缺失**(2026-04-22 对照识别)
-- 现象: `AndroidManifest.xml` 无任何 `<intent-filter scheme="ss|vmess|vless|trojan|tuic|..." />`;用户在 TG / 微信点节点链接不会路由给 Pilotty
-- 影响: 节点分享路径完全断流,用户必须"长按复制 → 切回 Pilotty → 粘贴",80% 场景直接流失
-- 修复: `docs/android-mvp-gap.md` M16 (~7-9h, 含扫码)。参考 NekoBox AndroidManifest.xml:96/108/119 + ScannerActivity
+**#M22 — Deep Link + 剪贴板导入** ✅ **已完成(2026-04-22 Pixel 4a 真机验证)**· QR 延期 v1.1
+- 实现:
+  - Go: `SubscriptionManager.ImportNodeURI(uri)` (`internal/subscription/manager.go:91+`) + `mobile.Client.ImportNodeURI` 暴露给 gomobile;AAR 重建两次(字段名 summary → message 微调)
+  - Kotlin: `AndroidManifest.xml` MainActivity 加 `launchMode="singleTask"` + 14 个 scheme intent-filter(`ss/vmess/vless/trojan/tuic/hysteria/hysteria2/hy2/wireguard/anytls/shadowtls/sub/clash/pilotty`)
+  - `MainActivity.handleIncomingUri` 处理 onCreate 冷启动 + onNewIntent 热启动 → `ImportBus.post(uri)`
+  - `ui/import_/ImportBus` StateFlow<Item?> 单例广播,SubsScreen 订阅 pending → 弹 `ImportConfirmDialog`
+  - `SubsViewModel.addSubscription` 分流:http(s) → 订阅;其他 scheme → `importNodeURI`
+  - AddSubscriptionDialog `pickImportableFromClipboard` 同步读 ClipboardManager,匹配 14 scheme 或 http(s) 时顶部显示"使用剪贴板"按钮
+- 真机验证: `am start -a VIEW -d ss://...#TestDeepLink` → logcat `deep-link received` → Subs tab 弹 Dialog 标题"导入节点 · SS" + URI 全文 → 点导入 → overlay.json outbounds +1 (tag=TestDeepLink, type=shadowsocks) → Nodes tab 16/16 含新节点
+- QR 扫码延期: v1 先有 Deep Link + 剪贴板已覆盖 TG / 浏览器 / 手动复制 3 大路径;CameraX + ZXing 约 3h 留给 v1.1
+- 实际工时: ~2.5h(Go 20min + AAR 两次 10min + Kotlin 1h + 真机回归 40min)
 
-**#M23 — 订阅流量配额 UI 缺失(后端已实现)**(2026-04-22 对照识别)
-- 现象: `internal/subscription/parser.go:ParseUserInfoHeader` + `store.go:UserInfo` 解析 upload/download/total/expire 齐了, Kotlin StatusDto + Subscription UI 无透传
-- 影响: 用户不知道"还剩多少流量 / 何时到期",被动撞"突然连不上"
-- 修复: `docs/android-mvp-gap.md` M17(feat) (~3-4h),纯 UI wire up
+**#M23 — 订阅流量配额 UI** ✅ **真机验证通过(2026-04-22 Pixel 4a)**
+- 实现: Go 侧 `Subscription.UserInfo` 已随 `Subscriptions()` JSON 透出(`internal/subscription/store.go:88`);Kotlin `SubscriptionDto.userInfo: UserInfoDto?`(`data/Dto.kt:56, 59-65`);`SubsScreen.QuotaRow`(`ui/subs/SubsScreen.kt:215-242`)渲染横向进度条(accent 填充) + 已用/总量 + 到期日期;fallback `sub.userInfo?.let { QuotaRow(it) }` 无 header 时不渲染
+- 真机验证: 本地 fixture server 给 `clash-mixed.yaml` 响应注入 `subscription-userinfo: upload=5GB; download=10GB; total=85GiB; expire=2026-05-15` header → 点"全部更新" → Subs tab 第二卡渲染进度条 ~18% + `已用 15.00 GB / 85.00 GB · 到期 2026-05-15`;第一卡(relaycore.cc 真实服务器不返回该 header)正确不渲染 QuotaRow,UI 不崩
+- 实际工时: ~0.5h(Dto+UI 此前已入库,本次只补 fixture header 做回归验证)
 
-**#M24 — 用户侧路由规则 CRUD UI 缺失(仅 Agent 可改)**(2026-04-22 对照识别)
-- 现象: Rules tab 能列规则 + 应用 4 个内置模板,但用户无法手工 加 / 删 / 改 单条规则。 后端 Overlay `AddRoutingRule / RemoveRoutingRule` 有,Agent 能用, 普通用户找不到入口
-- 影响: "加一条公司内网直连" 这种诉求, Agent 固然能做, 但要求用户先懂 Agent 存在
-- 修复: `docs/android-mvp-gap.md` M18(feat) (~6-8h)。参考 NekoBox RouteSettingsActivity
+**#M24 — 用户侧路由规则 CRUD UI** ✅ **已完成(2026-04-22 Pixel 4a 真机验证)**
+- 实现:
+  - Go: `mobile.Client.AddRule(ruleJSON)` / `RemoveRule(tag)` 暴露给 gomobile,内部走 `overlay.AddRule/RemoveRule + Apply(adapter)`;`source` 字段 Go 侧**强制覆盖为 "user"**,避免客户端伪造 Agent 来源
+  - Kotlin: Rules tab Kicker 右侧加 "+ 自定义规则" 按钮 · 规则卡右侧加红色 "×" 删除按钮 + 二次确认 AlertDialog · `AddRuleDialog` 含描述 + 4 种 matcher chip + 值输入 + 4 种 outbound chip · Tag 由 `"user-" + millis.toString(36)` 自动生成
+- 真机验证: 添加 `domain_suffix=test-rule.example.com → direct` → overlay.json 出现 `{tag:"user-mo9xd7yq", outbound:"direct", source:"user", domain_suffix:["test-rule.example.com"]}` → UI "ACTIVE RULES · 0 → 1" · 点 × → 二次确认 → 删除 → "ACTIVE RULES · 1 → 0"
+- 延期: 编辑现有规则(当前需删除后重加);outbound 下拉动态填充当前 proxy-group 列表;IP CIDR / domain 格式前端校验
+- 实际工时: ~2h(Go 15min + AAR 10min + Kotlin UI 1h + 真机回归 20min)
 
 **#M25 — WireGuard 在 sing-box 1.13.8+ 从 outbound 迁到 endpoint, convertWireGuard 过时**(2026-04-22 M13 --deep 真机 validate 捕获)
 - 现象: `internal/subscription/converter.go:convertWireGuard` 产出 `{"type":"wireguard", "local_address":[...], "peer_public_key":"..."}` 形态的 outbound 对象。 sing-box 1.13.8+ 把 WireGuard 搬去 endpoints registry (`protocol/wireguard/endpoint.go:33` 用 `option.WireGuardEndpointOptions` 注册),schema 改成 `{"address":[...], "peers":[{"address":...,"public_key":...,"reserved":[...]}]}` 且顶层没有 server/server_port。 当前 converter 产物被 1.13.9 binary `sing-box check` 直接拒 `json: unknown field "local_address"`

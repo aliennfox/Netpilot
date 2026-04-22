@@ -25,6 +25,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pilotty.app.data.*
+import com.pilotty.app.ui.agent.AgentQueryBus
 import com.pilotty.app.ui.components.*
 import com.pilotty.app.ui.theme.LocalPilottyColors
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -82,6 +83,15 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
 
     LaunchedEffect(ui.messages.size) {
         if (ui.messages.isNotEmpty()) listState.animateScrollToItem(ui.messages.size - 1)
+    }
+
+    // D1: Home "Ask the agent" → Chat 自动发送。 收到 pending query 就丢 vm.send + consume
+    val pendingQuery by AgentQueryBus.pending.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingQuery) {
+        pendingQuery?.let {
+            vm.send(it)
+            AgentQueryBus.consume()
+        }
     }
 
     Column(
@@ -504,16 +514,47 @@ class RulesViewModel : ViewModel() {
         }
     }
 
+    /** M18 用户自定义规则。 ruleJSON 由 UI 端拼好,已包含 tag/matcher/outbound/description。 */
+    fun addRule(ruleJSON: String) = viewModelScope.launch {
+        try {
+            val m = PilottyRepository.addRule(ruleJSON)
+            _state.value = _state.value.copy(toast = m.message.ifEmpty { "规则已添加" })
+            refresh()
+        } catch (e: Throwable) {
+            _state.value = _state.value.copy(error = e.message)
+        }
+    }
+
+    fun removeRule(tag: String) = viewModelScope.launch {
+        try {
+            val m = PilottyRepository.removeRule(tag)
+            _state.value = _state.value.copy(toast = m.message.ifEmpty { "规则已删除" })
+            refresh()
+        } catch (e: Throwable) {
+            _state.value = _state.value.copy(error = e.message)
+        }
+    }
+
     fun dismissToast() { _state.value = _state.value.copy(toast = null) }
+    fun dismissError() { _state.value = _state.value.copy(error = null) }
 }
 
 @Composable
 fun RulesSection(vm: RulesViewModel = viewModel()) {
     val pc = LocalPilottyColors.current
     val ui by vm.state.collectAsStateWithLifecycle()
+    var addDialogOpen by remember { mutableStateOf(false) }
+    var deleteTarget by remember { mutableStateOf<RouteRuleDto?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         ui.error?.let { Text("错误: $it", color = pc.error, fontSize = 12.sp) }
+        ui.toast?.let {
+            Text("· $it", color = pc.ink3, fontSize = 11.sp)
+            LaunchedEffect(it) {
+                kotlinx.coroutines.delay(2000)
+                vm.dismissToast()
+            }
+        }
 
         Kicker("Templates · ${ui.templates.size}")
         ui.templates.forEach { t ->
@@ -534,7 +575,19 @@ fun RulesSection(vm: RulesViewModel = viewModel()) {
         }
 
         Spacer(Modifier.height(8.dp))
-        Kicker("Active rules · ${ui.rules.size}")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Kicker("Active rules · ${ui.rules.size}")
+            PilottyButton(
+                text = "+ 自定义规则",
+                onClick = { addDialogOpen = true },
+                variant = PilottyButtonVariant.Outline,
+                small = true,
+            )
+        }
         ui.rules.forEach { r ->
             PilottyCard(modifier = Modifier.fillMaxWidth(), soft = true) {
                 Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
@@ -548,6 +601,7 @@ fun RulesSection(vm: RulesViewModel = viewModel()) {
                             color = pc.ink,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f),
                         )
                         Text(
                             r.source,
@@ -555,10 +609,21 @@ fun RulesSection(vm: RulesViewModel = viewModel()) {
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace,
                         )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "×",
+                            color = pc.error,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clickable { deleteTarget = r }
+                                .padding(horizontal = 6.dp),
+                        )
                     }
                     Spacer(Modifier.height(4.dp))
                     val parts = buildList {
-                        if (r.domainSuffix.isNotEmpty()) add("domain×${r.domainSuffix.size}")
+                        if (r.domainSuffix.isNotEmpty()) add("suffix×${r.domainSuffix.size}")
+                        if (r.domain.isNotEmpty()) add("domain×${r.domain.size}")
                         if (r.ipCidr.isNotEmpty()) add("ip×${r.ipCidr.size}")
                         if (r.processName.isNotEmpty()) add("proc×${r.processName.size}")
                     }
@@ -572,4 +637,129 @@ fun RulesSection(vm: RulesViewModel = viewModel()) {
             }
         }
     }
+
+    if (addDialogOpen) {
+        AddRuleDialog(
+            onDismiss = { addDialogOpen = false },
+            onConfirm = { ruleJSON ->
+                vm.addRule(ruleJSON)
+                addDialogOpen = false
+            },
+        )
+    }
+
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            containerColor = pc.surface,
+            title = { Text("删除规则", color = pc.ink) },
+            text = { Text("确定删除规则「${target.description.ifEmpty { target.tag }}」?", color = pc.ink2) },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.removeRule(target.tag)
+                    deleteTarget = null
+                }) { Text("删除", color = pc.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("取消", color = pc.ink2) }
+            },
+        )
+    }
+}
+
+@Composable
+private fun AddRuleDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (ruleJSON: String) -> Unit,
+) {
+    val pc = LocalPilottyColors.current
+    var description by remember { mutableStateOf("") }
+    var matcherType by remember { mutableStateOf("domain_suffix") }
+    var matcherValue by remember { mutableStateOf("") }
+    var outbound by remember { mutableStateOf("direct") }
+
+    val matcherTypes = listOf("domain_suffix", "domain", "ip_cidr", "process_name")
+    val outbounds = listOf("direct", "proxy", "proxy-group", "reject")
+
+    fun buildRuleJSON(): String? {
+        val value = matcherValue.trim()
+        if (value.isEmpty()) return null
+        val tag = "user-" + System.currentTimeMillis().toString(36)
+        val desc = description.trim().ifEmpty { "$matcherType=$value → $outbound" }
+        val escapedVals = value.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            .joinToString(",") { "\"" + it.replace("\\", "\\\\").replace("\"", "\\\"") + "\"" }
+        val matcherField = matcherType
+        return """{"tag":"$tag","$matcherField":[$escapedVals],"outbound":"$outbound","description":"${desc.replace("\"", "\\\"")}"}"""
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = pc.surface,
+        title = { Text("自定义路由规则", color = pc.ink) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("描述 (可选)") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = pc.ink,
+                        unfocusedBorderColor = pc.hairlineStrong,
+                    ),
+                )
+                Text("匹配条件", color = pc.ink4, fontSize = 11.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    matcherTypes.forEach { mt ->
+                        PilottyChip(
+                            text = when (mt) {
+                                "domain_suffix" -> "域名后缀"
+                                "domain" -> "完整域名"
+                                "ip_cidr" -> "IP 段"
+                                "process_name" -> "进程名"
+                                else -> mt
+                            },
+                            selected = matcherType == mt,
+                            onClick = { matcherType = mt },
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = matcherValue,
+                    onValueChange = { matcherValue = it },
+                    label = { Text(when (matcherType) {
+                        "domain_suffix" -> "值 (逗号分隔,如 google.com,youtube.com)"
+                        "domain" -> "值 (完整域名,逗号分隔)"
+                        "ip_cidr" -> "值 (如 10.0.0.0/8,192.168.0.0/16)"
+                        "process_name" -> "值 (如 com.tencent.mm)"
+                        else -> "值"
+                    }) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = pc.ink,
+                        unfocusedBorderColor = pc.hairlineStrong,
+                    ),
+                )
+                Text("出口", color = pc.ink4, fontSize = 11.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    outbounds.forEach { ob ->
+                        PilottyChip(
+                            text = ob,
+                            selected = outbound == ob,
+                            onClick = { outbound = ob },
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { buildRuleJSON()?.let(onConfirm) },
+                enabled = matcherValue.isNotBlank(),
+            ) { Text("添加", color = if (matcherValue.isNotBlank()) pc.accentInk else pc.ink4, fontWeight = FontWeight.SemiBold) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消", color = pc.ink2) }
+        },
+    )
 }

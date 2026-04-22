@@ -43,7 +43,10 @@ object PilottyCore {
     fun addSubscription(name: String, url: String): String = require().addSubscription(name, url)
     fun removeSubscription(id: String): String    = require().removeSubscription(id)
     fun updateAllSubscriptions(): String          = require().updateAllSubscriptions()
+    fun importNodeURI(uri: String): String        = require().importNodeURI(uri)
     fun rules(): String                           = require().rules()
+    fun addRule(ruleJSON: String): String         = require().addRule(ruleJSON)
+    fun removeRule(tag: String): String           = require().removeRule(tag)
     fun templates(): String                       = require().templates()
     fun applyTemplate(id: String): String         = require().applyTemplate(id)
     fun agentReady(): Boolean                     = require().agentReady()
@@ -67,4 +70,8 @@ object PilottyCore {
     // 配置备份/导入
     fun exportBackup(): String                         = require().exportBackup()
     fun importBackup(data: String): String             = require().importBackup(data)
+
+    // 快照 / 手动回滚 (D2 Safety card)
+    fun snapshots(): String                            = require().snapshots()
+    fun rollback(id: String = ""): String              = require().rollback(id)
 }

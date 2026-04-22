@@ -1,6 +1,8 @@
 package com.pilotty.app
 
+import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -29,6 +31,7 @@ import com.pilotty.app.ui.HomeScreen
 import com.pilotty.app.ui.NodesScreen
 import com.pilotty.app.ui.components.FloatingBottomNav
 import com.pilotty.app.ui.components.NavItem
+import com.pilotty.app.ui.import_.ImportBus
 import com.pilotty.app.ui.settings.SettingsScreen
 import com.pilotty.app.ui.settings.ThemeMode
 import com.pilotty.app.ui.subs.SubsScreen
@@ -42,6 +45,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         vpn = VpnController(this).also { it.registerLauncher() }
+        // App 被 Deep Link 冷启动时, intent 在 onCreate 里读; 热启动走 onNewIntent
+        handleIncomingUri(intent)
         setContent {
             var themeMode by rememberSaveable { mutableStateOf(ThemeMode.System) }
             val dark = when (themeMode) {
@@ -61,6 +66,23 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIncomingUri(intent)
+    }
+
+    /**
+     * 消费 intent.data: 既支持 `vmess://...` 节点 URI (走 ImportNodeURI),
+     * 也支持 `sub://...` / `clash://...` / `pilotty://subscribe?url=...` 订阅 URL。
+     * 当前策略: 所有 scheme 都丢给 ImportBus, 由 UI 层弹 dialog 让用户确认再导入。
+     */
+    private fun handleIncomingUri(intent: Intent?) {
+        val uri = intent?.data?.toString() ?: return
+        if (uri.isBlank()) return
+        Log.i("MainActivity", "deep-link received: $uri")
+        ImportBus.post(uri)
     }
 }
 

@@ -44,9 +44,15 @@ object PilottyRepository {
     suspend fun addSubscription(name: String, url: String): MessageDto = call { PilottyCore.addSubscription(name, url) }
     suspend fun removeSubscription(id: String): MessageDto = call { PilottyCore.removeSubscription(id) }
     suspend fun updateAllSubscriptions(): MessageDto = call { PilottyCore.updateAllSubscriptions() }
+    suspend fun importNodeURI(uri: String): MessageDto = call { PilottyCore.importNodeURI(uri) }
     suspend fun applyTemplate(id: String): MessageDto = call { PilottyCore.applyTemplate(id) }
     suspend fun rules(): List<RouteRuleDto> = call { PilottyCore.rules() }
+    suspend fun addRule(ruleJSON: String): MessageDto = call { PilottyCore.addRule(ruleJSON) }
+    suspend fun removeRule(tag: String): MessageDto = call { PilottyCore.removeRule(tag) }
     suspend fun templates(): List<TemplateDto> = call { PilottyCore.templates() }
+
+    suspend fun snapshots(): List<SnapshotDto> = call { PilottyCore.snapshots() }
+    suspend fun rollback(id: String = ""): MessageDto = call { PilottyCore.rollback(id) }
 
     fun clearHistory() = PilottyCore.clearHistory()
     fun agentReady(): Boolean = PilottyCore.agentReady()

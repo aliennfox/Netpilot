@@ -32,6 +32,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pilotty.app.data.PilottyRepository
 import com.pilotty.app.data.StatusDto
+import com.pilotty.app.ui.agent.AgentQueryBus
 import com.pilotty.app.ui.components.Kicker
 import com.pilotty.app.ui.components.LiveDot
 import com.pilotty.app.ui.components.PilottyButton
@@ -52,7 +53,9 @@ data class HomeUi(
     val loading: Boolean = false,
     val status: StatusDto? = null,
     val tunRunning: Boolean = false,
+    val snapshots: List<com.pilotty.app.data.SnapshotDto> = emptyList(),
     val error: String? = null,
+    val toast: String? = null,
 )
 
 class HomeViewModel : ViewModel() {
@@ -72,9 +75,12 @@ class HomeViewModel : ViewModel() {
         _state.value = _state.value.copy(loading = true, error = null)
         try {
             val s = PilottyRepository.status()
+            // snapshot 拉取失败不阻塞 status, 用空列表 fallback
+            val snaps = runCatching { PilottyRepository.snapshots() }.getOrDefault(emptyList())
             _state.value = _state.value.copy(
                 loading = false,
                 status = s,
+                snapshots = snaps,
                 tunRunning = com.pilotty.app.PilottyCore.tunRunning.value,
             )
         } catch (e: Throwable) {
@@ -86,6 +92,20 @@ class HomeViewModel : ViewModel() {
         try { PilottyRepository.setMode(mode); refresh() }
         catch (e: Throwable) { _state.value = _state.value.copy(error = e.message) }
     }
+
+    /** D2 Safety card: 一键回滚到最新快照。 */
+    fun rollbackLatest() = viewModelScope.launch {
+        try {
+            val r = PilottyRepository.rollback("")
+            _state.value = _state.value.copy(toast = r.message.ifEmpty { "已回滚" })
+            refresh()
+        } catch (e: Throwable) {
+            _state.value = _state.value.copy(error = e.message)
+        }
+    }
+
+    fun dismissToast() { _state.value = _state.value.copy(toast = null) }
+    fun dismissError() { _state.value = _state.value.copy(error = null) }
 }
 
 /* ---------- Home Screen ---------- */
@@ -232,6 +252,8 @@ fun HomeScreen(
                             .clip(RoundedCornerShape(8.dp))
                             .background(if (input.isNotEmpty()) pc.accent else pc.surface3)
                             .clickable(enabled = input.isNotEmpty()) {
+                                AgentQueryBus.post(input)
+                                input = ""
                                 onNavigateChat()
                             },
                         contentAlignment = Alignment.Center,
@@ -246,18 +268,28 @@ fun HomeScreen(
                 }
             }
 
-            // Quick action chips
+            // Quick action chips — 每个 chip 对应一个真能扔给 Agent 的自然语言 query。
+            // query 字符串故意选了 internal/router/keywords.go 的 substring match 能命中的短语,
+            // 保证在 LLM 未配置 apiKey 时本地 IntentRouter 也能直接执行, 形成 D1 差异化闭环。
+            val chipQueries = listOf(
+                "最快节点" to "切换节点 找个快的",       // → switch_best_node
+                "Netflix 模式" to "netflix 分流",       // → apply_template
+                "诊断卡顿" to "当前状态",              // → show_status
+            )
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                listOf("最快节点", "Netflix 模式", "诊断卡顿").forEach { label ->
+                chipQueries.forEach { (label, query) ->
                     PilottyChip(
                         text = label,
                         selected = false,
-                        onClick = onNavigateChat,
+                        onClick = {
+                            AgentQueryBus.post(query)
+                            onNavigateChat()
+                        },
                     )
                 }
             }
@@ -351,7 +383,8 @@ fun HomeScreen(
             }
         }
 
-        // Safety card (stub 占位, 待后端 snapshot API)
+        // Safety card (D2) — 自动快照 + 一键回滚
+        val latestSnap = ui.snapshots.firstOrNull()
         PilottyCard(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp)) {
                 Row(
@@ -365,26 +398,66 @@ fun HomeScreen(
                     ) {
                         Text("🛡", fontSize = 14.sp)
                         Text("Safety", color = pc.ink, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "· ${ui.snapshots.size} snapshots",
+                            color = pc.ink3,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                        )
                     }
                     PilottyButton(
                         text = "Rollback",
-                        onClick = { /* TODO: ManualRollback */ },
+                        onClick = { vm.rollbackLatest() },
                         variant = PilottyButtonVariant.Accent,
                         small = true,
+                        enabled = latestSnap != null,
                     )
                 }
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    "自动快照在每次 Agent 写操作前生成。TODO: snapshot API 暴露后填充最近一次快照时间戳。",
-                    color = pc.ink3,
-                    fontSize = 11.5.sp,
-                )
+                if (latestSnap != null) {
+                    Text(
+                        "最近快照: ${latestSnap.id} · ${formatSnapTs(latestSnap.timestamp)}",
+                        color = pc.ink2,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    if (latestSnap.activeProxies.isNotEmpty()) {
+                        Text(
+                            latestSnap.activeProxies.entries.joinToString(" · ") { "${it.key}=${it.value}" },
+                            color = pc.ink3,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                } else {
+                    Text(
+                        "还没有快照。自动快照在每次 Agent 或订阅写操作前生成。",
+                        color = pc.ink3,
+                        fontSize = 11.5.sp,
+                    )
+                }
             }
         }
 
         ui.error?.let {
             Text("错误: $it", color = pc.error, fontSize = 12.sp)
         }
+        ui.toast?.let {
+            Text("· $it", color = pc.ink3, fontSize = 11.sp)
+            LaunchedEffect(it) {
+                kotlinx.coroutines.delay(2500)
+                vm.dismissToast()
+            }
+        }
         Spacer(Modifier.height(96.dp)) // floating nav 留白
     }
+}
+
+/** Go 传回的 RFC3339 时间戳 → "04-22 18:35" 紧凑显示, 解析失败 fallback 原串。 */
+private fun formatSnapTs(raw: String): String {
+    if (raw.isEmpty()) return "—"
+    return runCatching {
+        val cleaned = raw.take(19).replace('T', ' ')
+        cleaned.substring(5, 16)
+    }.getOrDefault(raw.take(16))
 }

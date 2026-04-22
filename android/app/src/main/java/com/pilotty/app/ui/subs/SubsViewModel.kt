@@ -44,12 +44,19 @@ class SubsViewModel : ViewModel() {
             _state.value = _state.value.copy(error = "URL 不能为空")
             return@launch
         }
+        // http(s) → 订阅 fetch; 其他 scheme (vmess/ss/vless/...) → 单节点导入
+        val isHttpSub = cleanUrl.startsWith("http://", ignoreCase = true) ||
+            cleanUrl.startsWith("https://", ignoreCase = true)
         _state.value = _state.value.copy(loading = true, error = null)
         try {
-            val r = PilottyRepository.addSubscription(cleanName, cleanUrl)
+            val r = if (isHttpSub) {
+                PilottyRepository.addSubscription(cleanName, cleanUrl)
+            } else {
+                PilottyRepository.importNodeURI(cleanUrl)
+            }
             _state.value = _state.value.copy(
                 loading = false,
-                toast = r.message.ifEmpty { "订阅已导入" },
+                toast = r.message.ifEmpty { if (isHttpSub) "订阅已导入" else "节点已导入" },
             )
             refresh()
             requestVpnReloadIfRunning()
@@ -65,6 +72,27 @@ class SubsViewModel : ViewModel() {
             requestVpnReloadIfRunning()
         } catch (e: Throwable) {
             _state.value = _state.value.copy(error = e.message)
+        }
+    }
+
+    /** M16 Deep Link: 用户点 vmess://... 链接后, Go 侧 ImportNodeURI 把节点写到 overlay。 */
+    fun importNodeURI(uri: String) = viewModelScope.launch {
+        val cleanUri = uri.trim()
+        if (cleanUri.isEmpty()) {
+            _state.value = _state.value.copy(error = "URI 不能为空")
+            return@launch
+        }
+        _state.value = _state.value.copy(loading = true, error = null)
+        try {
+            val r = PilottyRepository.importNodeURI(cleanUri)
+            _state.value = _state.value.copy(
+                loading = false,
+                toast = r.message.ifEmpty { "节点已导入" },
+            )
+            refresh()
+            requestVpnReloadIfRunning()
+        } catch (e: Throwable) {
+            _state.value = _state.value.copy(loading = false, error = e.message)
         }
     }
 
