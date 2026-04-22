@@ -88,7 +88,11 @@ object PilottyCore {
         awaitClose { /* Go goroutine 自行结束;不主动 cancel */ }
     }
 
-    private val streamJson = Json { ignoreUnknownKeys = true; classDiscriminator = "type" }
+    private val streamJson = Json {
+        ignoreUnknownKeys = true
+        classDiscriminator = "type"
+        coerceInputValues = true // Go 侧 Events 为空时 marshal 成 null, 这里 coerce 回 emptyList()
+    }
 
     /** 仅用于解码 OnDone 的终态 payload。 形状与非流式 Chat 的 data 一致。 */
     @Serializable

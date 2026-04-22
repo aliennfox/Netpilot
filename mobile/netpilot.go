@@ -738,10 +738,16 @@ func (c *Client) ChatStream(message string, cb ChatStreamCallback) {
 		c.history.Add("user", message, "agent")
 		c.history.Add("assistant", result.Reply, "agent")
 		c.flushHistoryAsync()
+		// result.Events 可能为 nil (单角色 + LLM 直接给最终回复, 没调 tool), 显式兜底空切片
+		// 避免 json.Marshal 输出 "events":null, Kotlin 侧 serializer 不接受。
+		events := result.Events
+		if events == nil {
+			events = []agent.ToolEvent{}
+		}
 		finalJSON, _ := json.Marshal(map[string]interface{}{
 			"reply":  result.Reply,
 			"source": "agent",
-			"events": result.Events,
+			"events": events,
 		})
 		cb.OnDone(string(finalJSON))
 	}()
