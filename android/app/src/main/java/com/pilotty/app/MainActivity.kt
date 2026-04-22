@@ -117,6 +117,9 @@ fun PilottyApp(
     LaunchedEffect(Unit) {
         StartVpnBus.requests.collect { onStartVpn() }
     }
+    LaunchedEffect(Unit) {
+        com.pilotty.app.vpn.StopVpnBus.requests.collect { onStopVpn() }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         NavHost(

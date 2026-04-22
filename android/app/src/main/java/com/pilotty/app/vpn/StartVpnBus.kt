@@ -25,3 +25,19 @@ object StartVpnBus {
         _requests.tryEmit(Unit)
     }
 }
+
+/**
+ * 停止 VPN 的旁路总线, 对称于 StartVpnBus。 Chat "关闭 VPN" 快捷命令触发。
+ * stop 本身不需要 Activity 权限, 但为了与 start 路径对称, 也走总线让 MainActivity 统一处理。
+ */
+object StopVpnBus {
+    private val _requests = MutableSharedFlow<Unit>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val requests: SharedFlow<Unit> = _requests.asSharedFlow()
+
+    fun request() {
+        _requests.tryEmit(Unit)
+    }
+}

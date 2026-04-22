@@ -79,9 +79,19 @@ class ChatViewModel : ViewModel() {
      * Phase 7.3: 流式发送。 TextDelta 涌出时逐字追加到末尾 assistant 气泡, Tool 事件实时
      * append 到 events 列表, Done 终结并持久化。 本地路由命中 (source=local) 没 stream, 会
      * 直接跳到 Done 事件, 与非流式体验一致。
+     *
+     * Phase 7.5 (2026-04-23): VPN 生命周期快捷命令在入口拦截, 不走 Go Chat ——
+     * VpnService.prepare 要 Activity 权限, Go 根本调不到, 让 LLM 去"想办法"只会撞鸡生蛋死锁
+     * (#用户反馈: Agent 想半天说 Clash 未启动)。 直接走 StartVpnBus/StopVpnBus 旁路。
      */
     fun send(text: String) {
         if (text.isBlank()) return
+        val trimmed = text.trim()
+        val intent = classifyVpnIntent(trimmed)
+        if (intent != VpnIntent.None) {
+            handleVpnIntent(trimmed, intent)
+            return
+        }
         val u = ChatMessage("user", text)
         _state.value = _state.value.copy(
             sending = true,
@@ -175,6 +185,54 @@ class ChatViewModel : ViewModel() {
         PilottyRepository.clearHistory()
         _state.value = ChatUi()
         prefs?.clear()
+    }
+
+    private enum class VpnIntent { None, Start, Stop, Status }
+
+    /**
+     * 子字符串匹配 (与 Go IntentRouter 策略一致) — 用户输入含任一关键词即命中。
+     * 误伤容忍: "关闭代理模式" 会同时撞上 "关闭代理" 和 set_mode 语义, 因此 set_mode 那类词
+     * 不放进 VpnIntent 判定 —— 只匹配明确提 "VPN/连接" 的。
+     */
+    private fun classifyVpnIntent(s: String): VpnIntent {
+        val lower = s.lowercase()
+        val startKeys = listOf("打开vpn", "启动vpn", "开启vpn", "开vpn", "连接vpn", "连上vpn", "上vpn", "start vpn", "connect vpn", "enable vpn", "open vpn")
+        val stopKeys = listOf("关闭vpn", "停止vpn", "关掉vpn", "断开vpn", "断vpn", "stop vpn", "disconnect vpn", "disable vpn", "close vpn")
+        val statusKeys = listOf("vpn状态", "vpn 状态", "vpn 在运行吗", "vpn running", "vpn status")
+        if (startKeys.any { lower.contains(it) }) return VpnIntent.Start
+        if (stopKeys.any { lower.contains(it) }) return VpnIntent.Stop
+        if (statusKeys.any { lower.contains(it) }) return VpnIntent.Status
+        return VpnIntent.None
+    }
+
+    /** 本地合成 assistant 气泡 (source="local"), 不走 Go Chat, 不占 LLM 额度。 */
+    private fun handleVpnIntent(userText: String, intent: VpnIntent) {
+        val user = ChatMessage("user", userText)
+        val reply = when (intent) {
+            VpnIntent.Start -> {
+                val running = com.pilotty.app.PilottyCore.tunRunning.value
+                if (running) "VPN 已在运行。" else {
+                    com.pilotty.app.vpn.StartVpnBus.request()
+                    "正在启动 VPN。 首次启动会弹系统授权对话框, 同意后即连接。"
+                }
+            }
+            VpnIntent.Stop -> {
+                val running = com.pilotty.app.PilottyCore.tunRunning.value
+                if (!running) "VPN 未在运行。" else {
+                    com.pilotty.app.vpn.StopVpnBus.request()
+                    "已请求停止 VPN。"
+                }
+            }
+            VpnIntent.Status -> {
+                val running = com.pilotty.app.PilottyCore.tunRunning.value
+                if (running) "VPN 运行中。" else "VPN 未启动。"
+            }
+            VpnIntent.None -> return
+        }
+        val assistant = ChatMessage(role = "assistant", text = reply, source = "local", events = emptyList())
+        val updated = _state.value.messages + user + assistant
+        _state.value = _state.value.copy(messages = updated, sending = false, error = null, streamingPhase = "")
+        persist(updated)
     }
 }
 
