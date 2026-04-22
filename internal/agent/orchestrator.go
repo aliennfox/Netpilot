@@ -107,10 +107,11 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, history *Con
 			return Result{Events: allEvents}, fmt.Errorf("验证阶段失败: %w", err)
 		}
 
-		// 验证失败 → 自动回滚
+		// 验证失败 → 自动回滚 (#H2 修复: 原先调 pipeline.Execute("rollback", nil) 会进入占位 tool,
+		// 实际回滚 snapshot 必须走 ManualRollback)
 		if isVerificationFailed(verification) {
-			rollbackResult := o.pipeline.Execute(ctx, "rollback", nil)
-			if rollbackResult.Success {
+			rollbackResult := o.pipeline.ManualRollback("")
+			if rollbackResult != nil && rollbackResult.Success {
 				verification += "\n\n⚠️ 验证失败，已自动回滚到之前状态。"
 			}
 		}
