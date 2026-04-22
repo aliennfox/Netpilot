@@ -8,6 +8,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -32,6 +33,9 @@ fun SettingsScreen(
             .fillMaxSize()
             .background(pc.bg)
             .verticalScroll(rememberScrollState())
+            // imePadding: IME 打开时列缩到 (屏高 - IME 高), 配合末尾 96dp floating nav 留白,
+            // 用户可滚到 AgentApiKey 保存/取消按钮 (Phase 4 修复, 原先被 IME + nav 双重遮挡)
+            .imePadding()
             .padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {

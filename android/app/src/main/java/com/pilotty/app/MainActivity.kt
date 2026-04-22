@@ -16,12 +16,17 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -119,26 +124,41 @@ fun PilottyApp(
                 )
             }
             composable("chat") { ChatScreen() }
-            composable("nodes") { NodesScreen() }
+            composable("nodes") { NodesScreen(onNavigateSubs = { nav.navigate("subs") }) }
             composable("subs") { SubsScreen() }
             composable("settings") {
                 SettingsScreen(themeMode = themeMode, onThemeChange = onThemeChange)
             }
         }
 
-        FloatingBottomNav(
-            items = navItems,
-            current = current,
-            onTab = { route ->
-                if (current != route) {
-                    nav.navigate(route) {
-                        popUpTo(nav.graph.startDestinationId) { saveState = true }
-                        launchSingleTop = true
-                        restoreState = true
+        // Phase 4: IME 打开时隐藏 floating nav, 避免它覆盖 Settings AgentApiKey 的保存/取消 按钮。
+        // 直接用 ViewTreeObserver + WindowInsetsCompat — 比 compose-foundation 的 isImeVisible 可靠
+        // (后者在没显式 setDecorFitsSystemWindows(false) 的情况下状态不刷新, 实测首帧就卡 true)。
+        val view = LocalView.current
+        var imeVisible by remember { mutableStateOf(false) }
+        DisposableEffect(view) {
+            val listener = android.view.ViewTreeObserver.OnGlobalLayoutListener {
+                val insets = ViewCompat.getRootWindowInsets(view)
+                imeVisible = insets?.isVisible(WindowInsetsCompat.Type.ime()) ?: false
+            }
+            view.viewTreeObserver.addOnGlobalLayoutListener(listener)
+            onDispose { view.viewTreeObserver.removeOnGlobalLayoutListener(listener) }
+        }
+        if (!imeVisible) {
+            FloatingBottomNav(
+                items = navItems,
+                current = current,
+                onTab = { route ->
+                    if (current != route) {
+                        nav.navigate(route) {
+                            popUpTo(nav.graph.startDestinationId) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     }
-                }
-            },
-            modifier = Modifier.align(Alignment.BottomCenter),
-        )
+                },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
     }
 }

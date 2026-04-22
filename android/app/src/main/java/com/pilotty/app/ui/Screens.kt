@@ -3,7 +3,9 @@ package com.pilotty.app.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -215,14 +217,6 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
         }
         HorizontalDivider(color = pc.hairline, thickness = 1.dp)
 
-        ui.error?.let {
-            Text(
-                "错误: $it",
-                color = pc.error,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-            )
-        }
-
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
@@ -260,6 +254,39 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                                     fontFamily = FontFamily.Monospace,
                                 )
                                 ToolCallTimeline(msg.events)
+                            }
+                        }
+                    }
+                }
+            }
+            // 错误气泡: 不再用顶部红色 banner 遮挡消息, 改成 assistant 样式靠左的红色描边气泡,
+            // 跟随消息一起滚动 (Phase 4 修复: 原先在 LazyColumn 上方导致消息被顶下去)
+            ui.error?.let { errText ->
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Start,
+                    ) {
+                        Surface(
+                            color = pc.surface2,
+                            shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, pc.error),
+                        ) {
+                            Column(Modifier.padding(horizontal = 13.dp, vertical = 9.dp)) {
+                                Text(
+                                    "✗ 出错了",
+                                    color = pc.error,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    errText,
+                                    color = pc.error,
+                                    fontSize = 13.sp,
+                                    lineHeight = 18.sp,
+                                )
                             }
                         }
                     }
@@ -344,6 +371,7 @@ data class NodesUi(
     val nodes: List<NodeDto> = emptyList(),
     val query: String = "",
     val error: String? = null,
+    val toast: String? = null,
 )
 
 class NodesViewModel : ViewModel() {
@@ -358,13 +386,11 @@ class NodesViewModel : ViewModel() {
         try {
             val n = PilottyRepository.nodes()
             _state.value = _state.value.copy(loading = false, nodes = n)
-            if (!autoTestedOnce &&
-                com.pilotty.app.PilottyCore.tunRunning.value &&
-                n.isNotEmpty() && n.all { it.latency == 0 }) {
+            // 首次打开且所有节点 latency=0 时自动测速一次。 不再要求 tunRunning —— VPN 未启动
+            // 走 TCP probe 回退 (见 testAll)。
+            if (!autoTestedOnce && n.isNotEmpty() && n.all { it.latency == 0 }) {
                 autoTestedOnce = true
-                runCatching { PilottyRepository.testLatencyAll() }
-                val n2 = runCatching { PilottyRepository.nodes() }.getOrNull()
-                if (n2 != null) _state.value = _state.value.copy(nodes = n2)
+                testAll()
             }
         } catch (e: Throwable) {
             _state.value = _state.value.copy(loading = false, error = e.message)
@@ -374,18 +400,46 @@ class NodesViewModel : ViewModel() {
     fun setQuery(q: String) { _state.value = _state.value.copy(query = q) }
 
     fun switchTo(tag: String) = viewModelScope.launch {
+        // Clash API 要求 VPN 运行, 否则 switchNode 会撞 connection refused。
+        if (!com.pilotty.app.PilottyCore.tunRunning.value) {
+            _state.value = _state.value.copy(toast = "请先启动 VPN 再切换节点")
+            return@launch
+        }
         try { PilottyRepository.switchNode("proxy-group", tag); refresh() }
         catch (e: Throwable) { _state.value = _state.value.copy(error = e.message) }
     }
 
     fun testAll() = viewModelScope.launch {
-        try { PilottyRepository.testLatencyAll(); refresh() }
-        catch (e: Throwable) { _state.value = _state.value.copy(error = e.message) }
+        _state.value = _state.value.copy(loading = true)
+        try {
+            if (com.pilotty.app.PilottyCore.tunRunning.value) {
+                // VPN 运行: 走 Clash API /proxies/<tag>/delay (过代理, 延迟反映真实体验)
+                PilottyRepository.testLatencyAll()
+                val n2 = PilottyRepository.nodes()
+                _state.value = _state.value.copy(loading = false, nodes = n2)
+            } else {
+                // VPN 未运行: Kotlin 直接 TCP probe 回退 (精度够用, 参考 NekoBox)
+                val current = _state.value.nodes
+                val targets = current.map { it.server to it.port }
+                val results = com.pilotty.app.util.TcpLatencyProbe.probeAll(targets)
+                val updated = current.zip(results).map { (node, ms) ->
+                    node.copy(latency = if (ms < 0) 0 else ms, alive = ms > 0)
+                }
+                _state.value = _state.value.copy(loading = false, nodes = updated)
+            }
+        } catch (e: Throwable) {
+            _state.value = _state.value.copy(loading = false, error = e.message)
+        }
     }
+
+    fun dismissToast() { _state.value = _state.value.copy(toast = null) }
 }
 
 @Composable
-fun NodesScreen(vm: NodesViewModel = viewModel()) {
+fun NodesScreen(
+    onNavigateSubs: () -> Unit = {},
+    vm: NodesViewModel = viewModel(),
+) {
     val pc = LocalPilottyColors.current
     val ui by vm.state.collectAsStateWithLifecycle()
     val filtered = remember(ui.nodes, ui.query) {
@@ -393,6 +447,13 @@ fun NodesScreen(vm: NodesViewModel = viewModel()) {
         if (ui.query.isBlank()) sorted
         else sorted.filter {
             it.tag.contains(ui.query, true) || it.server.contains(ui.query, true)
+        }
+    }
+    // toast 自动消失
+    ui.toast?.let {
+        LaunchedEffect(it) {
+            kotlinx.coroutines.delay(2500)
+            vm.dismissToast()
         }
     }
 
@@ -457,8 +518,36 @@ fun NodesScreen(vm: NodesViewModel = viewModel()) {
         Spacer(Modifier.height(10.dp))
 
         ui.error?.let {
-            Text("错误: $it", color = pc.error, fontSize = 12.sp)
-            Spacer(Modifier.height(4.dp))
+            Surface(
+                color = pc.surface2,
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, pc.error),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    "✗ $it",
+                    color = pc.error,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        ui.toast?.let {
+            Surface(
+                color = pc.surface2,
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, pc.hairlineStrong),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    it,
+                    color = pc.ink2,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
         }
         if (ui.loading) {
             LinearProgressIndicator(
@@ -469,13 +558,46 @@ fun NodesScreen(vm: NodesViewModel = viewModel()) {
             Spacer(Modifier.height(4.dp))
         }
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(bottom = 96.dp),
-        ) {
-            items(filtered, key = { it.tag }) { node ->
-                NodeCard(node = node, onClick = { vm.switchTo(node.tag) })
+        // Phase 4: 0 节点 empty state, 引导去 Subs tab 导入订阅
+        if (!ui.loading && ui.nodes.isEmpty() && ui.error == null) {
+            PilottyCard(modifier = Modifier.fillMaxWidth(), soft = true) {
+                Column(
+                    modifier = Modifier
+                        .padding(horizontal = 20.dp, vertical = 24.dp)
+                        .fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        "还没有节点",
+                        color = pc.ink,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "添加一个订阅链接或导入节点 URI, 就能在这里切换。",
+                        color = pc.ink3,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    PilottyButton(
+                        text = "去 Subs 导入订阅",
+                        onClick = onNavigateSubs,
+                        variant = PilottyButtonVariant.Primary,
+                        small = true,
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(bottom = 96.dp),
+            ) {
+                items(filtered, key = { it.tag }) { node ->
+                    NodeCard(node = node, onClick = { vm.switchTo(node.tag) })
+                }
             }
         }
     }
@@ -577,6 +699,8 @@ data class RulesUi(
     val loading: Boolean = false,
     val rules: List<RouteRuleDto> = emptyList(),
     val templates: List<TemplateDto> = emptyList(),
+    /** AddRule 时 chip 可选的出口: 内置 direct/reject + 订阅里存在的 group tag (去重). */
+    val availableOutbounds: List<String> = listOf("direct", "reject"),
     val toast: String? = null,
     val error: String? = null,
 )
@@ -592,7 +716,19 @@ class RulesViewModel : ViewModel() {
         try {
             val r = PilottyRepository.rules()
             val t = PilottyRepository.templates()
-            _state.value = _state.value.copy(loading = false, rules = r, templates = t)
+            // Phase 4: 从当前节点列表动态推导可用出口 group
+            //   - direct / reject 是 sing-box 内置 outbound, 永远可用
+            //   - 去掉 "" (overlay 里可能有无 groupTag 的节点, 当内置处理)
+            //   - 结合节点 tag 可加, 但太长了 UX 差, 先只收集 group 维度
+            val nodes = runCatching { PilottyRepository.nodes() }.getOrDefault(emptyList())
+            val groups = nodes.mapNotNull { it.groupTag.takeIf { g -> g.isNotBlank() } }.distinct()
+            val outbounds = (listOf("direct", "reject") + groups).distinct()
+            _state.value = _state.value.copy(
+                loading = false,
+                rules = r,
+                templates = t,
+                availableOutbounds = outbounds,
+            )
         } catch (e: Throwable) {
             _state.value = _state.value.copy(loading = false, error = e.message)
         }
@@ -734,6 +870,7 @@ fun RulesSection(vm: RulesViewModel = viewModel()) {
 
     if (addDialogOpen) {
         AddRuleDialog(
+            availableOutbounds = ui.availableOutbounds,
             onDismiss = { addDialogOpen = false },
             onConfirm = { ruleJSON ->
                 vm.addRule(ruleJSON)
@@ -763,6 +900,7 @@ fun RulesSection(vm: RulesViewModel = viewModel()) {
 
 @Composable
 private fun AddRuleDialog(
+    availableOutbounds: List<String>,
     onDismiss: () -> Unit,
     onConfirm: (ruleJSON: String) -> Unit,
 ) {
@@ -770,10 +908,12 @@ private fun AddRuleDialog(
     var description by remember { mutableStateOf("") }
     var matcherType by remember { mutableStateOf("domain_suffix") }
     var matcherValue by remember { mutableStateOf("") }
-    var outbound by remember { mutableStateOf("direct") }
+    // 默认选 availableOutbounds 里的首项 (direct) — 不再写死 "direct" (兼容未来 reject 消失的情况)
+    var outbound by remember { mutableStateOf(availableOutbounds.firstOrNull() ?: "direct") }
 
     val matcherTypes = listOf("domain_suffix", "domain", "ip_cidr", "process_name")
-    val outbounds = listOf("direct", "proxy", "proxy-group", "reject")
+    // Phase 4: outbounds 从 RulesViewModel 注入, 动态反映当前节点的 group tag (含 direct/reject 内置)
+    val outbounds = availableOutbounds.ifEmpty { listOf("direct", "reject") }
 
     fun buildRuleJSON(): String? {
         val value = matcherValue.trim()
@@ -835,7 +975,11 @@ private fun AddRuleDialog(
                     ),
                 )
                 Text("出口", color = pc.ink4, fontSize = 11.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // 可横向滚动 (group 可能很多,长行吃不下时允许划动)
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     outbounds.forEach { ob ->
                         PilottyChip(
                             text = ob,

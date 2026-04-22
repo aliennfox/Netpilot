@@ -53,6 +53,7 @@ data class HomeUi(
     val loading: Boolean = false,
     val status: StatusDto? = null,
     val tunRunning: Boolean = false,
+    val isConnecting: Boolean = false,
     val snapshots: List<com.pilotty.app.data.SnapshotDto> = emptyList(),
     val error: String? = null,
     val toast: String? = null,
@@ -66,8 +67,26 @@ class HomeViewModel : ViewModel() {
         refresh()
         viewModelScope.launch {
             com.pilotty.app.PilottyCore.tunRunning.collect { running ->
-                _state.value = _state.value.copy(tunRunning = running)
+                // tunRunning 变 true → 清掉启动中 spinner。 变 false 时不清, 由超时兜底 / 用户再次点击。
+                _state.value = _state.value.copy(
+                    tunRunning = running,
+                    isConnecting = if (running) false else _state.value.isConnecting,
+                )
             }
+        }
+    }
+
+    /**
+     * 启动 VPN 并进入 "启动中" 视觉态。 实际 Intent 启动由上层 onStartVpn 处理 (需要 Activity
+     * 手持 ActivityResultLauncher 请求 VpnService.prepare),ViewModel 这里只负责 UI state。
+     * 8s 超时兜底: libbox 首次冷启动实测 5-10s, 超时只清 spinner 不当 error (真启动成功后
+     * tunRunning collect 会纠正按钮文案为 "停止")。
+     */
+    fun beginConnecting() = viewModelScope.launch {
+        _state.value = _state.value.copy(isConnecting = true)
+        kotlinx.coroutines.delay(8_000)
+        if (!_state.value.tunRunning) {
+            _state.value = _state.value.copy(isConnecting = false)
         }
     }
 
@@ -89,12 +108,23 @@ class HomeViewModel : ViewModel() {
     }
 
     fun setMode(mode: String) = viewModelScope.launch {
+        // Clash API 只在 VPN 运行时在 127.0.0.1:9090 可达, 否则 setMode 会撞 connection refused。
+        // 与其让用户看到 Go 原始错误, 不如前置兜底提示。
+        if (!com.pilotty.app.PilottyCore.tunRunning.value) {
+            _state.value = _state.value.copy(toast = "请先启动 VPN 再切换代理模式")
+            return@launch
+        }
         try { PilottyRepository.setMode(mode); refresh() }
         catch (e: Throwable) { _state.value = _state.value.copy(error = e.message) }
     }
 
     /** D2 Safety card: 一键回滚到最新快照。 */
     fun rollbackLatest() = viewModelScope.launch {
+        // Rollback 会通过 Clash API 还原 proxy-group 状态, VPN 未运行时必失败 → 友好提示。
+        if (!com.pilotty.app.PilottyCore.tunRunning.value) {
+            _state.value = _state.value.copy(toast = "请先启动 VPN 再回滚")
+            return@launch
+        }
         try {
             val r = PilottyRepository.rollback("")
             _state.value = _state.value.copy(toast = r.message.ifEmpty { "已回滚" })
@@ -345,28 +375,44 @@ fun HomeScreen(
             }
         }
 
-        // VPN 控制
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (ui.tunRunning) {
+        // VPN 控制 —— 单按钮占满一行, tunRunning/isConnecting 驱动文案 & 态切换。
+        // 刷新按钮已删除: PilottyCore.tunRunning StateFlow 实时推到 ui.tunRunning, 无需手动刷。
+        when {
+            ui.tunRunning -> {
                 PilottyButton(
                     text = "停止",
                     onClick = onStopVpn,
                     variant = PilottyButtonVariant.Outline,
-                    modifier = Modifier.weight(1f),
-                )
-            } else {
-                PilottyButton(
-                    text = "启动 VPN",
-                    onClick = onStartVpn,
-                    variant = PilottyButtonVariant.Accent,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
-            PilottyButton(
-                text = "刷新",
-                onClick = { vm.refresh() },
-                variant = PilottyButtonVariant.Outline,
-            )
+            ui.isConnecting -> {
+                PilottyButton(
+                    text = "启动中...",
+                    onClick = {},
+                    variant = PilottyButtonVariant.Accent,
+                    enabled = false,
+                    modifier = Modifier.fillMaxWidth(),
+                    leading = {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = pc.ink,
+                        )
+                    },
+                )
+            }
+            else -> {
+                PilottyButton(
+                    text = "启动",
+                    onClick = {
+                        vm.beginConnecting()
+                        onStartVpn()
+                    },
+                    variant = PilottyButtonVariant.Accent,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
 
         // 模式切换
@@ -410,7 +456,8 @@ fun HomeScreen(
                         onClick = { vm.rollbackLatest() },
                         variant = PilottyButtonVariant.Accent,
                         small = true,
-                        enabled = latestSnap != null,
+                        // 只有当存在快照 *且* VPN 运行时才启用: 回滚必须经 Clash API 重设 selector。
+                        enabled = latestSnap != null && ui.tunRunning,
                     )
                 }
                 Spacer(Modifier.height(8.dp))
@@ -439,11 +486,50 @@ fun HomeScreen(
             }
         }
 
-        ui.error?.let {
-            Text("错误: $it", color = pc.error, fontSize = 12.sp)
+        // 错误横幅: 带红色描边的卡片, 不再是裸文本, 避免跟随内容区渗在下方
+        ui.error?.let { err ->
+            Surface(
+                color = pc.surface2,
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, pc.error),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "✗ $err",
+                        color = pc.error,
+                        fontSize = 12.sp,
+                        modifier = Modifier.weight(1f).padding(end = 8.dp),
+                    )
+                    Text(
+                        "×",
+                        color = pc.error,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable { vm.dismissError() }.padding(horizontal = 6.dp),
+                    )
+                }
+            }
         }
+        // Toast: 中性色, 2.5s 自动消失
         ui.toast?.let {
-            Text("· $it", color = pc.ink3, fontSize = 11.sp)
+            Surface(
+                color = pc.surface2,
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, pc.hairlineStrong),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    it,
+                    color = pc.ink2,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+            }
             LaunchedEffect(it) {
                 kotlinx.coroutines.delay(2500)
                 vm.dismissToast()
