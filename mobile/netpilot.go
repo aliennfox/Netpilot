@@ -57,6 +57,62 @@ type Client struct {
 
 	// Phase 7.1: 对话历史持久化路径。 每次 Chat 调用后异步刷盘, 进程被系统杀后重启能恢复上下文。
 	historyPath string
+
+	// Phase 8: Agent 通过 start_vpn/stop_vpn/vpn_status tools 控制 VPN 生命周期。
+	// Kotlin 在 PilottyApp.onCreate 注入实现 (VpnControlImpl), 触发 StartVpnBus/StopVpnBus。
+	// 注入前调用走 clientVpnAdapter 的 nil-guard, 返回可读错误而非 panic。
+	vpnControl VpnControlCallback
+}
+
+// VpnControlCallback 是 Kotlin 侧实现的 gomobile reverse-binding 接口, 让 Go Agent Tool
+// 能驱动 VPN 生命周期 (VpnService.prepare 必须 Activity-scoped, Go 直接摸不到)。
+//
+// 方法签名遵循 gomobile 限制: 只用 primitive + error; 返回 error 的方法经 gomobile 生成
+// Java 版会抛 Exception, Kotlin 实现应尽可能不抛 (用 SharedFlow.tryEmit 非阻塞)。
+//
+// gomobile 生成的 Java 方法名: requestStart / requestStop / isRunning (首字母小写)。
+type VpnControlCallback interface {
+	RequestStart()
+	RequestStop()
+	IsRunning() bool
+}
+
+// clientVpnAdapter 把 Client.vpnControl 翻译成 tool.VpnController 接口, 加 nil-guard。
+// 每个方法每次都读 Client.vpnControl 而不缓存, 以支持 Kotlin 运行时替换 callback (通常不会)。
+type clientVpnAdapter struct {
+	client *Client
+}
+
+func (a *clientVpnAdapter) RequestStart() error {
+	a.client.mu.Lock()
+	cb := a.client.vpnControl
+	a.client.mu.Unlock()
+	if cb == nil {
+		return fmt.Errorf("VPN 控制未接入 (Kotlin 侧未调 SetVpnControl)")
+	}
+	cb.RequestStart()
+	return nil
+}
+
+func (a *clientVpnAdapter) RequestStop() error {
+	a.client.mu.Lock()
+	cb := a.client.vpnControl
+	a.client.mu.Unlock()
+	if cb == nil {
+		return fmt.Errorf("VPN 控制未接入 (Kotlin 侧未调 SetVpnControl)")
+	}
+	cb.RequestStop()
+	return nil
+}
+
+func (a *clientVpnAdapter) IsRunning() bool {
+	a.client.mu.Lock()
+	cb := a.client.vpnControl
+	a.client.mu.Unlock()
+	if cb == nil {
+		return false
+	}
+	return cb.IsRunning()
 }
 
 // NewClient 创建一个新的 Pilotty 客户端。
@@ -90,6 +146,8 @@ func NewClient(dataDir, clashAPIAddr, apiKey string) *Client {
 	pipeline.RegisterExtraTools(tool.RegisterOverlayTools(ov))
 	pipeline.RegisterExtraTools(tool.RegisterSubscriptionTools(subMgr))
 	pipeline.RegisterExtraTools(tool.RegisterDNSTools(ov))
+	// vpn_tools 注册引用 Client, 但 Client 此处还没构造。 下面 history block 之后的 return
+	// 拿到 c := &Client{...} 再补注册, 不在这里做。
 
 	mergedPath := ov.MergedConfigPath()
 	if _, err := os.Stat(mergedPath); err == nil {
@@ -123,7 +181,7 @@ func NewClient(dataDir, clashAPIAddr, apiKey string) *Client {
 	historyPath := filepath.Join(dataDir, "chat_history.json")
 	_ = history.LoadFromFile(historyPath) // 文件不存在视为首次启动, 静默
 
-	return &Client{
+	c := &Client{
 		adapter:      adapter,
 		pipeline:     pipeline,
 		localEngine:  localEngine,
@@ -136,6 +194,11 @@ func NewClient(dataDir, clashAPIAddr, apiKey string) *Client {
 		intentRouter: intentRouter,
 		failover:     fo,
 	}
+	// Phase 8: 注册 VPN 生命周期 tools, 用 clientVpnAdapter 间接读 c.vpnControl。
+	// Kotlin 在 PilottyApp.onCreate 里 SetVpnControl 注入真实 callback, 之前这些 tool 调用
+	// 会返回 "VPN 控制未接入" 错误 (nil-guard)。
+	pipeline.RegisterExtraTools(tool.RegisterVpnTools(&clientVpnAdapter{client: c}))
+	return c
 }
 
 // StartFailover 启动后台节点健康监控与自动故障切换。
@@ -209,6 +272,15 @@ func (c *Client) ImportBackup(data string) string {
 		"outbounds":          len(snap.Overlay.Outbounds),
 		"subscription_count": len(snap.Subscriptions),
 	})
+}
+
+// SetVpnControl 由平台层 (Android PilottyApp.onCreate) 在 NewClient 之后注入
+// VPN 生命周期控制实现, 让 Agent 的 start_vpn / stop_vpn / vpn_status tools 能真正起作用。
+// 注入前这些 tool 返回 "VPN 控制未接入" 错误 (nil-guard in clientVpnAdapter)。
+func (c *Client) SetVpnControl(cb VpnControlCallback) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.vpnControl = cb
 }
 
 // SetPlatformInterface 由平台层 (Android VpnService / iOS NEPacketTunnelProvider) 在

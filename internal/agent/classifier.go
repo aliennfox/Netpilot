@@ -23,6 +23,8 @@ func ClassifyTask(input string) TaskPlan {
 		// 查询类关键词
 		"可用", "代理节点", "列出", "显示",
 		"看看有什么", "有什么", "有哪些",
+		// Phase 8: VPN 只读查询
+		"vpn 状态", "vpn状态", "vpn 运行", "vpn 在吗", "vpn running", "vpn status",
 	}
 	if matchesAny(lower, diagnoseKeywords) && !matchesAny(lower, configKeywords()) {
 		return TaskPlan{
@@ -85,6 +87,11 @@ func configKeywords() []string {
 		"改成", "换成", "删除规则", "移除规则",
 		"全局模式", "直连模式", "规则模式",
 		"switch", "set", "patch", "remove",
+		// Phase 8: VPN 生命周期动作 (命中后走 Configure+Verify)
+		"打开", "启动", "开启", "连接", "连上",
+		"关闭", "停止", "关掉", "断开",
+		"turn on", "turn off", "start vpn", "stop vpn",
+		"connect", "disconnect", "enable", "disable",
 	}
 }
 
