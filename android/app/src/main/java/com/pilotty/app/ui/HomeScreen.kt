@@ -68,10 +68,15 @@ class HomeViewModel : ViewModel() {
         viewModelScope.launch {
             com.pilotty.app.PilottyCore.tunRunning.collect { running ->
                 // tunRunning 变 true → 清掉启动中 spinner。 变 false 时不清, 由超时兜底 / 用户再次点击。
+                val wasRunning = _state.value.tunRunning
                 _state.value = _state.value.copy(
                     tunRunning = running,
                     isConnecting = if (running) false else _state.value.isConnecting,
                 )
+                // running 翻转 (false→true 或 true→false) 触发 refresh, 拉 Clash API 的 currentNode /
+                // mode / nodeCount / connections。 不 poll 的代价: 连接数 / mode 只在 running 切换 + 手动
+                // 触发 setMode 时刷新, 自用场景够用, 避免 1Hz 轮询 Clash API 浪费电。
+                if (running != wasRunning) refresh()
             }
         }
     }

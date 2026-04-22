@@ -33,6 +33,7 @@ import com.pilotty.app.ui.theme.LocalPilottyColors
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /* ============================= Chat ============================= */
@@ -386,9 +387,10 @@ class NodesViewModel : ViewModel() {
         try {
             val n = PilottyRepository.nodes()
             _state.value = _state.value.copy(loading = false, nodes = n)
-            // 首次打开且所有节点 latency=0 时自动测速一次。 不再要求 tunRunning —— VPN 未启动
-            // 走 TCP probe 回退 (见 testAll)。
-            if (!autoTestedOnce && n.isNotEmpty() && n.all { it.latency == 0 }) {
+            // 首次打开且 VPN 已在运行 + 所有节点都未测 → 自动测一次。 VPN 未运行时不自动测,
+             // 否则会静默拉起 VPN (系统 consent 对话框会突然弹出), 属于预期外副作用。
+            if (!autoTestedOnce && n.isNotEmpty() && n.all { it.latency == 0 }
+                && com.pilotty.app.PilottyCore.tunRunning.value) {
                 autoTestedOnce = true
                 testAll()
             }
@@ -409,24 +411,41 @@ class NodesViewModel : ViewModel() {
         catch (e: Throwable) { _state.value = _state.value.copy(error = e.message) }
     }
 
+    /**
+     * 测速。 统一走 Clash API URL 测试 (过代理, 延迟反映真实体验)。 若 VPN 未启动,
+     * 自动请求启动 VPN → 等到 libbox ready → 再测。 这样用户不用手动先开 VPN, 得到的
+     * 数字也与 VPN 开启后测量一致 (避免 TCP ping 数字失真引起困惑)。
+     *
+     * latency 三态:
+     *   >0: 成功 (ms)
+     *    0: 未测 (初始值, 或 Clash API 没回 history)
+     *   -1: 此字段目前不再使用, 保留语义向前兼容
+     */
     fun testAll() = viewModelScope.launch {
         _state.value = _state.value.copy(loading = true)
         try {
-            if (com.pilotty.app.PilottyCore.tunRunning.value) {
-                // VPN 运行: 走 Clash API /proxies/<tag>/delay (过代理, 延迟反映真实体验)
-                PilottyRepository.testLatencyAll()
-                val n2 = PilottyRepository.nodes()
-                _state.value = _state.value.copy(loading = false, nodes = n2)
-            } else {
-                // VPN 未运行: Kotlin 直接 TCP probe 回退 (精度够用, 参考 NekoBox)
-                val current = _state.value.nodes
-                val targets = current.map { it.server to it.port }
-                val results = com.pilotty.app.util.TcpLatencyProbe.probeAll(targets)
-                val updated = current.zip(results).map { (node, ms) ->
-                    node.copy(latency = if (ms < 0) 0 else ms, alive = ms > 0)
+            if (!com.pilotty.app.PilottyCore.tunRunning.value) {
+                _state.value = _state.value.copy(toast = "正在启动 VPN 以测速...")
+                com.pilotty.app.vpn.StartVpnBus.request()
+                // 等 tunRunning 变 true, 最多 15s。 libbox 首次冷启 5-10s, 加 TUN establish
+                // 可能再 1-2s, 15s 留安全边际。
+                val started = kotlinx.coroutines.withTimeoutOrNull(15_000) {
+                    com.pilotty.app.PilottyCore.tunRunning.first { it }
                 }
-                _state.value = _state.value.copy(loading = false, nodes = updated)
+                if (started != true) {
+                    _state.value = _state.value.copy(
+                        loading = false,
+                        toast = "VPN 启动超时, 测速取消。 请手动启动后重试。",
+                    )
+                    return@launch
+                }
+                // Clash API server 在 libbox 起来的同时暴露, 但首次 /proxies 可能还没填好节点
+                // 状态缓存, 等 1.5s 再发测速请求以免拿到部分 NaN 结果。
+                kotlinx.coroutines.delay(1_500)
             }
+            PilottyRepository.testLatencyAll()
+            val n2 = PilottyRepository.nodes()
+            _state.value = _state.value.copy(loading = false, nodes = n2)
         } catch (e: Throwable) {
             _state.value = _state.value.copy(loading = false, error = e.message)
         }
@@ -443,7 +462,14 @@ fun NodesScreen(
     val pc = LocalPilottyColors.current
     val ui by vm.state.collectAsStateWithLifecycle()
     val filtered = remember(ui.nodes, ui.query) {
-        val sorted = ui.nodes.sortedWith(compareBy { if (it.latency == 0) Int.MAX_VALUE else it.latency })
+        // 排序: 成功 (>0 ms 升序) → 未测 (0) → 失败 (-1)。 失败排最后方便用户忽略。
+        val sorted = ui.nodes.sortedWith(compareBy {
+            when {
+                it.latency > 0 -> it.latency
+                it.latency == 0 -> Int.MAX_VALUE - 1
+                else -> Int.MAX_VALUE
+            }
+        })
         if (ui.query.isBlank()) sorted
         else sorted.filter {
             it.tag.contains(ui.query, true) || it.server.contains(ui.query, true)
@@ -667,8 +693,13 @@ private fun NodeCard(node: NodeDto, onClick: () -> Unit) {
                     }
                 }
                 Text(
-                    text = if (node.latency > 0) "${node.latency}ms" else "—",
+                    text = when {
+                        node.latency > 0 -> "${node.latency}ms"
+                        node.latency < 0 -> "失败"
+                        else -> "—"
+                    },
                     color = when {
+                        node.latency < 0 -> pc.error
                         slow -> pc.error
                         node.active -> pc.accentInk
                         else -> pc.ink

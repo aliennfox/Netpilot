@@ -42,7 +42,9 @@ import com.pilotty.app.ui.settings.ThemeMode
 import com.pilotty.app.ui.subs.SubsScreen
 import com.pilotty.app.ui.theme.LocalPilottyColors
 import com.pilotty.app.ui.theme.PilottyTheme
+import com.pilotty.app.vpn.StartVpnBus
 import com.pilotty.app.vpn.VpnController
+import androidx.compose.runtime.LaunchedEffect
 
 class MainActivity : ComponentActivity() {
     lateinit var vpn: VpnController
@@ -109,6 +111,12 @@ fun PilottyApp(
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val current = backStack?.destination?.route ?: "home"
+
+    // Nodes 测速等场景 ViewModel 层需要拉起 VPN, 但 VpnService.prepare 要 Activity-scope
+    // launcher, 这里 collect StartVpnBus 的一次性请求转给 onStartVpn (现有链路)。
+    LaunchedEffect(Unit) {
+        StartVpnBus.requests.collect { onStartVpn() }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         NavHost(
