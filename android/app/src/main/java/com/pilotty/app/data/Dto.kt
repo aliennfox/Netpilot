@@ -83,6 +83,60 @@ data class UserInfoDto(
 @Serializable
 data class MessageDto(val message: String = "")
 
+/**
+ * Phase 7.3 流式 Chat 事件。 前 5 种 (TextDelta/PhaseStart/PhaseEnd/ToolStart/ToolEnd) 从
+ * Go mobile.ChatStreamCallback.OnEvent(jsonStr) 解析, 按 "type" 字段走多态反序列化。
+ *
+ * Done/Error 是 Kotlin bridge 合成的终态 —— Go 走 OnDone/OnError 两个独立 callback 方法,
+ * bridge 层把它们包成同一 sealed family 方便 Flow collect { when (it) { ... } } 一锅端。
+ *
+ * UI 映射:
+ *  - TextDelta → 当前 assistant 气泡 text 追加
+ *  - PhaseStart/PhaseEnd → 顶部 "[诊断中]"/"[配置中]"/"[验证中]" 指示器
+ *  - ToolStart/ToolEnd → ToolCallTimeline 实时新增, "▸ running" → "✓ done"
+ *  - Done → 气泡 finalize, sending=false, 持久化 messages
+ *  - Error → 红色气泡
+ */
+@Serializable
+sealed class ChatStreamEvent {
+    @Serializable
+    @SerialName("text_delta")
+    data class TextDelta(val role: String = "", val delta: String = "") : ChatStreamEvent()
+
+    @Serializable
+    @SerialName("phase_start")
+    data class PhaseStart(val role: String = "") : ChatStreamEvent()
+
+    @Serializable
+    @SerialName("phase_end")
+    data class PhaseEnd(val role: String = "", val summary: String = "") : ChatStreamEvent()
+
+    @Serializable
+    @SerialName("tool_start")
+    data class ToolStart(
+        val name: String = "",
+        @SerialName("args_summary") val argsSummary: String = "",
+        val role: String = "",
+    ) : ChatStreamEvent()
+
+    @Serializable
+    @SerialName("tool_end")
+    data class ToolEnd(
+        val name: String = "",
+        @SerialName("args_summary") val argsSummary: String = "",
+        @SerialName("duration_ms") val durationMs: Long = 0,
+        @SerialName("output_preview") val outputPreview: String = "",
+        val error: String = "",
+        val role: String = "",
+    ) : ChatStreamEvent()
+
+    /** 终态, 合成自 Go OnDone(finalJSON) */
+    data class Done(val reply: String, val source: String, val events: List<ToolEventDto>) : ChatStreamEvent()
+
+    /** 终态, 合成自 Go OnError(msg) */
+    data class Error(val message: String) : ChatStreamEvent()
+}
+
 @Serializable
 data class RouteRuleDto(
     val tag: String = "",

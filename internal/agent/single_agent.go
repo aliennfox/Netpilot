@@ -167,6 +167,165 @@ func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMess
 	return "已达到最大操作步数，停止自动操作。", events, nil
 }
 
+// StreamSink 接收 SingleAgent 流式执行过程中的事件 (Phase 7.3)。
+// 实现层可以是 orchestrator 的包装 sink, 最终把事件 forward 给 mobile 层 Kotlin callback。
+type StreamSink interface {
+	// OnText 每次收到 LLM content delta 时触发 (可能很短, 1-5 char)。
+	// 仅在 "最终回复" 迭代触发; tool-use 迭代里 LLM 不输出 content。
+	OnText(delta string)
+	// OnToolStart 在 pipeline.Execute 之前触发, 让 UI 立刻渲染 "▸ 调用中" 占位。
+	// evt 此时只有 Name / ArgsSummary / Role, Duration/Output 为空。
+	OnToolStart(evt ToolEvent)
+	// OnToolEnd 在 pipeline.Execute 结束后触发, evt 含完整字段。
+	OnToolEnd(evt ToolEvent)
+}
+
+// nopStreamSink 在 orchestrator 非流式路径或未提供 sink 时兜底, 避免 nil 检查散布各处。
+type nopStreamSink struct{}
+
+func (nopStreamSink) OnText(string)         {}
+func (nopStreamSink) OnToolStart(ToolEvent) {}
+func (nopStreamSink) OnToolEnd(ToolEvent)   {}
+
+// RunWithRoleStream 是 RunWithRole 的流式版本; 逻辑基本一致但 LLM 调用走 CompleteStream。
+// 返回值语义与 RunWithRole 完全相同 (finalReply, events, err), 方便 orchestrator 切换。
+//
+// sink 不可为 nil; 非流式上下文传 nopStreamSink{}。
+func (a *SingleAgent) RunWithRoleStream(ctx context.Context, role *AgentRole, userMessage string, history *ConversationHistory, sink StreamSink) (string, []ToolEvent, error) {
+	if sink == nil {
+		sink = nopStreamSink{}
+	}
+	systemPrompt := a.assembler.AssembleForRole(ctx, role, history)
+	messages := []Message{
+		{Role: "system", Content: StringPtr(systemPrompt)},
+		{Role: "user", Content: StringPtr(userMessage)},
+	}
+	tools := ConvertToolsForRole(a.tools, role.AllowedTools)
+
+	var events []ToolEvent
+
+	for i := 0; i < a.maxIter; i++ {
+		req := CompletionRequest{
+			Model:      a.llm.Model,
+			Messages:   messages,
+			Tools:      tools,
+			ToolChoice: "auto",
+		}
+
+		var contentBuf strings.Builder
+		var toolDeltas []ToolCallDelta
+		var finishReason string
+
+		err := a.llm.CompleteStream(ctx, req, func(d StreamDelta) error {
+			if d.ContentDelta != "" {
+				contentBuf.WriteString(d.ContentDelta)
+				sink.OnText(d.ContentDelta)
+			}
+			if len(d.ToolCallDeltas) > 0 {
+				toolDeltas = append(toolDeltas, d.ToolCallDeltas...)
+			}
+			if d.FinishReason != "" {
+				finishReason = d.FinishReason
+			}
+			return nil
+		})
+		if err != nil {
+			return "", events, fmt.Errorf("[%s] LLM 调用失败: %w", role.Name, err)
+		}
+
+		toolCalls := AccumulateToolCalls(toolDeltas)
+
+		// 最终回复: 没 tool 调用, 或明确 finish_reason=stop
+		if finishReason == "stop" || len(toolCalls) == 0 {
+			return contentBuf.String(), events, nil
+		}
+
+		// 有 tool calls → 执行并回填
+		var summaryParts []string
+		for _, tc := range toolCalls {
+			if !isToolAllowed(tc.Function.Name, role.AllowedTools) {
+				denyMsg := fmt.Sprintf("当前角色 %s 无权使用此工具", role.Name)
+				evt := ToolEvent{
+					Name:        tc.Function.Name,
+					ArgsSummary: truncateResult(tc.Function.Arguments, 120),
+					Error:       denyMsg,
+					Role:        role.Name,
+				}
+				sink.OnToolEnd(evt)
+				events = append(events, evt)
+				summaryParts = append(summaryParts,
+					fmt.Sprintf("[%s] 被拒绝: %s", tc.Function.Name, denyMsg))
+				continue
+			}
+
+			startEvt := ToolEvent{
+				Name:        tc.Function.Name,
+				ArgsSummary: truncateResult(tc.Function.Arguments, 120),
+				Role:        role.Name,
+			}
+			sink.OnToolStart(startEvt)
+
+			var params map[string]interface{}
+			if tc.Function.Arguments != "" {
+				if err := json.Unmarshal([]byte(tc.Function.Arguments), &params); err != nil {
+					evt := ToolEvent{
+						Name:        tc.Function.Name,
+						ArgsSummary: truncateResult(tc.Function.Arguments, 120),
+						Error:       "参数解析失败: " + err.Error(),
+						Role:        role.Name,
+					}
+					sink.OnToolEnd(evt)
+					events = append(events, evt)
+					summaryParts = append(summaryParts,
+						fmt.Sprintf("[%s] 参数解析失败: %s", tc.Function.Name, err.Error()))
+					continue
+				}
+			}
+
+			startedAt := time.Now()
+			result := a.pipeline.Execute(ctx, tc.Function.Name, params)
+			durationMs := time.Since(startedAt).Milliseconds()
+
+			cleanMsg := truncateResult(stripANSI(result.Message), 2000)
+			evt := ToolEvent{
+				Name:          tc.Function.Name,
+				ArgsSummary:   truncateResult(tc.Function.Arguments, 120),
+				DurationMs:    durationMs,
+				OutputPreview: truncateResult(stripANSI(result.Message), 200),
+				Role:          role.Name,
+			}
+			if !result.Success {
+				evt.Error = truncateResult(stripANSI(result.Message), 200)
+			}
+			sink.OnToolEnd(evt)
+			events = append(events, evt)
+			if result.Success {
+				summaryParts = append(summaryParts,
+					fmt.Sprintf("[%s] 成功: %s", tc.Function.Name, cleanMsg))
+			} else {
+				summaryParts = append(summaryParts,
+					fmt.Sprintf("[%s] 失败: %s", tc.Function.Name, cleanMsg))
+			}
+		}
+
+		// 把 tool 结果作为纯文本塞回 messages, 进入下一轮 (与 RunWithRole 保持一致的规避 tool_calls 校验策略)
+		var callDescs []string
+		for _, tc := range toolCalls {
+			callDescs = append(callDescs, fmt.Sprintf("%s(%s)", tc.Function.Name, tc.Function.Arguments))
+		}
+		messages = append(messages, Message{
+			Role:    "assistant",
+			Content: StringPtr(fmt.Sprintf("我需要调用工具: %s", strings.Join(callDescs, ", "))),
+		})
+		messages = append(messages, Message{
+			Role:    "user",
+			Content: StringPtr(fmt.Sprintf("工具执行结果:\n%s\n\n如果还有后续步骤需要执行，继续调用工具；如果所有操作已完成，回复用户最终结果。", strings.Join(summaryParts, "\n"))),
+		})
+	}
+
+	return "已达到最大操作步数，停止自动操作。", events, nil
+}
+
 // isToolAllowed 检查 tool 是否在角色白名单中
 func isToolAllowed(toolName string, allowed []string) bool {
 	for _, name := range allowed {

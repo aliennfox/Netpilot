@@ -1,9 +1,19 @@
 package com.pilotty.app
 
 import android.content.Context
+import android.util.Log
+import com.pilotty.app.data.ChatStreamEvent
+import com.pilotty.app.data.ToolEventDto
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import mobile.ChatStreamCallback
 import mobile.Client
 import mobile.Mobile
 
@@ -38,6 +48,54 @@ object PilottyCore {
     fun testLatency(node: String): String         = require().testLatency(node)
     fun testLatencyAll(): String                  = require().testLatencyAll()
     fun chat(message: String): String             = require().chat(message)
+
+    /**
+     * Phase 7.3 流式 Chat。 每个 event 通过 Flow 涌出, 终态 [ChatStreamEvent.Done] 或
+     * [ChatStreamEvent.Error]。 collect 时 Flow 会持续到 Done/Error 之一到达, 然后自动 close。
+     *
+     * 内部用 [callbackFlow] 包装 gomobile [ChatStreamCallback]: Go 侧在 goroutine 里跑
+     * orchestrator.RunStream, OnEvent/OnDone/OnError 三路 callback 直接 trySend 到 channel。
+     * awaitClose 时没有显式 cancel 路径 (Go 侧 RunStream 已发完事件就结束), 若 Flow 被上游
+     * 取消, 仍旧让 goroutine 跑完但丢弃后续事件。 stop-mid-stream 留给 v1.x。
+     */
+    fun chatStream(message: String): Flow<ChatStreamEvent> = callbackFlow {
+        val client = require()
+        val cb = object : ChatStreamCallback {
+            override fun onEvent(eventJSON: String) {
+                runCatching { streamJson.decodeFromString(ChatStreamEvent.serializer(), eventJSON) }
+                    .onSuccess { trySend(it) }
+                    .onFailure { Log.w("PilottyCore", "chatStream: bad event json: $eventJSON", it) }
+            }
+            override fun onDone(finalJSON: String) {
+                runCatching { streamJson.decodeFromString(ChatStreamDone.serializer(), finalJSON) }
+                    .onSuccess {
+                        trySend(ChatStreamEvent.Done(it.reply, it.source, it.events))
+                        close()
+                    }
+                    .onFailure {
+                        Log.w("PilottyCore", "chatStream: bad done json: $finalJSON", it)
+                        trySend(ChatStreamEvent.Error("内部错误: final JSON 解析失败"))
+                        close()
+                    }
+            }
+            override fun onError(message: String) {
+                trySend(ChatStreamEvent.Error(message))
+                close()
+            }
+        }
+        client.chatStream(message, cb)
+        awaitClose { /* Go goroutine 自行结束;不主动 cancel */ }
+    }
+
+    private val streamJson = Json { ignoreUnknownKeys = true; classDiscriminator = "type" }
+
+    /** 仅用于解码 OnDone 的终态 payload。 形状与非流式 Chat 的 data 一致。 */
+    @Serializable
+    private data class ChatStreamDone(
+        val reply: String = "",
+        val source: String = "",
+        val events: List<ToolEventDto> = emptyList(),
+    )
     /** M8 热重载: 用户在 Settings 改 apiKey 后立即调这个, 无需重启 App。 空字符串 = 关 Agent。 */
     fun setApiKey(key: String): String            = require().setAPIKey(key)
     fun clearHistory()                            = require().clearHistory()

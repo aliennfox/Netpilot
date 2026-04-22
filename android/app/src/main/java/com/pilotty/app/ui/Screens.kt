@@ -56,6 +56,8 @@ data class ChatUi(
     val sending: Boolean = false,
     val messages: List<ChatMessage> = emptyList(),
     val error: String? = null,
+    /** Phase 7.3: 当前流式阶段 ("Diagnose"/"Configure"/"Verify"), 空串表示无阶段或已结束 */
+    val streamingPhase: String = "",
 )
 
 class ChatViewModel : ViewModel() {
@@ -73,6 +75,11 @@ class ChatViewModel : ViewModel() {
         prefs?.save(messages.map { ChatHistoryPrefs.Entry(it.role, it.text, it.source, it.events) })
     }
 
+    /**
+     * Phase 7.3: 流式发送。 TextDelta 涌出时逐字追加到末尾 assistant 气泡, Tool 事件实时
+     * append 到 events 列表, Done 终结并持久化。 本地路由命中 (source=local) 没 stream, 会
+     * 直接跳到 Done 事件, 与非流式体验一致。
+     */
     fun send(text: String) {
         if (text.isBlank()) return
         val u = ChatMessage("user", text)
@@ -80,21 +87,86 @@ class ChatViewModel : ViewModel() {
             sending = true,
             messages = _state.value.messages + u,
             error = null,
+            streamingPhase = "",
         )
         viewModelScope.launch {
+            // 占位 assistant 气泡: text 空, 随 TextDelta 涌出
+            var pending = ChatMessage(role = "assistant", text = "", source = "", events = emptyList())
+            var placedPending = false
+
+            fun replacePending(updater: (ChatMessage) -> ChatMessage) {
+                pending = updater(pending)
+                val msgs = _state.value.messages.toMutableList()
+                if (!placedPending) {
+                    msgs.add(pending)
+                    placedPending = true
+                } else {
+                    msgs[msgs.lastIndex] = pending
+                }
+                _state.value = _state.value.copy(messages = msgs)
+            }
+
             try {
-                val r = PilottyRepository.chat(text)
-                val updated = _state.value.messages + ChatMessage(
-                    role = "assistant",
-                    text = r.reply,
-                    source = r.source,
-                    events = r.events,
-                )
-                _state.value = _state.value.copy(sending = false, messages = updated)
-                persist(updated)
+                PilottyRepository.chatStream(text).collect { event ->
+                    when (event) {
+                        is ChatStreamEvent.PhaseStart -> {
+                            _state.value = _state.value.copy(streamingPhase = event.role)
+                        }
+                        is ChatStreamEvent.PhaseEnd -> {
+                            // 不清 phase; 下一个 PhaseStart 会覆盖; Done 最终清空
+                        }
+                        is ChatStreamEvent.TextDelta -> {
+                            replacePending { it.copy(text = it.text + event.delta) }
+                        }
+                        is ChatStreamEvent.ToolStart -> {
+                            replacePending {
+                                it.copy(events = it.events + ToolEventDto(
+                                    name = event.name,
+                                    argsSummary = event.argsSummary,
+                                    role = event.role,
+                                ))
+                            }
+                        }
+                        is ChatStreamEvent.ToolEnd -> {
+                            // 更新最后一个同名 running 条目 (最常见: ToolStart 后紧跟 ToolEnd)
+                            replacePending { pm ->
+                                val newEvents = pm.events.toMutableList()
+                                val idx = newEvents.indexOfLast { it.name == event.name && it.durationMs == 0L && it.error.isBlank() && it.outputPreview.isBlank() }
+                                val full = ToolEventDto(
+                                    name = event.name,
+                                    argsSummary = event.argsSummary,
+                                    durationMs = event.durationMs,
+                                    outputPreview = event.outputPreview,
+                                    error = event.error,
+                                    role = event.role,
+                                )
+                                if (idx >= 0) newEvents[idx] = full else newEvents.add(full)
+                                pm.copy(events = newEvents)
+                            }
+                        }
+                        is ChatStreamEvent.Done -> {
+                            // 用 reply 作权威来源覆盖 pending.text (多阶段 pipeline 的 formatFinalResponse
+                            // 会加 "📋 诊断报告:" 等 section 分隔, 单阶段 reply == 累积的 TextDelta)
+                            replacePending { it.copy(text = event.reply, source = event.source, events = event.events) }
+                            _state.value = _state.value.copy(sending = false, streamingPhase = "")
+                            persist(_state.value.messages)
+                        }
+                        is ChatStreamEvent.Error -> {
+                            _state.value = _state.value.copy(sending = false, error = event.message, streamingPhase = "")
+                            // 即使出错, 也把 pending 气泡(如果有 text 已经显示)保留
+                            if (placedPending && pending.text.isBlank()) {
+                                // 完全没 delta 就移除占位, 避免空白气泡
+                                val msgs = _state.value.messages.toMutableList()
+                                if (msgs.isNotEmpty() && msgs.last() === pending) msgs.removeAt(msgs.lastIndex)
+                                _state.value = _state.value.copy(messages = msgs)
+                            }
+                            persist(_state.value.messages)
+                        }
+                    }
+                }
             } catch (e: Throwable) {
-                _state.value = _state.value.copy(sending = false, error = e.message)
-                persist(_state.value.messages) // 至少留下用户消息
+                _state.value = _state.value.copy(sending = false, error = e.message, streamingPhase = "")
+                persist(_state.value.messages)
             }
         }
     }
@@ -112,7 +184,7 @@ class ChatViewModel : ViewModel() {
  * Phase 7.3 流式上线后本气泡会被"逐字涌出的空气泡"替代, 但两者并存也 OK。
  */
 @Composable
-private fun PendingBubble() {
+private fun PendingBubble(phase: String = "") {
     val pc = LocalPilottyColors.current
     val transition = rememberInfiniteTransition(label = "pending-dots")
     val t by transition.animateFloat(
@@ -124,6 +196,13 @@ private fun PendingBubble() {
         ),
         label = "dot-phase",
     )
+    // 阶段标签: Phase 7.3 期间 RunStream 的 OnPhaseStart 提供, 空串时显示 "正在思考" 兜底
+    val label = when (phase) {
+        "Diagnose" -> "诊断中"
+        "Configure" -> "配置中"
+        "Verify" -> "验证中"
+        else -> "正在思考"
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Start,
@@ -138,13 +217,12 @@ private fun PendingBubble() {
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
             ) {
                 Text(
-                    "正在思考",
+                    label,
                     color = pc.ink3,
                     fontSize = 13.sp,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 0.3.sp,
                 )
-                // 3 点波浪: 当前活跃索引按 t 循环 (0→1→2), 其余点淡化
                 val active = t.toInt().coerceIn(0, 2)
                 repeat(3) { idx ->
                     Box(
@@ -339,10 +417,10 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                     }
                 }
             }
-            // sending 占位气泡 (Phase 7.2): 点送出后立刻渲染, LLM 到达后 ChatViewModel.send
-            // 把真 assistant 消息 append 到 messages + sending=false, 本 item 自动移除
-            if (ui.sending) {
-                item { PendingBubble() }
+            // sending 占位气泡 (Phase 7.2 + 7.3): 流式下首个 TextDelta 到达前显示;
+            // 之后 ChatViewModel 会添加空 assistant 气泡, 此气泡自动让位。
+            if (ui.sending && ui.messages.lastOrNull()?.role != "assistant") {
+                item { PendingBubble(phase = ui.streamingPhase) }
             }
 
             // 错误气泡: 不再用顶部红色 banner 遮挡消息, 改成 assistant 样式靠左的红色描边气泡,

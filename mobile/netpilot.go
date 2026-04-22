@@ -541,6 +541,140 @@ func (c *Client) flushHistoryAsync() {
 	}()
 }
 
+// --- Chat streaming (Phase 7.3) ---
+
+// ChatStreamCallback 是 Kotlin 侧需实现的 gomobile reverse-binding interface。
+// 所有方法参数均为 String (gomobile 限制), payload 用 JSON 字符串。
+//
+// event JSON schema (OnEvent):
+//
+//	{"type":"phase_start","role":"Diagnose"}
+//	{"type":"text_delta","role":"Diagnose","delta":"你好"}
+//	{"type":"tool_start","name":"list_nodes","args_summary":"{}","role":"Diagnose"}
+//	{"type":"tool_end","name":"list_nodes","duration_ms":321,"output_preview":"...","error":"","role":"Diagnose"}
+//	{"type":"phase_end","role":"Diagnose","summary":"..."}
+//
+// OnDone payload (终态, 等同非流式 Chat 的 data 字段):
+//
+//	{"reply":"...","source":"agent"|"local","events":[...]}
+//
+// OnError: 单行错误字符串, UI 侧可直接展示或包装成红色气泡。
+type ChatStreamCallback interface {
+	OnEvent(eventJSON string)
+	OnDone(finalJSON string)
+	OnError(message string)
+}
+
+// chatStreamBridge 把 Orchestrator 的 OrchestratorSink 事件 marshal 成 JSON, 转发给 Kotlin callback。
+type chatStreamBridge struct {
+	cb ChatStreamCallback
+}
+
+func (b chatStreamBridge) emit(payload map[string]interface{}) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	b.cb.OnEvent(string(data))
+}
+
+func (b chatStreamBridge) OnPhaseStart(role string) {
+	b.emit(map[string]interface{}{"type": "phase_start", "role": role})
+}
+
+func (b chatStreamBridge) OnText(role, delta string) {
+	b.emit(map[string]interface{}{"type": "text_delta", "role": role, "delta": delta})
+}
+
+func (b chatStreamBridge) OnToolStart(evt agent.ToolEvent) {
+	b.emit(map[string]interface{}{
+		"type":         "tool_start",
+		"name":         evt.Name,
+		"args_summary": evt.ArgsSummary,
+		"role":         evt.Role,
+	})
+}
+
+func (b chatStreamBridge) OnToolEnd(evt agent.ToolEvent) {
+	b.emit(map[string]interface{}{
+		"type":           "tool_end",
+		"name":           evt.Name,
+		"args_summary":   evt.ArgsSummary,
+		"duration_ms":    evt.DurationMs,
+		"output_preview": evt.OutputPreview,
+		"error":          evt.Error,
+		"role":           evt.Role,
+	})
+}
+
+func (b chatStreamBridge) OnPhaseEnd(role, summary string) {
+	b.emit(map[string]interface{}{"type": "phase_end", "role": role, "summary": summary})
+}
+
+// ChatStream 流式版 Chat。 内部起 goroutine 避免阻塞调用线程 (gomobile JNI 回调是
+// 阻塞调用, 调用方期望 ChatStream 本身立即返回)。 IntentRouter 命中场景没有 stream
+// 可用 → 直接 OnDone 给完整结果, Kotlin 侧 PendingBubble 短闪即换。
+func (c *Client) ChatStream(message string, cb ChatStreamCallback) {
+	if cb == nil {
+		return
+	}
+	if message == "" {
+		cb.OnError("message is required")
+		return
+	}
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				cb.OnError(fmt.Sprintf("internal panic: %v", r))
+			}
+		}()
+
+		routing := c.intentRouter.Route(message)
+		if routing.Matched {
+			routing.Params["_input"] = message
+			result, err := c.localEngine.Execute(routing.ActionID, routing.Params)
+			if err != nil {
+				cb.OnError(err.Error())
+				return
+			}
+			clean := stripANSI(result)
+			c.history.Add("user", message, "local")
+			c.history.Add("assistant", clean, "local")
+			c.flushHistoryAsync()
+			finalJSON, _ := json.Marshal(map[string]interface{}{
+				"reply": clean, "source": "local", "events": []agent.ToolEvent{},
+			})
+			cb.OnDone(string(finalJSON))
+			return
+		}
+
+		c.mu.Lock()
+		orch := c.orchestrator
+		c.mu.Unlock()
+		if orch == nil {
+			cb.OnError("AI Agent 未启用")
+			return
+		}
+
+		bridge := chatStreamBridge{cb: cb}
+		result, err := orch.RunStream(context.Background(), message, c.history, bridge)
+		if err != nil {
+			cb.OnError(fmt.Sprintf("Agent 错误: %v", err))
+			return
+		}
+		c.history.Add("user", message, "agent")
+		c.history.Add("assistant", result.Reply, "agent")
+		c.flushHistoryAsync()
+		finalJSON, _ := json.Marshal(map[string]interface{}{
+			"reply":  result.Reply,
+			"source": "agent",
+			"events": result.Events,
+		})
+		cb.OnDone(string(finalJSON))
+	}()
+}
+
 // SetAPIKey 热重载 LLM apiKey。Kotlin 侧用户在 Settings 改 key 后立即调这个, 无需重启 App。
 // key 为空 → 关闭 orchestrator (Agent 回到"未启用"状态)。
 // 线程安全：持 Client.mu 重建 orchestrator。

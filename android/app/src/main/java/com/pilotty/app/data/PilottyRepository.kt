@@ -2,6 +2,8 @@ package com.pilotty.app.data
 
 import com.pilotty.app.PilottyCore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
@@ -40,6 +42,13 @@ object PilottyRepository {
     suspend fun testLatency(node: String): String = withContext(Dispatchers.IO) { PilottyCore.testLatency(node) }
     suspend fun testLatencyAll(): String = withContext(Dispatchers.IO) { PilottyCore.testLatencyAll() }
     suspend fun chat(message: String): ChatDto = call { PilottyCore.chat(message) }
+
+    /**
+     * Phase 7.3 流式 Chat。 Flow 涌出多个事件, 最后以 [ChatStreamEvent.Done] 或
+     * [ChatStreamEvent.Error] 终结。 collect 在 IO 线程, viewmodel 切回 Main 更新 state。
+     */
+    fun chatStream(message: String): Flow<ChatStreamEvent> =
+        PilottyCore.chatStream(message).flowOn(Dispatchers.IO)
     suspend fun subscriptions(): List<SubscriptionDto> = call { PilottyCore.subscriptions() }
     suspend fun addSubscription(name: String, url: String): MessageDto = call { PilottyCore.addSubscription(name, url) }
     suspend fun removeSubscription(id: String): MessageDto = call { PilottyCore.removeSubscription(id) }
