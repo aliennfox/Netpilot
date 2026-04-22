@@ -438,15 +438,16 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - 测试: `internal/subscription/parser_test.go` 加 5 个 case(sip002 basic / `?type=tcp` 回归 / `?plugin=obfs-local;obfs=tls` / legacy all-base64 / malformed),覆盖 SIP002 主要格式
 - 遗留: 其他 parser(vmess/vless/trojan/hysteria2/wg)同类单测尚未写 —— 归入 `docs/android-mvp-gap.md` M4 的"剩余"项,不在 #M17 本身
 
-**#M18 — 协议 URI 解析器覆盖低于消费级基线** ✅ **已修(2026-04-22 当晚 M10 完成)**
+**#M18 — 协议 URI 解析器覆盖低于消费级基线** ✅ **真机验证通过(2026-04-22 Pixel 4a)**
 - 修复: `parseLine` switch 扩到 10 个 scheme,新增 `tuic` / `hysteria` / `anytls` / `shadowtls` 四个 parser + 对应 `convertTuic` / `convertHysteria1` / `convertAnyTLS` / `convertShadowTLS` converter;VLESS `flow` (converter.go:116-117)和 `fingerprint` → `tls.utls.fingerprint` (converter.go:137-142) 已 write-through;`spider_x` 不写(sing-box v1.13.8 `option/tls.go:OutboundRealityOptions` 无该字段,验证后刻意 skip,test 锁死)
 - 覆盖: `internal/subscription/parser.go:201-470` 新增 4 个 parser, `converter.go:47-200` 新增 4 个 converter + 扩 SummarizeNodes/protocolSuffixRegex
 - 测试: `parser_test.go` 新增 9 个 case(TestParseTuic / TestConvertTuic / TestParseHysteria1 / TestConvertHysteria1 / TestParseAnyTLS / TestConvertAnyTLS / TestParseShadowTLS / TestConvertShadowTLS / TestParseVLessReality_Vision)
-- 遗留: 真实世界脏数据变体回归还需靠 M13 矩阵脚本 + 真实机场 fixture 补充
+- **真机验证**: `http://127.0.0.1:8765/clash-mixed.yaml` fixture 通过 adb reverse 导入, `shared_prefs/perapp_vpn.xml` + `overlay.json` 验证 7 个节点全部写入成功 —— 特别确认 `tuic: TUIC-KR` 和 `anytls: AnyTLS-AU` 类型条目出现在 overlay 的 outbounds 数组(即 Go parser → converter → overlay.Apply 全链无回归)
+- 遗留: 真实世界脏数据变体回归还需靠 M13 矩阵脚本 + 真实机场 fixture 补充;selector 未自动接纳新节点是 #M6 预存在 bug(非本次引入)
 - 修复: `docs/android-mvp-gap.md` M10 (~8-12h),在 Phase 3B-4 内完成。参考 `~/References/nekobox/app/src/main/java/io/nekohasekai/sagernet/fmt/` 各子目录 + `moe/matsuri/nb4a/proxy/anytls|shadowtls/`
 - 关联: 明确延期的 SSR/Mieru/Naive/SSH/Trojan-Go 见 gap 文档 W11-W15
 
-**#M19 — 订阅格式仅支持 Base64-URI 列表, 不识别 Clash YAML** ✅ **已修(2026-04-22 当晚 M11/M12/M13 完成)**
+**#M19 — 订阅格式仅支持 Base64-URI 列表, 不识别 Clash YAML** ✅ **真机验证通过(2026-04-22 Pixel 4a)**
 - M11 Clash / Clash.Meta YAML: `internal/subscription/clash.go` 430 行, `IsClashYAML` 探测(容忍顶层先出现 `mixed-port:` 等 Clash 全局 key) + `ParseClashYAML` + 10 种协议映射 + ws-opts/grpc-opts/reality-opts 回填;参考 NekoBox `RawUpdater.kt:227-243`;依赖 `gopkg.in/yaml.v3`
 - M12 sing-box native JSON: `internal/subscription/singbox.go` 200 行, `ParseSingBoxJSON` 反向映射 outbound → NodeConfig,跳过 direct/block/selector/urltest 控制流
 - Dispatch: `ParseSubscription` 按优先级 `Clash → sing-box JSON → base64-URI` 探测(parser.go:138-184)
@@ -455,19 +456,21 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - Android: 不需要 rebuild aar —— 订阅解析走 subscription 包, mobile/netpilot.go 只持有 SubscriptionManager 句柄,新 parser 自动生效
 - 遗留: Clash `proxy-providers:` 外部 URL 拉取暂不解析(W 档,非 must);真实机场 fixture 应持续补充 testdata/fixtures/
 
-**#M20 — Per-App VPN UI 缺失** ⚠️ **UI 已实现,真机验证未做(2026-04-22 commit 0848f85)**
+**#M20 — Per-App VPN UI** ✅ **UI + 持久化 + reload 链真机验证通过(2026-04-22 Pixel 4a)**
 - 实现:
   - `android/.../perapp/PerAppVpnPrefs.kt`(Mode: Off/Allow/Deny + Set<String>)
   - `android/.../perapp/InstalledAppsLoader.kt`(PackageManager.getInstalledApplications + 图标)
   - `android/.../ui/settings/PerAppVpnSection.kt`(卡片 + 全屏 Dialog + 搜索 + 多选)
   - `ConfigMerger.injectPerAppRules`(改 tun inbound 的 include_package/exclude_package)
   - `PilottyVpnService.loadConfigJson`(走一次 injectPerAppRules)
-  - AndroidManifest.xml `QUERY_ALL_PACKAGES` (API 30+ 必需)
-- 未验证:
-  - 真机下 QUERY_ALL_PACKAGES 是否确实返回全部 app (Google Play 对该权限要专审, 国内分发 OK)
-  - libbox TunOptions.includePackage 是否被 sing-box 1.13.8 正确解析并通过 openTun 下发到 VpnService.Builder.addAllowedApplication (代码链全接通但没跑实流量)
-  - Allow 空列表 / Deny 空列表的兜底行为 (当前清空两个字段走全局, 与预期一致)
-- 下一步: 真机回归(Pixel 4a)开"白名单 + 只选 Chrome"→ 确认微信/QQ 走直连, Chrome 走代理;配合 `/connections` Clash API 观测 per-app 标签
+  - AndroidManifest.xml `QUERY_ALL_PACKAGES`
+- 真机验证(Pixel 4a, 09211JEC204960):
+  - QUERY_ALL_PACKAGES 安装授予后 `InstalledAppsLoader.load()` 返回完整应用列表(用户 App + 系统 App 带 launcher intent 的)
+  - AppPickerDialog 渲染:图标 + label + package 名 + system tag + Checkbox 全部正常
+  - 选 Chrome + 完成 → `shared_prefs/perapp_vpn.xml`:`mode=allow, packages=[com.android.chrome]` 写入持久
+  - 模式切换每次触发 `PilottyVpnService.requestReload`;VPN 未运行时 logcat 输出 `reload: service not running, ignoring`(完全符合设计)
+  - merged.json 保持 "include_package NOT SET" 直到 VPN 启动(因为 injectPerAppRules 只在 `loadConfigJson` 时跑 —— 冷路径注入不引入漂移)
+- 唯一未验证: **VPN 运行状态下实际流量分流**(Chrome 走代理 / WeChat 直连)—— 需要真实能用的代理节点 + 发流量观测 `/connections`。 用户的 relaycore 订阅可完成此步, 但属下一次真机回归范围
 
 **#M21 — Kill Switch 缺失**(2026-04-22 对照识别)
 - 现象: VPN 断开 / 崩溃时无阻断,流量明文回到物理网络
