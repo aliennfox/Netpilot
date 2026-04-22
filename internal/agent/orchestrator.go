@@ -8,6 +8,24 @@ import (
 	"github.com/foxnetpilot/netpilot/internal/tool"
 )
 
+// ToolEvent 是一次 tool 调用的可观测快照, 供 D3 Chat Tool-Call Timeline UI 渲染。
+// OutputPreview 和 Error 各限 200 字节, 完整 output 只存 telemetry 磁盘。
+type ToolEvent struct {
+	Name          string `json:"name"`
+	ArgsSummary   string `json:"args_summary,omitempty"`
+	DurationMs    int64  `json:"duration_ms"`
+	OutputPreview string `json:"output_preview,omitempty"`
+	Error         string `json:"error,omitempty"`
+	Role          string `json:"role,omitempty"` // Diagnose / Configure / Verify
+}
+
+// Result 是 Orchestrator.Run 的完整输出, 含自然语言回复 + 工具调用事件流。
+// Kotlin 侧解析后, Reply 放到 Chat 气泡, Events 渲染成可折叠 timeline。
+type Result struct {
+	Reply  string      `json:"reply"`
+	Events []ToolEvent `json:"events,omitempty"`
+}
+
 // Orchestrator 协调多角色 Agent 完成任务。
 // 根据 ClassifyTask 的结果决定走哪些角色，按 Diagnose → Configure → Verify 顺序执行。
 type Orchestrator struct {
@@ -25,7 +43,8 @@ func NewOrchestrator(llm *LLMClient, pipeline *tool.ToolPipeline, assembler *Pro
 }
 
 // Run 执行编排：分类 → 按需走角色流水线。history 可为 nil（无上下文）。
-func (o *Orchestrator) Run(ctx context.Context, userMessage string, history *ConversationHistory) (string, error) {
+// 返回 Result.Events 记录跨阶段 tool 调用流水, Kotlin 侧据此渲染 timeline。
+func (o *Orchestrator) Run(ctx context.Context, userMessage string, history *ConversationHistory) (Result, error) {
 	plan := ClassifyTask(userMessage)
 
 	fmt.Printf("\033[90m[分类: %s]\033[0m\n", plan.Reason)
@@ -40,14 +59,17 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, history *Con
 
 	// 多角色流水线
 	var diagnosis, configResult, verification string
+	var allEvents []ToolEvent
 	var err error
 
 	// Diagnose 阶段
 	if plan.NeedDiagnose {
 		fmt.Print("\033[36m🔍 [诊断中...]\033[0m\n")
-		diagnosis, err = o.agent.RunWithRole(ctx, RoleDiagnose, userMessage, history)
+		var events []ToolEvent
+		diagnosis, events, err = o.agent.RunWithRole(ctx, RoleDiagnose, userMessage, history)
+		allEvents = append(allEvents, events...)
 		if err != nil {
-			return "", fmt.Errorf("诊断阶段失败: %w", err)
+			return Result{Events: allEvents}, fmt.Errorf("诊断阶段失败: %w", err)
 		}
 		fmt.Printf("\033[36m🔍 诊断完成\033[0m\n")
 	}
@@ -61,9 +83,11 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, history *Con
 			configInput = fmt.Sprintf("用户请求: %s\n\n诊断报告:\n%s", userMessage, diagnosis)
 		}
 
-		configResult, err = o.agent.RunWithRole(ctx, RoleConfigure, configInput, history)
+		var events []ToolEvent
+		configResult, events, err = o.agent.RunWithRole(ctx, RoleConfigure, configInput, history)
+		allEvents = append(allEvents, events...)
 		if err != nil {
-			return "", fmt.Errorf("配置阶段失败: %w", err)
+			return Result{Events: allEvents}, fmt.Errorf("配置阶段失败: %w", err)
 		}
 		fmt.Printf("\033[36m🔧 配置完成\033[0m\n")
 	}
@@ -76,9 +100,11 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, history *Con
 		if configResult != "" {
 			verifyInput = fmt.Sprintf("请验证以下配置操作是否成功:\n%s", configResult)
 		}
-		verification, err = o.agent.RunWithRole(ctx, RoleVerify, verifyInput, history)
+		var events []ToolEvent
+		verification, events, err = o.agent.RunWithRole(ctx, RoleVerify, verifyInput, history)
+		allEvents = append(allEvents, events...)
 		if err != nil {
-			return "", fmt.Errorf("验证阶段失败: %w", err)
+			return Result{Events: allEvents}, fmt.Errorf("验证阶段失败: %w", err)
 		}
 
 		// 验证失败 → 自动回滚
@@ -91,27 +117,30 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, history *Con
 		fmt.Printf("\033[36m✅ 验证完成\033[0m\n")
 	}
 
-	return formatFinalResponse(plan, diagnosis, configResult, verification), nil
+	return Result{
+		Reply:  formatFinalResponse(plan, diagnosis, configResult, verification),
+		Events: allEvents,
+	}, nil
 }
 
 // runDiagnoseOnly 快速路径：只跑诊断
-func (o *Orchestrator) runDiagnoseOnly(ctx context.Context, userMessage string, history *ConversationHistory) (string, error) {
+func (o *Orchestrator) runDiagnoseOnly(ctx context.Context, userMessage string, history *ConversationHistory) (Result, error) {
 	fmt.Print("\033[36m🔍 [诊断中...]\033[0m\n")
-	result, err := o.agent.RunWithRole(ctx, RoleDiagnose, userMessage, history)
+	reply, events, err := o.agent.RunWithRole(ctx, RoleDiagnose, userMessage, history)
 	if err != nil {
-		return "", err
+		return Result{Events: events}, err
 	}
-	return result, nil
+	return Result{Reply: reply, Events: events}, nil
 }
 
 // runConfigureOnly 快速路径：只跑配置（无验证）
-func (o *Orchestrator) runConfigureOnly(ctx context.Context, userMessage string, history *ConversationHistory) (string, error) {
+func (o *Orchestrator) runConfigureOnly(ctx context.Context, userMessage string, history *ConversationHistory) (Result, error) {
 	fmt.Print("\033[36m🔧 [配置中...]\033[0m\n")
-	result, err := o.agent.RunWithRole(ctx, RoleConfigure, userMessage, history)
+	reply, events, err := o.agent.RunWithRole(ctx, RoleConfigure, userMessage, history)
 	if err != nil {
-		return "", err
+		return Result{Events: events}, err
 	}
-	return result, nil
+	return Result{Reply: reply, Events: events}, nil
 }
 
 // isVerificationFailed 判断验证结果是否包含失败标记

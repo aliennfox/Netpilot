@@ -287,6 +287,8 @@ func (c *Client) Shutdown() {
 
 // AgentReady 返回 LLM Agent 是否可用。
 func (c *Client) AgentReady() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.orchestrator != nil
 }
 
@@ -325,7 +327,10 @@ func errStr(msg string) string {
 //	{ "current_node": "...", "mode": "...", "node_count": N, "connections": N,
 //	  "upload": int64, "download": int64, "agent_ready": bool }
 func (c *Client) Status() string {
-	data := map[string]interface{}{"agent_ready": c.orchestrator != nil}
+	c.mu.Lock()
+	agentReady := c.orchestrator != nil
+	c.mu.Unlock()
+	data := map[string]interface{}{"agent_ready": agentReady}
 	if g, err := c.adapter.GetProxyGroup("proxy-group"); err == nil {
 		data["current_node"] = g.Now
 		data["node_count"] = len(g.All)
@@ -471,7 +476,11 @@ func (c *Client) TestLatencyAll() string {
 // --- Chat ---
 
 // Chat 处理一条用户消息：先尝试 Intent Router，失败回落到 LLM Agent。
-// 返回 JSON：{ "reply": "...", "source": "local"|"agent" }
+// 返回 JSON：
+//
+//	{ "reply": "...", "source": "local"|"agent", "events": [{name, args_summary, duration_ms, output_preview, error, role}, ...] }
+//
+// local 来源没有 events (IntentRouter 不经 orchestrator), Kotlin 侧 UI 需优雅降级 (显示"本地路由 · 未调 Agent")。
 func (c *Client) Chat(message string) string {
 	if message == "" {
 		return errStr("message is required")
@@ -487,20 +496,48 @@ func (c *Client) Chat(message string) string {
 		clean := stripANSI(result)
 		c.history.Add("user", message, "local")
 		c.history.Add("assistant", clean, "local")
-		return okJSON(map[string]string{"reply": clean, "source": "local"})
+		return okJSON(map[string]interface{}{"reply": clean, "source": "local"})
 	}
 
-	if c.orchestrator == nil {
+	c.mu.Lock()
+	orch := c.orchestrator
+	c.mu.Unlock()
+	if orch == nil {
 		return errStr("AI Agent 未启用")
 	}
 
-	reply, err := c.orchestrator.Run(context.Background(), message, c.history)
+	result, err := orch.Run(context.Background(), message, c.history)
 	if err != nil {
 		return errJSON(fmt.Errorf("Agent 错误: %v", err))
 	}
 	c.history.Add("user", message, "agent")
-	c.history.Add("assistant", reply, "agent")
-	return okJSON(map[string]string{"reply": reply, "source": "agent"})
+	c.history.Add("assistant", result.Reply, "agent")
+	return okJSON(map[string]interface{}{
+		"reply":  result.Reply,
+		"source": "agent",
+		"events": result.Events,
+	})
+}
+
+// SetAPIKey 热重载 LLM apiKey。Kotlin 侧用户在 Settings 改 key 后立即调这个, 无需重启 App。
+// key 为空 → 关闭 orchestrator (Agent 回到"未启用"状态)。
+// 线程安全：持 Client.mu 重建 orchestrator。
+func (c *Client) SetAPIKey(key string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if key == "" {
+		c.orchestrator = nil
+		return okJSON(map[string]interface{}{"agent_ready": false})
+	}
+	llmClient := agent.NewLLMClient(
+		config.DefaultLLMBaseURL,
+		key,
+		config.DefaultLLMModel,
+		time.Duration(config.DefaultLLMTimeout)*time.Second,
+	)
+	assembler := agent.NewPromptAssembler(c.adapter)
+	c.orchestrator = agent.NewOrchestrator(llmClient, c.pipeline, assembler, c.pipeline.GetTools())
+	return okJSON(map[string]interface{}{"agent_ready": true})
 }
 
 // ClearHistory 清空对话历史。
@@ -567,7 +604,9 @@ func (c *Client) Rules() string {
 
 // AddRule 添加一条路由规则 (M18)。
 // ruleJSON 是 overlay.RouteRule 的 JSON 序列化,格式:
-//   {"tag":"my-rule","domain_suffix":["example.com"],"outbound":"proxy","description":"..."}
+//
+//	{"tag":"my-rule","domain_suffix":["example.com"],"outbound":"proxy","description":"..."}
+//
 // 字段 source 由服务端固定填 "user", 避免被客户端伪造成 "agent"。
 func (c *Client) AddRule(ruleJSON string) string {
 	var rule overlay.RouteRule

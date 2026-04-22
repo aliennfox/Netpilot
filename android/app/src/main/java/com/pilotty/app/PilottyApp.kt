@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.util.Log
+import com.pilotty.app.agent.ApiKeyPrefs
 import libbox.Libbox
 import libbox.SetupOptions
 import java.io.File
@@ -31,7 +32,9 @@ class PilottyApp : Application() {
 
         bootstrapConfigAssets()
 
-        PilottyCore.init(this, clashAPIAddr = "127.0.0.1:9090", apiKey = "")
+        val apiKey = ApiKeyPrefs.get(this).key
+        Log.i(TAG, "PilottyCore.init apiKey=${if (apiKey.isBlank()) "<empty>" else "sk-***${apiKey.takeLast(4)}"}")
+        PilottyCore.init(this, clashAPIAddr = "127.0.0.1:9090", apiKey = apiKey)
     }
 
     /**

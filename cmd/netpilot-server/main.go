@@ -95,10 +95,11 @@ type APIResponse struct {
 
 // ChatResponse Agent 聊天响应
 type ChatResponse struct {
-	Reply   string       `json:"reply"`
-	Source  string       `json:"source"`
-	Stages  []string     `json:"stages,omitempty"`
-	Actions []ChatAction `json:"actions,omitempty"`
+	Reply   string            `json:"reply"`
+	Source  string            `json:"source"`
+	Stages  []string          `json:"stages,omitempty"`
+	Actions []ChatAction      `json:"actions,omitempty"`
+	Events  []agent.ToolEvent `json:"events,omitempty"`
 }
 
 // ChatAction Agent 建议的后续操作
@@ -502,20 +503,21 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reply, err := s.orchestrator.Run(context.Background(), req.Message, s.history)
+	result, err := s.orchestrator.Run(context.Background(), req.Message, s.history)
 	if err != nil {
 		errJSON(w, http.StatusInternalServerError, fmt.Sprintf("Agent 错误: %v", err))
 		return
 	}
 
 	s.history.Add("user", req.Message, "agent")
-	s.history.Add("assistant", reply, "agent")
+	s.history.Add("assistant", result.Reply, "agent")
 
 	resp := ChatResponse{
-		Reply:   reply,
+		Reply:   result.Reply,
 		Source:  "agent",
-		Stages:  detectStages(reply),
-		Actions: suggestActionsFromReply(reply),
+		Stages:  detectStages(result.Reply),
+		Actions: suggestActionsFromReply(result.Reply),
+		Events:  result.Events,
 	}
 	okJSON(w, resp)
 }

@@ -79,26 +79,8 @@ fun SettingsScreen(
             }
         }
 
-        // LLM 占位 (M8 做完后替换)
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Kicker("Agent · LLM")
-            PilottyCard(modifier = Modifier.fillMaxWidth(), soft = true) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("DeepSeek via 硅基流动", color = pc.ink, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    Text(
-                        "API Key 尚未配置。Chat tab 需此 key 才能启用 Agent。",
-                        color = pc.ink3,
-                        fontSize = 12.sp,
-                    )
-                    Text(
-                        "TODO M8: EncryptedSharedPreferences 存取入口",
-                        color = pc.ink4,
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                }
-            }
-        }
+        // Agent · LLM apiKey 配置 (M8 最短路径)
+        AgentApiKeySection()
 
         // Per-App VPN (M14)
         PerAppVpnSection()

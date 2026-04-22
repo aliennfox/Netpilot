@@ -38,6 +38,8 @@ object PilottyCore {
     fun testLatency(node: String): String         = require().testLatency(node)
     fun testLatencyAll(): String                  = require().testLatencyAll()
     fun chat(message: String): String             = require().chat(message)
+    /** M8 热重载: 用户在 Settings 改 apiKey 后立即调这个, 无需重启 App。 空字符串 = 关 Agent。 */
+    fun setApiKey(key: String): String            = require().setAPIKey(key)
     fun clearHistory()                            = require().clearHistory()
     fun subscriptions(): String                   = require().subscriptions()
     fun addSubscription(name: String, url: String): String = require().addSubscription(name, url)

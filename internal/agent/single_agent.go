@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/foxnetpilot/netpilot/internal/tool"
 )
@@ -36,10 +37,12 @@ func NewSingleAgent(llm *LLMClient, pipeline *tool.ToolPipeline, assembler *Prom
 // RunWithRole 用指定角色执行 Agent 循环。
 // role 决定 system prompt 和可用 tool 列表。
 //
+// 返回值 events 记录本角色内每次 tool 调用的可观测细节, 供 Chat Tool-Call Timeline UI (D3) 渲染。
+//
 // 硅基流动对 tool_calls 消息格式的校验不稳定（相同请求时而通过时而 400），
 // 因此不在消息历史中保留 tool_calls/tool 格式，而是将 tool 调用和结果
 // 转化为纯文本 assistant 消息，再以 user 角色喂回结果。
-func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMessage string, history *ConversationHistory) (string, error) {
+func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMessage string, history *ConversationHistory) (string, []ToolEvent, error) {
 	// 1. 组装角色专用 system prompt（含对话历史摘要）
 	systemPrompt := a.assembler.AssembleForRole(ctx, role, history)
 
@@ -51,6 +54,8 @@ func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMess
 
 	// 3. 获取角色限定的 tool schemas
 	tools := ConvertToolsForRole(a.tools, role.AllowedTools)
+
+	var events []ToolEvent
 
 	// 4. Tool-use 循环
 	for i := 0; i < a.maxIter; i++ {
@@ -66,7 +71,7 @@ func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMess
 		}
 		resp, err := a.llm.Complete(ctx, req)
 		if err != nil {
-			return "", fmt.Errorf("[%s] LLM 调用失败: %w", role.Name, err)
+			return "", events, fmt.Errorf("[%s] LLM 调用失败: %w", role.Name, err)
 		}
 
 		choice := resp.Choices[0]
@@ -79,9 +84,9 @@ func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMess
 		// LLM 完成（不再调用工具），返回最终回复
 		if choice.FinishReason == "stop" || len(choice.Message.ToolCalls) == 0 {
 			if choice.Message.Content != nil {
-				return *choice.Message.Content, nil
+				return *choice.Message.Content, events, nil
 			}
-			return "", nil
+			return "", events, nil
 		}
 
 		// LLM 要调用工具 → 执行所有 tool calls，将结果拼成纯文本
@@ -90,8 +95,15 @@ func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMess
 		for _, tc := range choice.Message.ToolCalls {
 			// 硬性检查：只读角色不允许调写操作
 			if !isToolAllowed(tc.Function.Name, role.AllowedTools) {
+				denyMsg := fmt.Sprintf("当前角色 %s 无权使用此工具", role.Name)
 				summaryParts = append(summaryParts,
-					fmt.Sprintf("[%s] 被拒绝: 当前角色 %s 无权使用此工具", tc.Function.Name, role.Name))
+					fmt.Sprintf("[%s] 被拒绝: %s", tc.Function.Name, denyMsg))
+				events = append(events, ToolEvent{
+					Name:        tc.Function.Name,
+					ArgsSummary: truncateResult(tc.Function.Arguments, 120),
+					Error:       denyMsg,
+					Role:        role.Name,
+				})
 				continue
 			}
 
@@ -103,21 +115,38 @@ func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMess
 				if err := json.Unmarshal([]byte(tc.Function.Arguments), &params); err != nil {
 					summaryParts = append(summaryParts,
 						fmt.Sprintf("[%s] 参数解析失败: %s", tc.Function.Name, err.Error()))
+					events = append(events, ToolEvent{
+						Name:        tc.Function.Name,
+						ArgsSummary: truncateResult(tc.Function.Arguments, 120),
+						Error:       "参数解析失败: " + err.Error(),
+						Role:        role.Name,
+					})
 					continue
 				}
 			}
 
 			// 通过 Pipeline 执行（走完整的 hook/snapshot/telemetry 流程）
+			startedAt := time.Now()
 			result := a.pipeline.Execute(ctx, tc.Function.Name, params)
+			durationMs := time.Since(startedAt).Milliseconds()
 
 			cleanMsg := truncateResult(stripANSI(result.Message), 2000)
+			evt := ToolEvent{
+				Name:          tc.Function.Name,
+				ArgsSummary:   truncateResult(tc.Function.Arguments, 120),
+				DurationMs:    durationMs,
+				OutputPreview: truncateResult(stripANSI(result.Message), 200),
+				Role:          role.Name,
+			}
 			if result.Success {
 				summaryParts = append(summaryParts,
 					fmt.Sprintf("[%s] 成功: %s", tc.Function.Name, cleanMsg))
 			} else {
+				evt.Error = truncateResult(stripANSI(result.Message), 200)
 				summaryParts = append(summaryParts,
 					fmt.Sprintf("[%s] 失败: %s", tc.Function.Name, cleanMsg))
 			}
+			events = append(events, evt)
 		}
 
 		// 将 tool 调用结果作为纯文本加入消息历史（避免 tool_calls 格式）
@@ -135,7 +164,7 @@ func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMess
 		})
 	}
 
-	return "已达到最大操作步数，停止自动操作。", nil
+	return "已达到最大操作步数，停止自动操作。", events, nil
 }
 
 // isToolAllowed 检查 tool 是否在角色白名单中

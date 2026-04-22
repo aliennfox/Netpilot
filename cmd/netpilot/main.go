@@ -296,14 +296,14 @@ func main() {
 
 		// 3. Try Agent (LLM)
 		if orchestrator != nil {
-			reply, err := orchestrator.Run(context.Background(), line, history)
+			result, err := orchestrator.Run(context.Background(), line, history)
 			if err != nil {
 				fmt.Printf("%s🤖 Agent 错误: %v%s\n", colorRed, err, colorReset)
 			} else {
 				// 记录 Agent 对话到历史
 				history.Add("user", line, "agent")
-				history.Add("assistant", reply, "agent")
-				fmt.Printf("\033[36m🤖 %s\033[0m\n", reply)
+				history.Add("assistant", result.Reply, "agent")
+				fmt.Printf("\033[36m🤖 %s\033[0m\n", result.Reply)
 			}
 			continue
 		}
