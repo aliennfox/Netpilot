@@ -32,6 +32,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.pilotty.app.chat.ChatHistoryPrefs
 import com.pilotty.app.data.*
 import com.pilotty.app.ui.agent.AgentQueryBus
 import com.pilotty.app.ui.components.*
@@ -58,8 +59,19 @@ data class ChatUi(
 )
 
 class ChatViewModel : ViewModel() {
-    private val _state = MutableStateFlow(ChatUi())
+    // Phase 7.1: 启动时从 SP 恢复历史气泡; send/clear 写回 SP。 Go 侧 ConversationHistory
+    // 另行持久到 filesDir/chat_history.json 保证 LLM system prompt 摘要跨重启连续。
+    private val prefs: ChatHistoryPrefs? = com.pilotty.app.PilottyApp.appContext?.let { ChatHistoryPrefs.get(it) }
+
+    private val _state = MutableStateFlow(ChatUi(messages = loadPersistedMessages()))
     val state: StateFlow<ChatUi> = _state.asStateFlow()
+
+    private fun loadPersistedMessages(): List<ChatMessage> =
+        prefs?.state?.value?.map { ChatMessage(it.role, it.text, it.source, it.events) } ?: emptyList()
+
+    private fun persist(messages: List<ChatMessage>) {
+        prefs?.save(messages.map { ChatHistoryPrefs.Entry(it.role, it.text, it.source, it.events) })
+    }
 
     fun send(text: String) {
         if (text.isBlank()) return
@@ -72,17 +84,17 @@ class ChatViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val r = PilottyRepository.chat(text)
-                _state.value = _state.value.copy(
-                    sending = false,
-                    messages = _state.value.messages + ChatMessage(
-                        role = "assistant",
-                        text = r.reply,
-                        source = r.source,
-                        events = r.events,
-                    ),
+                val updated = _state.value.messages + ChatMessage(
+                    role = "assistant",
+                    text = r.reply,
+                    source = r.source,
+                    events = r.events,
                 )
+                _state.value = _state.value.copy(sending = false, messages = updated)
+                persist(updated)
             } catch (e: Throwable) {
                 _state.value = _state.value.copy(sending = false, error = e.message)
+                persist(_state.value.messages) // 至少留下用户消息
             }
         }
     }
@@ -90,6 +102,7 @@ class ChatViewModel : ViewModel() {
     fun clear() {
         PilottyRepository.clearHistory()
         _state.value = ChatUi()
+        prefs?.clear()
     }
 }
 

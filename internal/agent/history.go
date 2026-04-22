@@ -1,7 +1,10 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -129,6 +132,57 @@ func (h *ConversationHistory) Len() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return len(h.messages)
+}
+
+// SaveToFile 原子写入 messages 到 path (tmp + rename)。
+// Phase 7.1 Chat 持久化: Kotlin SP 存 UI 层气泡, Go 侧这个存 ConversationHistory
+// (用于 LLM system prompt 摘要注入), 两边独立存但内容对齐。
+// 失败返回 error 不改磁盘; 上层可选择异步忽略或打日志。
+func (h *ConversationHistory) SaveToFile(path string) error {
+	h.mu.Lock()
+	entries := make([]HistoryEntry, len(h.messages))
+	copy(entries, h.messages)
+	h.mu.Unlock()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
+	}
+	data, err := json.Marshal(entries)
+	if err != nil {
+		return fmt.Errorf("marshal history: %w", err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return fmt.Errorf("write tmp: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
+}
+
+// LoadFromFile 从 path 读回 messages; 文件不存在返回 nil (视为首次启动)。
+// 加载时截到 maxEntries, 与 Add 保持一致。
+func (h *ConversationHistory) LoadFromFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	var entries []HistoryEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return fmt.Errorf("unmarshal history: %w", err)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(entries) > h.maxEntries {
+		entries = entries[len(entries)-h.maxEntries:]
+	}
+	h.messages = entries
+	return nil
 }
 
 // truncateRunes 按 rune 截断字符串（正确处理中文）

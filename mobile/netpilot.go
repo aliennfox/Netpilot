@@ -54,6 +54,9 @@ type Client struct {
 	// 3B-1 阶段 BoxInstance 的 Start/Close 是 stub, 3B-3 接入真 libbox CommandServer。
 	box   *libcore.BoxInstance
 	iface libcore.PlatformInterface
+
+	// Phase 7.1: 对话历史持久化路径。 每次 Chat 调用后异步刷盘, 进程被系统杀后重启能恢复上下文。
+	historyPath string
 }
 
 // NewClient 创建一个新的 Pilotty 客户端。
@@ -116,6 +119,10 @@ func NewClient(dataDir, clashAPIAddr, apiKey string) *Client {
 
 	fo := failover.New(adapter, failover.Config{})
 
+	history := agent.NewConversationHistory(40)
+	historyPath := filepath.Join(dataDir, "chat_history.json")
+	_ = history.LoadFromFile(historyPath) // 文件不存在视为首次启动, 静默
+
 	return &Client{
 		adapter:      adapter,
 		pipeline:     pipeline,
@@ -124,7 +131,8 @@ func NewClient(dataDir, clashAPIAddr, apiKey string) *Client {
 		subMgr:       subMgr,
 		templates:    ts,
 		orchestrator: orchestrator,
-		history:      agent.NewConversationHistory(40),
+		history:      history,
+		historyPath:  historyPath,
 		intentRouter: intentRouter,
 		failover:     fo,
 	}
@@ -496,6 +504,7 @@ func (c *Client) Chat(message string) string {
 		clean := stripANSI(result)
 		c.history.Add("user", message, "local")
 		c.history.Add("assistant", clean, "local")
+		c.flushHistoryAsync()
 		return okJSON(map[string]interface{}{"reply": clean, "source": "local"})
 	}
 
@@ -512,11 +521,24 @@ func (c *Client) Chat(message string) string {
 	}
 	c.history.Add("user", message, "agent")
 	c.history.Add("assistant", result.Reply, "agent")
+	c.flushHistoryAsync()
 	return okJSON(map[string]interface{}{
 		"reply":  result.Reply,
 		"source": "agent",
 		"events": result.Events,
 	})
+}
+
+// flushHistoryAsync 异步刷盘 ConversationHistory。 每次 Chat 后调用, 避免同步 I/O
+// 阻塞 LLM 响应;最坏场景(进程秒杀)丢最后 1 条消息, 可接受。
+func (c *Client) flushHistoryAsync() {
+	if c.historyPath == "" {
+		return
+	}
+	path := c.historyPath
+	go func() {
+		_ = c.history.SaveToFile(path)
+	}()
 }
 
 // SetAPIKey 热重载 LLM apiKey。Kotlin 侧用户在 Settings 改 key 后立即调这个, 无需重启 App。
@@ -540,9 +562,12 @@ func (c *Client) SetAPIKey(key string) string {
 	return okJSON(map[string]interface{}{"agent_ready": true})
 }
 
-// ClearHistory 清空对话历史。
+// ClearHistory 清空对话历史。 同步删磁盘文件, 确保 App 重启不恢复。
 func (c *Client) ClearHistory() {
 	c.history.Clear()
+	if c.historyPath != "" {
+		_ = os.Remove(c.historyPath)
+	}
 }
 
 // --- Subscriptions ---
