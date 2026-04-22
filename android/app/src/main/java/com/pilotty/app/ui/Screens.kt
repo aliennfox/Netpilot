@@ -190,18 +190,40 @@ class ChatViewModel : ViewModel() {
     private enum class VpnIntent { None, Start, Stop, Status }
 
     /**
-     * 子字符串匹配 (与 Go IntentRouter 策略一致) — 用户输入含任一关键词即命中。
-     * 误伤容忍: "关闭代理模式" 会同时撞上 "关闭代理" 和 set_mode 语义, 因此 set_mode 那类词
-     * 不放进 VpnIntent 判定 —— 只匹配明确提 "VPN/连接" 的。
+     * 两步检查: 必须提 "vpn" + 匹配一组动词才算意图命中。
+     * 避免 "打开xxx" 单纯因为有 "打开" 就误伤, 且让 "turn on the vpn"/"start vpn please"/
+     * "把 VPN 关掉" 等自然语序都能命中。
      */
     private fun classifyVpnIntent(s: String): VpnIntent {
         val lower = s.lowercase()
-        val startKeys = listOf("打开vpn", "启动vpn", "开启vpn", "开vpn", "连接vpn", "连上vpn", "上vpn", "start vpn", "connect vpn", "enable vpn", "open vpn")
-        val stopKeys = listOf("关闭vpn", "停止vpn", "关掉vpn", "断开vpn", "断vpn", "stop vpn", "disconnect vpn", "disable vpn", "close vpn")
-        val statusKeys = listOf("vpn状态", "vpn 状态", "vpn 在运行吗", "vpn running", "vpn status")
-        if (startKeys.any { lower.contains(it) }) return VpnIntent.Start
-        if (stopKeys.any { lower.contains(it) }) return VpnIntent.Stop
-        if (statusKeys.any { lower.contains(it) }) return VpnIntent.Status
+        if (!lower.contains("vpn")) return VpnIntent.None
+
+        // Start: 启动/连接意图。 中文动词 + 英文常见说法全收
+        val startVerbs = listOf(
+            "打开", "启动", "开启", "连接", "连上", "激活", "拉起", "开一下", "启动一下", "打开一下", "连一下",
+            "turn on", "turn it on", "turn the vpn on", "open the vpn",
+            "start", "connect", "enable", "activate", "bring up", "power on",
+            "switch on", "fire up", "launch", "boot",
+        )
+        // Stop: 关闭/断开意图
+        val stopVerbs = listOf(
+            "关闭", "停止", "关掉", "断开", "下线", "停掉", "关一下", "停一下", "关了", "断了",
+            "turn off", "turn it off", "turn the vpn off", "close the vpn",
+            "stop", "disconnect", "disable", "deactivate",
+            "shut down", "shutdown", "kill", "bring down", "power off", "switch off",
+        )
+        // Status: 只查询状态, 不动作
+        val statusWords = listOf(
+            "vpn状态", "vpn 状态", "在运行吗", "在跑吗", "开了吗", "连了吗",
+            "vpn running", "vpn status", "is vpn on", "is vpn running", "is the vpn",
+        )
+        // 紧耦合单字 (如 "开VPN"/"关VPN"): 单字 "开/关/停/上" 单独不算, 必须紧挨 vpn
+        val tightStart = listOf("开vpn", "开 vpn", "上vpn", "上 vpn")
+        val tightStop = listOf("关vpn", "关 vpn", "停vpn", "停 vpn", "断vpn", "断 vpn")
+
+        if (startVerbs.any { lower.contains(it) } || tightStart.any { lower.contains(it) }) return VpnIntent.Start
+        if (stopVerbs.any { lower.contains(it) } || tightStop.any { lower.contains(it) }) return VpnIntent.Stop
+        if (statusWords.any { lower.contains(it) }) return VpnIntent.Status
         return VpnIntent.None
     }
 
