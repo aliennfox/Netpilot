@@ -15,7 +15,7 @@ import (
 // NodeConfig 是解析后的通用节点配置
 type NodeConfig struct {
 	Name     string
-	Type     string // "shadowsocks" | "trojan" | "vmess" | "vless" | "hysteria" | "hysteria2" | "wireguard" | "tuic" | "anytls" | "shadowtls"
+	Type     string // "shadowsocks" | "trojan" | "vmess" | "vless" | "hysteria" | "hysteria2" | "wireguard" | "tuic" | "anytls" | "shadowtls" | "ssh" | "naive"
 	Server   string
 	Port     int
 	Password string // ss / trojan / hysteria2 / anytls / shadowtls / tuic-token-fallback
@@ -231,9 +231,102 @@ func parseLine(line string) (NodeConfig, error) {
 		return parseShadowTLS(line)
 	case strings.HasPrefix(line, "wireguard://") || strings.HasPrefix(line, "wg://"):
 		return parseWireGuard(line)
+	case strings.HasPrefix(line, "ssh://"):
+		return parseSSH(line)
+	case strings.HasPrefix(line, "naive+https://"):
+		return parseNaive(line)
+	case strings.HasPrefix(line, "ssr://"),
+		strings.HasPrefix(line, "trojan-go://"),
+		strings.HasPrefix(line, "mieru://"),
+		strings.HasPrefix(line, "juicity://"):
+		// Phase 9 A4: sing-box 上游无原生实现 (SSR 在 v1.6 被移除, 其它从未存在),
+		// 本阶段不魔改核心 → 显式跳过, parser.go 上层会打 "⚠️ 跳过无法解析的行" 提示。
+		proto := strings.SplitN(line, "://", 2)[0]
+		return NodeConfig{}, errProtocolUnsupported(proto)
 	default:
 		return NodeConfig{}, fmt.Errorf("不支持的协议: %s", truncate(line, 20))
 	}
+}
+
+// parseSSH 解析 ssh:// URI (Phase 9 A2)。
+// 格式: ssh://user:password@host:port?host_key_algorithms=xxx&private_key_path=/path#Name
+//
+//	ssh://user@host:port?private_key=base64urlenc-KEY#Name
+//
+// 多行 private_key 用 URL-encoded newline (%0A) 或 base64, Extra 里原样透传。
+func parseSSH(uri string) (NodeConfig, error) {
+	node := NodeConfig{Type: "ssh", Extra: map[string]string{}}
+	u, err := url.Parse(uri)
+	if err != nil {
+		return node, fmt.Errorf("解析 ssh URI 失败: %w", err)
+	}
+	if u.Host == "" {
+		return node, fmt.Errorf("ssh URI 缺 host")
+	}
+	host, port, err := parseHostPort(u.Host)
+	if err != nil {
+		return node, fmt.Errorf("ssh host:port: %w", err)
+	}
+	node.Server = host
+	node.Port = port
+	if u.User != nil {
+		node.Extra["user"] = u.User.Username()
+		if pw, set := u.User.Password(); set {
+			node.Password = pw
+		}
+	}
+	q := u.Query()
+	for _, k := range []string{"private_key", "private_key_path", "private_key_passphrase",
+		"host_key", "host_key_algorithms", "client_version"} {
+		if v := q.Get(k); v != "" {
+			node.Extra[k] = v
+		}
+	}
+	node.Name = decodeURIComponent(u.Fragment)
+	if node.Name == "" {
+		node.Name = fmt.Sprintf("ssh-%s", host)
+	}
+	return node, nil
+}
+
+// parseNaive 解析 naive+https:// URI (Phase 9 A3)。
+// 格式: naive+https://user:password@host:port?sni=xxx#Name
+// NekoBox 风格, 必须 https (naive 本身只跑 HTTPS CONNECT)。
+func parseNaive(uri string) (NodeConfig, error) {
+	node := NodeConfig{Type: "naive", Extra: map[string]string{"tls": "true"}}
+	// 去掉 naive+ 前缀, url.Parse 认 https://
+	body := strings.TrimPrefix(uri, "naive+")
+	u, err := url.Parse(body)
+	if err != nil {
+		return node, fmt.Errorf("解析 naive URI 失败: %w", err)
+	}
+	if u.Scheme != "https" {
+		return node, fmt.Errorf("naive URI 必须 https, 得到 %s", u.Scheme)
+	}
+	if u.Host == "" {
+		return node, fmt.Errorf("naive URI 缺 host")
+	}
+	host, port, err := parseHostPort(u.Host)
+	if err != nil {
+		return node, fmt.Errorf("naive host:port: %w", err)
+	}
+	node.Server = host
+	node.Port = port
+	if u.User != nil {
+		node.Extra["username"] = u.User.Username()
+		if pw, set := u.User.Password(); set {
+			node.Password = pw
+		}
+	}
+	q := u.Query()
+	if sni := q.Get("sni"); sni != "" {
+		node.SNI = sni
+	}
+	node.Name = decodeURIComponent(u.Fragment)
+	if node.Name == "" {
+		node.Name = fmt.Sprintf("naive-%s", host)
+	}
+	return node, nil
 }
 
 // parseSS 解析 ss:// URI

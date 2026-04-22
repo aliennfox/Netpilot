@@ -85,7 +85,7 @@ gomobile bind \
     -androidapi "$ANDROID_API" \
     -trimpath \
     -ldflags='-s -w -checklinkname=0' \
-    -tags='with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api' \
+    -tags='with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_naive_outbound' \
     -o "$OUT" \
     ./libcore ./mobile \
     github.com/sagernet/sing-box/experimental/libbox

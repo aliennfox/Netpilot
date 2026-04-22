@@ -91,8 +91,18 @@ func mergeRouteRules(config map[string]interface{}, rules []RouteRule) {
 	route["rules"] = merged
 }
 
-// mergeOutbounds 将 overlay 出站追加到 outbounds 末尾（跳过重复 tag），
-// 并将新节点 tag 添加到 selector group 的 outbounds 列表中
+// isEndpointType 判断 sing-box 1.13+ outbound type 是否属于 "endpoints" 注册表。
+// 这些协议 schema 上不是 dialer 型, 必须放在 merged.json 的独立 endpoints 段。
+// 当前仅 wireguard, 后续 sing-box 迁更多可在这里扩。
+func isEndpointType(typ string) bool {
+	return typ == "wireguard"
+}
+
+// mergeOutbounds 将 overlay 出站追加到 outbounds / endpoints 末尾（跳过重复 tag），
+// 并将新节点 tag 添加到第一个 selector group 的 outbounds 列表中。
+//
+// #M25: endpoint 型 (wireguard) 必须放在 merged.endpoints 而非 outbounds,
+// selector 仍引用其 tag (sing-box 把 endpoint.tag 和 outbound.tag 放同一命名空间)。
 func mergeOutbounds(config map[string]interface{}, outbounds []map[string]interface{}) {
 	var existingOutbounds []interface{}
 	if raw, ok := config["outbounds"]; ok {
@@ -100,8 +110,14 @@ func mergeOutbounds(config map[string]interface{}, outbounds []map[string]interf
 			existingOutbounds = arr
 		}
 	}
+	var existingEndpoints []interface{}
+	if raw, ok := config["endpoints"]; ok {
+		if arr, ok := raw.([]interface{}); ok {
+			existingEndpoints = arr
+		}
+	}
 
-	// 收集已有的 tag
+	// 收集已有 tag (outbounds 和 endpoints 共享 tag 命名空间)
 	existingTags := map[string]bool{}
 	for _, ob := range existingOutbounds {
 		if m, ok := ob.(map[string]interface{}); ok {
@@ -110,22 +126,37 @@ func mergeOutbounds(config map[string]interface{}, outbounds []map[string]interf
 			}
 		}
 	}
+	for _, ep := range existingEndpoints {
+		if m, ok := ep.(map[string]interface{}); ok {
+			if tag, ok := m["tag"].(string); ok {
+				existingTags[tag] = true
+			}
+		}
+	}
 
-	// 追加不重复的 overlay 出站，并收集新增 tag
+	// 按 type 分派: endpoint 型 → endpoints 段, 其它 → outbounds 段
 	var newTags []string
 	for _, ob := range outbounds {
 		tag, _ := ob["tag"].(string)
 		if existingTags[tag] {
 			continue
 		}
-		existingOutbounds = append(existingOutbounds, ob)
+		typ, _ := ob["type"].(string)
+		if isEndpointType(typ) {
+			existingEndpoints = append(existingEndpoints, ob)
+		} else {
+			existingOutbounds = append(existingOutbounds, ob)
+		}
 		existingTags[tag] = true
 		newTags = append(newTags, tag)
 	}
 
 	config["outbounds"] = existingOutbounds
+	if len(existingEndpoints) > 0 {
+		config["endpoints"] = existingEndpoints
+	}
 
-	// 将新增节点 tag 添加到第一个 selector group 的 outbounds 中
+	// selector 在 outbounds 里 (它本身是 outbound 类型), 引用所有可选 tag 包括 endpoint tag
 	if len(newTags) > 0 {
 		addTagsToSelector(existingOutbounds, newTags)
 	}

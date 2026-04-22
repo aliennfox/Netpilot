@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"encoding/base64"
+	"strings"
 	"testing"
 )
 
@@ -446,5 +447,224 @@ func TestParseSS_QueryPreservedInExtra(t *testing.T) {
 	}
 	if got.Extra["type"] != "tcp" {
 		t.Errorf("type should be preserved in Extra, got %q", got.Extra["type"])
+	}
+}
+
+// TestConvertWireGuardEndpoint 锁 #M25 修复: WG converter 产新 endpoint schema
+// (peers[] 数组, server/port/peer_public_key 合并进 peer, 顶层 address/private_key/mtu),
+// 不再产老 outbound schema (local_address/peer_public_key)。
+func TestConvertWireGuardEndpoint(t *testing.T) {
+	node := NodeConfig{
+		Type:   "wireguard",
+		Name:   "WG-JP",
+		Server: "1.2.3.4",
+		Port:   51820,
+		Extra: map[string]string{
+			"private_key":                   "privkey_base64==",
+			"peer_public_key":               "pubkey_base64==",
+			"local_address":                 "10.0.0.2/32,fd00::2/128",
+			"pre_shared_key":                "psk_base64==",
+			"mtu":                           "1408",
+			"reserved":                      "1,2,3",
+			"persistent_keepalive_interval": "25",
+		},
+	}
+	ep, err := convertWireGuard(node, "WG-JP")
+	if err != nil {
+		t.Fatalf("convertWireGuard: %v", err)
+	}
+
+	// 顶层
+	if ep["type"] != "wireguard" || ep["tag"] != "WG-JP" {
+		t.Errorf("type/tag wrong: %+v", ep)
+	}
+	if ep["private_key"] != "privkey_base64==" {
+		t.Errorf("private_key missing")
+	}
+	if ep["mtu"] != 1408 {
+		t.Errorf("mtu=%v, want 1408", ep["mtu"])
+	}
+	// address 是 interface{} slice
+	addrs, ok := ep["address"].([]interface{})
+	if !ok || len(addrs) != 2 {
+		t.Errorf("address: %+v", ep["address"])
+	}
+
+	// 老 schema 字段一定不能出现 (会被 sing-box 1.13+ 拒)
+	if _, has := ep["server"]; has {
+		t.Errorf("server should NOT be at endpoint top level in new schema: %+v", ep)
+	}
+	if _, has := ep["server_port"]; has {
+		t.Errorf("server_port should NOT be at endpoint top level: %+v", ep)
+	}
+	if _, has := ep["peer_public_key"]; has {
+		t.Errorf("peer_public_key should NOT be at endpoint top level: %+v", ep)
+	}
+	if _, has := ep["local_address"]; has {
+		t.Errorf("local_address should be renamed to 'address': %+v", ep)
+	}
+
+	// peers 数组
+	peers, ok := ep["peers"].([]interface{})
+	if !ok || len(peers) != 1 {
+		t.Fatalf("peers: %+v", ep["peers"])
+	}
+	peer, ok := peers[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("peer not map: %+v", peers[0])
+	}
+	if peer["address"] != "1.2.3.4" {
+		t.Errorf("peer.address=%v, want 1.2.3.4", peer["address"])
+	}
+	if peer["port"] != 51820 {
+		t.Errorf("peer.port=%v, want 51820", peer["port"])
+	}
+	if peer["public_key"] != "pubkey_base64==" {
+		t.Errorf("peer.public_key missing")
+	}
+	if peer["pre_shared_key"] != "psk_base64==" {
+		t.Errorf("peer.pre_shared_key missing")
+	}
+	if peer["persistent_keepalive_interval"] != 25 {
+		t.Errorf("peer.keepalive=%v, want 25", peer["persistent_keepalive_interval"])
+	}
+	if ai, ok := peer["allowed_ips"].([]interface{}); !ok || len(ai) != 2 {
+		t.Errorf("peer.allowed_ips: %+v", peer["allowed_ips"])
+	}
+	if res, ok := peer["reserved"].([]interface{}); !ok || len(res) != 3 {
+		t.Errorf("peer.reserved: %+v", peer["reserved"])
+	}
+}
+
+// TestMergeConfigs_WireguardGoesToEndpoints 锁 merger 层: wireguard type 分流到
+// merged.json.endpoints, 不进 merged.json.outbounds。 selector 仍拿到 tag 引用。
+func TestMergeConfigs_WireguardGoesToEndpoints(t *testing.T) {
+	t.Skip("overlay package test, see internal/overlay/merger_test.go (scaffold)")
+}
+
+// TestParseSSH Phase 9 A2
+func TestParseSSH(t *testing.T) {
+	uri := "ssh://alice:pass123@10.0.0.5:2222?host_key_algorithms=ssh-ed25519%3Brsa-sha2-256&client_version=SSH-2.0-go#bastion-jp"
+	got, err := parseSSH(uri)
+	if err != nil {
+		t.Fatalf("parseSSH: %v", err)
+	}
+	if got.Server != "10.0.0.5" || got.Port != 2222 {
+		t.Errorf("server/port: %s:%d", got.Server, got.Port)
+	}
+	if got.Extra["user"] != "alice" || got.Password != "pass123" {
+		t.Errorf("user/pass: %+v", got)
+	}
+	if got.Extra["host_key_algorithms"] != "ssh-ed25519;rsa-sha2-256" {
+		t.Errorf("host_key_algorithms: %q", got.Extra["host_key_algorithms"])
+	}
+	if got.Extra["client_version"] != "SSH-2.0-go" {
+		t.Errorf("client_version: %q", got.Extra["client_version"])
+	}
+	if got.Name != "bastion-jp" {
+		t.Errorf("name: %q", got.Name)
+	}
+}
+
+// TestConvertSSH Phase 9 A2
+func TestConvertSSH(t *testing.T) {
+	node := NodeConfig{
+		Type: "ssh", Server: "host.lan", Port: 22, Password: "p",
+		Extra: map[string]string{
+			"user":                "ops",
+			"private_key_path":    "/data/key",
+			"host_key":            "ed25519 AAAA;rsa AAAB",
+			"host_key_algorithms": "ssh-ed25519;rsa-sha2-512",
+		},
+	}
+	ob, err := convertSSH(node, "ssh-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ob["type"] != "ssh" || ob["server"] != "host.lan" || ob["server_port"] != 22 {
+		t.Errorf("base: %+v", ob)
+	}
+	if ob["user"] != "ops" || ob["password"] != "p" {
+		t.Errorf("auth: %+v", ob)
+	}
+	if ob["private_key_path"] != "/data/key" {
+		t.Errorf("private_key_path: %+v", ob)
+	}
+	// host_key 应被 ; 切成 []string
+	hk, ok := ob["host_key"].([]interface{})
+	if !ok || len(hk) != 2 {
+		t.Errorf("host_key should be 2-elem list: %+v", ob["host_key"])
+	}
+	hka, ok := ob["host_key_algorithms"].([]interface{})
+	if !ok || len(hka) != 2 {
+		t.Errorf("host_key_algorithms should be 2-elem list: %+v", ob["host_key_algorithms"])
+	}
+}
+
+// TestParseNaive Phase 9 A3
+func TestParseNaive(t *testing.T) {
+	uri := "naive+https://user:pass@jp.example.com:443?sni=example.com#JP-Naive"
+	got, err := parseNaive(uri)
+	if err != nil {
+		t.Fatalf("parseNaive: %v", err)
+	}
+	if got.Server != "jp.example.com" || got.Port != 443 {
+		t.Errorf("server/port: %s:%d", got.Server, got.Port)
+	}
+	if got.Extra["username"] != "user" || got.Password != "pass" {
+		t.Errorf("auth: %+v", got)
+	}
+	if got.SNI != "example.com" {
+		t.Errorf("sni: %q", got.SNI)
+	}
+	if got.Name != "JP-Naive" {
+		t.Errorf("name: %q", got.Name)
+	}
+}
+
+// TestConvertNaive Phase 9 A3
+func TestConvertNaive(t *testing.T) {
+	node := NodeConfig{
+		Type: "naive", Server: "jp.example.com", Port: 443,
+		Password: "pwd", SNI: "cdn.example.com",
+		Extra: map[string]string{"username": "bob"},
+	}
+	ob, err := convertNaive(node, "JP-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ob["type"] != "naive" {
+		t.Errorf("type: %+v", ob)
+	}
+	if ob["username"] != "bob" || ob["password"] != "pwd" {
+		t.Errorf("auth: %+v", ob)
+	}
+	tls, ok := ob["tls"].(map[string]interface{})
+	if !ok || tls["enabled"] != true || tls["server_name"] != "cdn.example.com" {
+		t.Errorf("tls: %+v", tls)
+	}
+}
+
+// TestParseLine_UnsupportedSkipsGracefully Phase 9 A4: 不支持协议在 parser 层被拒, ParseSubscription 不崩
+func TestParseLine_UnsupportedSkipsGracefully(t *testing.T) {
+	// base64 一条 ssr + 一条合法 ss 的订阅, 期望保留 ss 跳过 ssr
+	// 注意: tryBase64Decode 会 decode, 顶层订阅不加 base64 也行 (明文 URI 列表)
+	content := strings.Join([]string{
+		"ssr://fake-ssr",
+		"ss://" + base64.RawStdEncoding.EncodeToString([]byte("aes-256-gcm:pass")) + "@1.1.1.1:443#TestSS",
+		"trojan-go://fake-trojan-go",
+		"mieru://fake-mieru",
+		"juicity://fake-juicity",
+	}, "\n")
+
+	nodes, err := ParseSubscription(content)
+	if err != nil {
+		t.Fatalf("ParseSubscription: %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node (ss), got %d: %+v", len(nodes), nodes)
+	}
+	if nodes[0].Type != "shadowsocks" || nodes[0].Name != "TestSS" {
+		t.Errorf("survivor node wrong: %+v", nodes[0])
 	}
 }

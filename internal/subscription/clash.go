@@ -136,17 +136,65 @@ func clashProxyToNode(p map[string]interface{}) (NodeConfig, error) {
 		return clashShadowTLS(p)
 	case "wireguard", "wg":
 		return clashWireGuard(p)
+	case "ssh":
+		return clashSSH(p)
+	case "naive":
+		return clashNaive(p)
 	case "socks5", "socks":
 		return NodeConfig{}, fmt.Errorf("socks 暂未实现 (S12)")
 	case "http", "https":
 		return NodeConfig{}, fmt.Errorf("http(s) 暂未实现 (S12)")
 	case "ssr":
-		return NodeConfig{}, fmt.Errorf("SSR 显式不支持 (gap W11)")
-	case "mieru", "naive", "ssh", "trojan-go":
-		return NodeConfig{}, fmt.Errorf("%s 显式不支持 (gap W12-W15)", typ)
+		return NodeConfig{}, errProtocolUnsupported("ssr")
+	case "mieru", "trojan-go", "juicity":
+		return NodeConfig{}, errProtocolUnsupported(typ)
 	default:
 		return NodeConfig{}, fmt.Errorf("未知 Clash type: %s", typ)
 	}
+}
+
+// errProtocolUnsupported Phase 9 A4: 上游 sing-box 不原生支持 + 咱们本阶段不魔改 → 清晰跳过。
+func errProtocolUnsupported(proto string) error {
+	return fmt.Errorf("协议 %s 本版本暂不支持 (sing-box 上游无原生实现, 跳过)", proto)
+}
+
+// clashSSH Clash YAML: type=ssh → NodeConfig (Phase 9 A2)
+func clashSSH(p map[string]interface{}) (NodeConfig, error) {
+	node := NodeConfig{
+		Type:     "ssh",
+		Name:     clashStr(p, "name"),
+		Server:   clashStr(p, "server"),
+		Port:     clashInt(p, "port"),
+		Password: clashStr(p, "password"),
+		Extra:    map[string]string{},
+	}
+	if user := clashStr(p, "username"); user != "" {
+		node.Extra["user"] = user
+	}
+	for _, k := range []string{"private_key", "private_key_path", "private_key_passphrase",
+		"host_key", "host_key_algorithms", "client_version"} {
+		if v := clashStr(p, k); v != "" {
+			node.Extra[k] = v
+		}
+	}
+	return node, nil
+}
+
+// clashNaive Clash YAML: type=naive → NodeConfig (Phase 9 A3)
+func clashNaive(p map[string]interface{}) (NodeConfig, error) {
+	node := NodeConfig{
+		Type:     "naive",
+		Name:     clashStr(p, "name"),
+		Server:   clashStr(p, "server"),
+		Port:     clashInt(p, "port"),
+		Password: clashStr(p, "password"),
+		SNI:      clashStr(p, "sni"),
+		Extra:    map[string]string{"tls": "true"},
+	}
+	if user := clashStr(p, "username"); user != "" {
+		node.Extra["username"] = user
+	}
+	return node, nil
 }
 
 // --- 各类型映射 --- //

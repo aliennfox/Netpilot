@@ -40,6 +40,10 @@ func ConvertToSingboxOutbound(node NodeConfig) (map[string]interface{}, error) {
 		return convertShadowTLS(node, tag)
 	case "wireguard":
 		return convertWireGuard(node, tag)
+	case "ssh":
+		return convertSSH(node, tag)
+	case "naive":
+		return convertNaive(node, tag)
 	default:
 		return nil, fmt.Errorf("不支持的节点类型: %s", node.Type)
 	}
@@ -188,6 +192,12 @@ func convertHysteria2(node NodeConfig, tag string) (map[string]interface{}, erro
 	return ob, nil
 }
 
+// convertWireGuard #M25 修复 (2026-04-23, Phase 9 A1): sing-box 1.13.8+ WG 从 outbound
+// 迁到 endpoint, schema 完全不同 —— 用 peers[] 数组, server/server_port/peer_public_key
+// 旧字段合并到 peer 对象里, local_address → address, 顶层仍保留 private_key/mtu。
+// Merger 层通过 type=="wireguard" 识别并路由到 merged.json.endpoints, 不再进 outbounds。
+//
+// 依据: sing-box v1.13.8 `option/wireguard.go:WireGuardEndpointOptions`。
 func convertWireGuard(node NodeConfig, tag string) (map[string]interface{}, error) {
 	priv := node.Extra["private_key"]
 	peer := node.Extra["peer_public_key"]
@@ -195,32 +205,16 @@ func convertWireGuard(node NodeConfig, tag string) (map[string]interface{}, erro
 		return nil, fmt.Errorf("WireGuard 节点缺少必要字段: server=%s port=%d private_key=%v peer_public_key=%v",
 			node.Server, node.Port, priv != "", peer != "")
 	}
-	ob := map[string]interface{}{
-		"type":            "wireguard",
-		"tag":             tag,
-		"server":          node.Server,
-		"server_port":     node.Port,
-		"private_key":     priv,
-		"peer_public_key": peer,
-	}
-	if addr := node.Extra["local_address"]; addr != "" {
-		// 支持多地址，逗号分隔
-		var list []interface{}
-		for _, a := range strings.Split(addr, ",") {
-			a = strings.TrimSpace(a)
-			if a != "" {
-				list = append(list, a)
-			}
-		}
-		ob["local_address"] = list
+
+	// 构造 peer: server → peer.address, port → peer.port, peer_public_key → peer.public_key
+	peerObj := map[string]interface{}{
+		"address":     node.Server,
+		"port":        node.Port,
+		"public_key":  peer,
+		"allowed_ips": []interface{}{"0.0.0.0/0", "::/0"},
 	}
 	if psk := node.Extra["pre_shared_key"]; psk != "" {
-		ob["pre_shared_key"] = psk
-	}
-	if mtu := node.Extra["mtu"]; mtu != "" {
-		if n, err := strconv.Atoi(mtu); err == nil {
-			ob["mtu"] = n
-		}
+		peerObj["pre_shared_key"] = psk
 	}
 	if reserved := node.Extra["reserved"]; reserved != "" {
 		var list []interface{}
@@ -230,9 +224,112 @@ func convertWireGuard(node NodeConfig, tag string) (map[string]interface{}, erro
 			}
 		}
 		if len(list) > 0 {
-			ob["reserved"] = list
+			peerObj["reserved"] = list
 		}
 	}
+	if keepalive := node.Extra["persistent_keepalive_interval"]; keepalive != "" {
+		if n, err := strconv.Atoi(keepalive); err == nil && n > 0 {
+			peerObj["persistent_keepalive_interval"] = n
+		}
+	}
+
+	ep := map[string]interface{}{
+		"type":        "wireguard",
+		"tag":         tag,
+		"private_key": priv,
+		"peers":       []interface{}{peerObj},
+	}
+
+	// local_address → address (endpoint 本地 IP, wireguard 强制要求)
+	if addr := node.Extra["local_address"]; addr != "" {
+		var list []interface{}
+		for _, a := range strings.Split(addr, ",") {
+			a = strings.TrimSpace(a)
+			if a != "" {
+				list = append(list, a)
+			}
+		}
+		if len(list) > 0 {
+			ep["address"] = list
+		}
+	}
+	if mtu := node.Extra["mtu"]; mtu != "" {
+		if n, err := strconv.Atoi(mtu); err == nil {
+			ep["mtu"] = n
+		}
+	}
+	return ep, nil
+}
+
+// convertSSH 将 SSH 节点转为 sing-box outbound (Phase 9 A2)。
+// Schema 依据: sing-box v1.13.8 `option/ssh.go:SSHOutboundOptions`。
+func convertSSH(node NodeConfig, tag string) (map[string]interface{}, error) {
+	if node.Server == "" || node.Port == 0 {
+		return nil, fmt.Errorf("SSH 节点缺少必要字段: server=%s port=%d", node.Server, node.Port)
+	}
+	user := node.Extra["user"]
+	if user == "" {
+		return nil, fmt.Errorf("SSH 节点缺 user")
+	}
+	ob := map[string]interface{}{
+		"type":        "ssh",
+		"tag":         tag,
+		"server":      node.Server,
+		"server_port": node.Port,
+		"user":        user,
+	}
+	if node.Password != "" {
+		ob["password"] = node.Password
+	}
+	for _, k := range []string{"private_key", "private_key_path", "private_key_passphrase",
+		"host_key", "host_key_algorithms", "client_version"} {
+		if v := node.Extra[k]; v != "" {
+			// private_key / host_key / host_key_algorithms 在 sing-box schema 里是 Listable[string]
+			// 简化: 用户给单行就用 []string{v} 包一层, 多行用 ";" 分隔
+			if k == "private_key" || k == "host_key" || k == "host_key_algorithms" {
+				parts := strings.Split(v, ";")
+				list := make([]interface{}, 0, len(parts))
+				for _, p := range parts {
+					if p = strings.TrimSpace(p); p != "" {
+						list = append(list, p)
+					}
+				}
+				ob[k] = list
+			} else {
+				ob[k] = v
+			}
+		}
+	}
+	return ob, nil
+}
+
+// convertNaive 将 Naive 节点转为 sing-box outbound (Phase 9 A3)。
+// Schema 依据: sing-box v1.13.8 `protocol/naive/outbound.go:NaiveOutboundOptions`。
+// 构建需要 `with_naive_outbound` build tag, 见 scripts/build-aar.sh。
+func convertNaive(node NodeConfig, tag string) (map[string]interface{}, error) {
+	if node.Server == "" || node.Port == 0 {
+		return nil, fmt.Errorf("Naive 节点缺 server/port: server=%s port=%d", node.Server, node.Port)
+	}
+	username := node.Extra["username"]
+	if username == "" {
+		return nil, fmt.Errorf("Naive 节点缺 username")
+	}
+	ob := map[string]interface{}{
+		"type":        "naive",
+		"tag":         tag,
+		"server":      node.Server,
+		"server_port": node.Port,
+		"username":    username,
+		"password":    node.Password,
+	}
+	// Naive 默认 HTTPS CONNECT, 必须开 TLS
+	tls := map[string]interface{}{"enabled": true}
+	if sni := node.SNI; sni != "" {
+		tls["server_name"] = sni
+	} else {
+		tls["server_name"] = node.Server
+	}
+	ob["tls"] = tls
 	return ob, nil
 }
 
