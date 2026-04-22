@@ -68,12 +68,14 @@ func ClassifyTask(input string) TaskPlan {
 		}
 	}
 
-	// 无法分类：走全部三个（保险）
+	// 无法分类：默认只走 Diagnose（只读、最短路径）。
+	// 之前默认走全 3 阶段, 对聊天类/含糊查询产出 3 倍长的无关输出;
+	// 用户反馈 "回答太长" 后改为只读单阶段, 若用户确实想改配置会用明确动作词命中 Configure 路径。
 	return TaskPlan{
 		NeedDiagnose:  true,
-		NeedConfigure: true,
-		NeedVerify:    true,
-		Reason:        "未分类，走完整流程",
+		NeedConfigure: false,
+		NeedVerify:    false,
+		Reason:        "未分类，默认只诊断（最短路径）",
 	}
 }
 
