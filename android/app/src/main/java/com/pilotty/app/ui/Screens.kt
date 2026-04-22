@@ -1,5 +1,11 @@
 package com.pilotty.app.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -84,6 +90,59 @@ class ChatViewModel : ViewModel() {
     fun clear() {
         PilottyRepository.clearHistory()
         _state.value = ChatUi()
+    }
+}
+
+/**
+ * sending=true 时的占位气泡 (Phase 7.2)。 解决用户反馈 "发了之后没反应" —— 非流式下
+ * LLM 往返 5-10s 完全黑屏, 加一个 assistant-side 气泡 + 3 点波浪动画, 让用户看到 "正在工作"。
+ * Phase 7.3 流式上线后本气泡会被"逐字涌出的空气泡"替代, 但两者并存也 OK。
+ */
+@Composable
+private fun PendingBubble() {
+    val pc = LocalPilottyColors.current
+    val transition = rememberInfiniteTransition(label = "pending-dots")
+    val t by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "dot-phase",
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Start,
+    ) {
+        Surface(
+            color = pc.surface2,
+            shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Text(
+                    "正在思考",
+                    color = pc.ink3,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 0.3.sp,
+                )
+                // 3 点波浪: 当前活跃索引按 t 循环 (0→1→2), 其余点淡化
+                val active = t.toInt().coerceIn(0, 2)
+                repeat(3) { idx ->
+                    Box(
+                        modifier = Modifier
+                            .size(5.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(if (idx == active) pc.ink else pc.ink4),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -203,7 +262,14 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column {
-                Text("Agent", color = pc.ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.15).sp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text("Agent", color = pc.ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.15).sp)
+                    // sending=true 时顶部叠 LiveDot, 让用户在滚到底之外也能看到 "Agent 正在工作"
+                    if (ui.sending) LiveDot()
+                }
                 Text(
                     "deepseek-chat · ${ui.messages.count { it.role == "user" }} msgs",
                     color = pc.ink3,
@@ -260,6 +326,12 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                     }
                 }
             }
+            // sending 占位气泡 (Phase 7.2): 点送出后立刻渲染, LLM 到达后 ChatViewModel.send
+            // 把真 assistant 消息 append 到 messages + sending=false, 本 item 自动移除
+            if (ui.sending) {
+                item { PendingBubble() }
+            }
+
             // 错误气泡: 不再用顶部红色 banner 遮挡消息, 改成 assistant 样式靠左的红色描边气泡,
             // 跟随消息一起滚动 (Phase 4 修复: 原先在 LazyColumn 上方导致消息被顶下去)
             ui.error?.let { errText ->
