@@ -115,10 +115,18 @@ fun PilottyApp(
     // Nodes 测速等场景 ViewModel 层需要拉起 VPN, 但 VpnService.prepare 要 Activity-scope
     // launcher, 这里 collect StartVpnBus 的一次性请求转给 onStartVpn (现有链路)。
     LaunchedEffect(Unit) {
-        StartVpnBus.requests.collect { onStartVpn() }
+        Log.i("MainActivity", "StartVpnBus collector attached")
+        StartVpnBus.requests.collect {
+            Log.i("MainActivity", "StartVpnBus → onStartVpn")
+            onStartVpn()
+        }
     }
     LaunchedEffect(Unit) {
-        com.pilotty.app.vpn.StopVpnBus.requests.collect { onStopVpn() }
+        Log.i("MainActivity", "StopVpnBus collector attached")
+        com.pilotty.app.vpn.StopVpnBus.requests.collect {
+            Log.i("MainActivity", "StopVpnBus → onStopVpn")
+            onStopVpn()
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {

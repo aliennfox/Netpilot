@@ -1,5 +1,6 @@
 package com.pilotty.app.vpn
 
+import android.util.Log
 import com.pilotty.app.PilottyCore
 import mobile.VpnControlCallback
 
@@ -21,11 +22,15 @@ import mobile.VpnControlCallback
  * 注入位置: PilottyApp.onCreate, PilottyCore.init 之后。
  */
 object VpnControlImpl : VpnControlCallback {
+    private const val TAG = "VpnControlImpl"
+
     override fun requestStart() {
+        Log.i(TAG, "requestStart → StartVpnBus")
         StartVpnBus.request()
     }
 
     override fun requestStop() {
+        Log.i(TAG, "requestStop → StopVpnBus")
         StopVpnBus.request()
     }
 

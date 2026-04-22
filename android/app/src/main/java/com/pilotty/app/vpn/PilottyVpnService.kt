@@ -148,6 +148,7 @@ class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerH
     // ──────────────── Service 生命周期 ─────────────────
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.i(TAG, "onStartCommand action=${intent?.action} flags=$flags startId=$startId")
         when (intent?.action) {
             ACTION_STOP -> {
                 stopService()
@@ -222,6 +223,14 @@ class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerH
         runCatching { pfd?.close() }
         pfd = null
         runCatching { DefaultNetworkMonitor.unregister() }
+        // Android 12+: 没有 stopForeground 前台服务会 linger, dumpsys 里 ServiceRecord 仍可见,
+        // VPN key 状态栏图标不消失。 必须显式调这个才真正释放 foreground + 通知。
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
         PilottyCore.markTunRunning(false)
     }
 

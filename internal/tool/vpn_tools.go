@@ -65,48 +65,61 @@ func RegisterVpnTools(ctrl VpnController) map[string]*ToolDef {
 	}
 }
 
-// toolTestLatencyAllAutoVpn 包装 test_latency_all: VPN 未启动时自动请求启动 + 等就绪 + 延迟
-// 1.5s warm-up 后走 Clash API 真测。 总最长 ~17s (15s VPN 启动 + 1.5s warm + 实测)。
+// toolTestLatencyAllAutoVpn 包装 test_latency_all: VPN 未启动时自动 "偷偷" 启动 → 测 → 恢复原状。
+// 原状 = 测前 VPN 状态: 若测前 VPN 是关的, 测完自动关; 若测前 VPN 已开, 测完仍开。
+// 开不开 VPN 的主权归用户, 测速只是暂时借用。
 func toolTestLatencyAllAutoVpn(ctrl VpnController) *ToolDef {
 	return &ToolDef{
 		Name:        "test_latency_all",
-		Description: "Test latency of all proxy nodes. Auto-starts VPN if not running (blocks ~5-10s for libbox bootstrap on first run).",
+		Description: "Test latency of all proxy nodes via proxy tunnel. Silently toggles VPN if off and restores original state.",
 		IsWriteOp:   false,
 		Execute: func(ctx context.Context, a engine.EngineAdapter, params map[string]interface{}) (*ToolResult, error) {
-			if err := ensureVpnReadyForMeasure(ctrl); err != nil {
+			cleanup, err := ensureVpnReadyForMeasure(ctrl)
+			if err != nil {
 				return &ToolResult{Success: false, Message: err.Error()}, nil
 			}
+			defer cleanup()
 			return invokeBaseTestLatencyAll(ctx, a, params)
 		},
 	}
 }
 
-// toolTestLatencyAutoVpn 包装 test_latency: 同上自动启动 VPN。
+// toolTestLatencyAutoVpn 包装 test_latency: 同上, 偷偷测 + 恢复原状。
 func toolTestLatencyAutoVpn(ctrl VpnController) *ToolDef {
 	return &ToolDef{
 		Name:        "test_latency",
-		Description: "Test latency of a single node (params: tag). Auto-starts VPN if not running.",
+		Description: "Test latency of a single node (params: tag) via proxy tunnel. Silently toggles VPN if off and restores.",
 		IsWriteOp:   false,
 		Execute: func(ctx context.Context, a engine.EngineAdapter, params map[string]interface{}) (*ToolResult, error) {
-			if err := ensureVpnReadyForMeasure(ctrl); err != nil {
+			cleanup, err := ensureVpnReadyForMeasure(ctrl)
+			if err != nil {
 				return &ToolResult{Success: false, Message: err.Error()}, nil
 			}
+			defer cleanup()
 			return invokeBaseTestLatency(ctx, a, params)
 		},
 	}
 }
 
-// ensureVpnReadyForMeasure 测速前的共享 VPN 就绪逻辑: 请求启动 → 等最长 15s → warm-up 1.5s。
-func ensureVpnReadyForMeasure(ctrl VpnController) error {
+// ensureVpnReadyForMeasure 测速前共享 VPN 就绪逻辑 + 返回 cleanup 函数恢复原状。
+//
+// 返回值语义:
+//   - cleanup == 空操作: VPN 测前就是开的, 不该关
+//   - cleanup == RequestStop: 测前是关的, 测完关掉还给用户原状态
+//
+// err != nil 时 cleanup 仍然返回 noop, 调用方 defer 安全。
+func ensureVpnReadyForMeasure(ctrl VpnController) (cleanup func(), err error) {
+	noop := func() {}
 	if ctrl.IsRunning() {
-		return nil
+		return noop, nil // 用户自己开着, 不碰
 	}
-	if err := WaitVpnReady(ctrl, 15*time.Second); err != nil {
-		return fmt.Errorf("VPN 未启动且自动拉起失败: %v", err)
+	if e := WaitVpnReady(ctrl, 15*time.Second); e != nil {
+		return noop, fmt.Errorf("VPN 未启动且自动拉起失败: %v", e)
 	}
 	// libbox 启动后 Clash API 需 1-2s 才真正响应 /proxies/<tag>/delay; 加短延时避免首发请求撞空。
 	time.Sleep(1500 * time.Millisecond)
-	return nil
+	// 我们拉起来的, 定义 cleanup 关掉以恢复原状。
+	return func() { _ = ctrl.RequestStop() }, nil
 }
 
 // toolStartVpn 启动 VPN 数据面 (Android: VpnService + libbox TUN)。

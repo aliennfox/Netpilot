@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -157,6 +158,10 @@ func invokeBaseTestLatency(ctx context.Context, a engine.EngineAdapter, params m
 }
 
 // invokeBaseTestLatencyAll 是 test_latency_all 的核心逻辑, 共享给 auto-VPN 包装。
+//
+// 输出格式 (monospace 友好): [tag 左对齐 到最长 tag 宽度] [latency/timeout 右对齐到 7 宽]。
+// latency 用 "500ms"/"1234ms", timeout 统一写 "timeout" (都是 ASCII, 避免 CJK 宽度问题)。
+// ✓/✗ 尾随标记, 便于 LLM 透传给用户 (Monospace UI 下列能对齐)。
 func invokeBaseTestLatencyAll(ctx context.Context, a engine.EngineAdapter, params map[string]interface{}) (*ToolResult, error) {
 	proxies, err := a.GetProxies()
 	if err != nil {
@@ -178,15 +183,27 @@ func invokeBaseTestLatencyAll(ctx context.Context, a engine.EngineAdapter, param
 		return li > 0
 	})
 
-	out := ""
+	maxTagLen := 0
 	for _, r := range results {
-		if r.Latency > 0 {
-			out += fmt.Sprintf("  %-20s %4dms  \033[32m✓\033[0m\n", r.Tag, r.Latency)
-		} else {
-			out += fmt.Sprintf("  %-20s 超时    \033[31m✗\033[0m\n", r.Tag)
+		if l := len(r.Tag); l > maxTagLen {
+			maxTagLen = l
 		}
 	}
-	return &ToolResult{Success: true, Message: out}, nil
+
+	var b strings.Builder
+	for _, r := range results {
+		var lat, mark string
+		if r.Latency > 0 {
+			lat = fmt.Sprintf("%dms", r.Latency) // "500ms" / "1234ms"
+			mark = "\033[32m✓\033[0m"
+		} else {
+			lat = "timeout"
+			mark = "\033[31m✗\033[0m"
+		}
+		// tag 左对齐到 maxTagLen; latency 右对齐到 7 列 (够 "XXXXms"/"timeout")
+		b.WriteString(fmt.Sprintf("%-*s  %7s  %s\n", maxTagLen, r.Tag, lat, mark))
+	}
+	return &ToolResult{Success: true, Message: b.String()}, nil
 }
 
 // --- Write tools ---
