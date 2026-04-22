@@ -3,9 +3,35 @@ package tool
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/foxnetpilot/netpilot/internal/engine"
 )
+
+// WaitVpnReady 轮询 ctrl.IsRunning 直到 true 或超时。 用于 Clash-API-dependent 的 tools
+// 在 VPN 未启动时 "请求启动 + 等就绪 + 继续操作" 模式 —— 跟 Nodes tab testAll 对齐。
+//
+// 返回 nil 表示 VPN 已就绪; 返回 error 表示超时或控制未接入。
+// 调用方拿到 nil 后建议再 sleep 1-2s 等 Clash API 真正接受请求 (libbox 起来后还需 warm-up)。
+func WaitVpnReady(ctrl VpnController, totalTimeout time.Duration) error {
+	if ctrl == nil {
+		return fmt.Errorf("VPN 控制未接入")
+	}
+	if ctrl.IsRunning() {
+		return nil
+	}
+	if err := ctrl.RequestStart(); err != nil {
+		return fmt.Errorf("请求启动 VPN 失败: %w", err)
+	}
+	deadline := time.Now().Add(totalTimeout)
+	for time.Now().Before(deadline) {
+		time.Sleep(500 * time.Millisecond)
+		if ctrl.IsRunning() {
+			return nil
+		}
+	}
+	return fmt.Errorf("等待 VPN 就绪超时 (%.0fs)", totalTimeout.Seconds())
+}
 
 // VpnController 是 start_vpn / stop_vpn / vpn_status 三个工具需要的平台侧控制接口。
 // mobile/netpilot.go 提供实现 (通过 gomobile reverse-binding callback 转给 Kotlin)。
@@ -22,14 +48,65 @@ type VpnController interface {
 	IsRunning() bool
 }
 
-// RegisterVpnTools 构造三个 VPN 生命周期工具。
-// ctrl 不能为 nil; 调用方若还没接入平台层, 应传一个返回 error 的占位实现而非 nil。
+// RegisterVpnTools 构造 VPN 生命周期工具 + 依赖 VPN 的测速工具。
+//
+// test_latency / test_latency_all 在此被覆盖为 "自动等 VPN 就绪再测" 的版本,
+// 对齐 Nodes tab testAll 的行为 —— 用户反馈 Agent 测速不该因 VPN 没开就拒绝,
+// 要自动把 VPN 拉起来再真测 (这样数字也与 VPN 开启后一致, 避免 TCP ping 失真)。
+//
+// ctrl 不能为 nil; 调用方若还没接入平台层, 传返回 error 的占位实现而非 nil。
 func RegisterVpnTools(ctrl VpnController) map[string]*ToolDef {
 	return map[string]*ToolDef{
-		"start_vpn":  toolStartVpn(ctrl),
-		"stop_vpn":   toolStopVpn(ctrl),
-		"vpn_status": toolVpnStatus(ctrl),
+		"start_vpn":        toolStartVpn(ctrl),
+		"stop_vpn":         toolStopVpn(ctrl),
+		"vpn_status":       toolVpnStatus(ctrl),
+		"test_latency":     toolTestLatencyAutoVpn(ctrl),
+		"test_latency_all": toolTestLatencyAllAutoVpn(ctrl),
 	}
+}
+
+// toolTestLatencyAllAutoVpn 包装 test_latency_all: VPN 未启动时自动请求启动 + 等就绪 + 延迟
+// 1.5s warm-up 后走 Clash API 真测。 总最长 ~17s (15s VPN 启动 + 1.5s warm + 实测)。
+func toolTestLatencyAllAutoVpn(ctrl VpnController) *ToolDef {
+	return &ToolDef{
+		Name:        "test_latency_all",
+		Description: "Test latency of all proxy nodes. Auto-starts VPN if not running (blocks ~5-10s for libbox bootstrap on first run).",
+		IsWriteOp:   false,
+		Execute: func(ctx context.Context, a engine.EngineAdapter, params map[string]interface{}) (*ToolResult, error) {
+			if err := ensureVpnReadyForMeasure(ctrl); err != nil {
+				return &ToolResult{Success: false, Message: err.Error()}, nil
+			}
+			return invokeBaseTestLatencyAll(ctx, a, params)
+		},
+	}
+}
+
+// toolTestLatencyAutoVpn 包装 test_latency: 同上自动启动 VPN。
+func toolTestLatencyAutoVpn(ctrl VpnController) *ToolDef {
+	return &ToolDef{
+		Name:        "test_latency",
+		Description: "Test latency of a single node (params: tag). Auto-starts VPN if not running.",
+		IsWriteOp:   false,
+		Execute: func(ctx context.Context, a engine.EngineAdapter, params map[string]interface{}) (*ToolResult, error) {
+			if err := ensureVpnReadyForMeasure(ctrl); err != nil {
+				return &ToolResult{Success: false, Message: err.Error()}, nil
+			}
+			return invokeBaseTestLatency(ctx, a, params)
+		},
+	}
+}
+
+// ensureVpnReadyForMeasure 测速前的共享 VPN 就绪逻辑: 请求启动 → 等最长 15s → warm-up 1.5s。
+func ensureVpnReadyForMeasure(ctrl VpnController) error {
+	if ctrl.IsRunning() {
+		return nil
+	}
+	if err := WaitVpnReady(ctrl, 15*time.Second); err != nil {
+		return fmt.Errorf("VPN 未启动且自动拉起失败: %v", err)
+	}
+	// libbox 启动后 Clash API 需 1-2s 才真正响应 /proxies/<tag>/delay; 加短延时避免首发请求撞空。
+	time.Sleep(1500 * time.Millisecond)
+	return nil
 }
 
 // toolStartVpn 启动 VPN 数据面 (Android: VpnService + libbox TUN)。

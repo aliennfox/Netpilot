@@ -50,7 +50,7 @@ func (a *SingBoxAdapter) SetConfigPath(path string) {
 func (a *SingBoxAdapter) GetProxies() ([]ProxyInfo, error) {
 	resp, err := a.httpClient.Get(a.baseURL + "/proxies")
 	if err != nil {
-		return nil, fmt.Errorf("clash API unreachable: %w", err)
+		return nil, fmt.Errorf("代理控制通道不可达 (VPN 未启动): %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -79,7 +79,7 @@ func (a *SingBoxAdapter) GetProxies() ([]ProxyInfo, error) {
 func (a *SingBoxAdapter) GetProxyGroup(groupTag string) (*ProxyGroup, error) {
 	resp, err := a.httpClient.Get(a.baseURL + "/proxies/" + url.PathEscape(groupTag))
 	if err != nil {
-		return nil, fmt.Errorf("clash API unreachable: %w", err)
+		return nil, fmt.Errorf("代理控制通道不可达 (VPN 未启动): %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -170,7 +170,7 @@ func (a *SingBoxAdapter) SetActiveProxy(groupTag, proxyTag string) error {
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("clash API unreachable: %w", err)
+		return fmt.Errorf("代理控制通道不可达 (VPN 未启动): %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -216,7 +216,7 @@ func (a *SingBoxAdapter) TestLatency(proxyTag string, testURL string, timeout ti
 func (a *SingBoxAdapter) GetConnections() ([]ConnectionInfo, error) {
 	resp, err := a.httpClient.Get(a.baseURL + "/connections")
 	if err != nil {
-		return nil, fmt.Errorf("clash API unreachable: %w", err)
+		return nil, fmt.Errorf("代理控制通道不可达 (VPN 未启动): %w", err)
 	}
 	defer resp.Body.Close()
 

@@ -127,20 +127,7 @@ func toolTestLatency() *ToolDef {
 		Name:        "test_latency",
 		Description: "Test latency of a single proxy node",
 		IsWriteOp:   false,
-		Execute: func(ctx context.Context, a engine.EngineAdapter, params map[string]interface{}) (*ToolResult, error) {
-			tag, _ := params["tag"].(string)
-			if tag == "" {
-				return nil, fmt.Errorf("missing param: tag")
-			}
-			ms, err := a.TestLatency(tag, "https://www.gstatic.com/generate_204", 5*time.Second)
-			if err != nil {
-				return nil, err
-			}
-			return &ToolResult{
-				Success: true,
-				Message: fmt.Sprintf("%s: %dms\n", tag, ms),
-			}, nil
-		},
+		Execute:     invokeBaseTestLatency,
 	}
 }
 
@@ -149,38 +136,57 @@ func toolTestLatencyAll() *ToolDef {
 		Name:        "test_latency_all",
 		Description: "Test latency of all real proxy nodes concurrently",
 		IsWriteOp:   false,
-		Execute: func(ctx context.Context, a engine.EngineAdapter, params map[string]interface{}) (*ToolResult, error) {
-			proxies, err := a.GetProxies()
-			if err != nil {
-				return nil, fmt.Errorf("获取节点列表失败: %w", err)
-			}
-			nodes := filterRealNodes(proxies)
-			if len(nodes) == 0 {
-				return &ToolResult{Success: true, Message: "没有可测试的节点。\n"}, nil
-			}
-
-			fmt.Println("\033[36m正在测试所有节点...\033[0m")
-			results := concurrentLatencyTest(a, nodes)
-
-			sort.Slice(results, func(i, j int) bool {
-				li, lj := results[i].Latency, results[j].Latency
-				if li > 0 && lj > 0 {
-					return li < lj
-				}
-				return li > 0
-			})
-
-			out := ""
-			for _, r := range results {
-				if r.Latency > 0 {
-					out += fmt.Sprintf("  %-20s %4dms  \033[32m✓\033[0m\n", r.Tag, r.Latency)
-				} else {
-					out += fmt.Sprintf("  %-20s 超时    \033[31m✗\033[0m\n", r.Tag)
-				}
-			}
-			return &ToolResult{Success: true, Message: out}, nil
-		},
+		Execute:     invokeBaseTestLatencyAll,
 	}
+}
+
+// invokeBaseTestLatency 是 test_latency 的核心逻辑, 被 CLI 和 mobile (含 auto-VPN 包装) 共享。
+func invokeBaseTestLatency(ctx context.Context, a engine.EngineAdapter, params map[string]interface{}) (*ToolResult, error) {
+	tag, _ := params["tag"].(string)
+	if tag == "" {
+		return nil, fmt.Errorf("missing param: tag")
+	}
+	ms, err := a.TestLatency(tag, "https://www.gstatic.com/generate_204", 5*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	return &ToolResult{
+		Success: true,
+		Message: fmt.Sprintf("%s: %dms\n", tag, ms),
+	}, nil
+}
+
+// invokeBaseTestLatencyAll 是 test_latency_all 的核心逻辑, 共享给 auto-VPN 包装。
+func invokeBaseTestLatencyAll(ctx context.Context, a engine.EngineAdapter, params map[string]interface{}) (*ToolResult, error) {
+	proxies, err := a.GetProxies()
+	if err != nil {
+		return nil, fmt.Errorf("获取节点列表失败: %w", err)
+	}
+	nodes := filterRealNodes(proxies)
+	if len(nodes) == 0 {
+		return &ToolResult{Success: true, Message: "没有可测试的节点。\n"}, nil
+	}
+
+	fmt.Println("\033[36m正在测试所有节点...\033[0m")
+	results := concurrentLatencyTest(a, nodes)
+
+	sort.Slice(results, func(i, j int) bool {
+		li, lj := results[i].Latency, results[j].Latency
+		if li > 0 && lj > 0 {
+			return li < lj
+		}
+		return li > 0
+	})
+
+	out := ""
+	for _, r := range results {
+		if r.Latency > 0 {
+			out += fmt.Sprintf("  %-20s %4dms  \033[32m✓\033[0m\n", r.Tag, r.Latency)
+		} else {
+			out += fmt.Sprintf("  %-20s 超时    \033[31m✗\033[0m\n", r.Tag)
+		}
+	}
+	return &ToolResult{Success: true, Message: out}, nil
 }
 
 // --- Write tools ---
