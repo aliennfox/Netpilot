@@ -112,7 +112,9 @@ class HomeViewModel : ViewModel() {
                     .onSuccess { _state.value = _state.value.copy(trafficSamples = it) }
             }
         }
-        // 2s connections count 采样 — 驱动 Connections tile Sparkline, 滑动窗口 60 点
+        // 2s connections 采样 — 驱动 Connections tile Sparkline + status 字段刷新
+        // (Connections tile 数字读 ui.status?.connections, status 只在 refresh() 里
+        //  拉一次永远冻结, 所以同一个协程里顺手刷下 status)
         viewModelScope.launch {
             while (true) {
                 delay(2000)
@@ -122,6 +124,10 @@ class HomeViewModel : ViewModel() {
                         val hist = (_state.value.connectionsHistory + conns.size).takeLast(60)
                         _state.value = _state.value.copy(connectionsHistory = hist)
                     }
+                // 顺带刷 status (current_node / mode / connections count / upload/download 累计)
+                // 不用独立协程避免两个 poll 打架, 2s 频率对 Telemetry 够了
+                runCatching { PilottyRepository.status() }
+                    .onSuccess { _state.value = _state.value.copy(status = it) }
             }
         }
         // 5s latency + active proto 采样 — 驱动 Latency Sparkline + ActiveNode ProtoBadge
@@ -141,6 +147,19 @@ class HomeViewModel : ViewModel() {
                             )
                         }
                     }
+            }
+        }
+        // 30s 主动测速 current node — sing-box 不会自动持续测延迟, /proxies/<tag>/delay
+        // 必须显式调用才会发真实 HTTP 请求测, 结果写入 Clash API 缓存供 nodes() 下次拉取
+        // 频率 30s 权衡: 太频 (< 10s) 会白烧流量; 太疏 (> 60s) Latency Sparkline 平线感明显
+        viewModelScope.launch {
+            while (true) {
+                delay(30_000)
+                if (!_state.value.tunRunning) continue
+                val currentTag = _state.value.status?.currentNode ?: continue
+                if (currentTag.isEmpty()) continue
+                runCatching { PilottyRepository.testLatency(currentTag) }
+                // 结果异步, 下一次 5s nodes() poll 会捞到新 latency 值塞进 latencyHistory
             }
         }
     }
@@ -265,7 +284,7 @@ fun HomeScreen(
             Box(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp)) {
                 ActiveNodeCard(
                     nodeName = ui.status?.currentNode?.ifEmpty { "未连接" } ?: "未连接",
-                    latency = parseLatencyMs(ui.status),
+                    latency = ui.latencyHistory.lastOrNull() ?: 0,
                     running = ui.tunRunning,
                     isConnecting = ui.isConnecting,
                     mode = (ui.status?.mode ?: "rule").uppercase(),
@@ -295,9 +314,10 @@ fun HomeScreen(
                 ) {
                     val latSeries = ui.latencyHistory.map { it.toFloat() }
                     val p95 = computeP95(ui.latencyHistory)
+                    val lastLat = ui.latencyHistory.lastOrNull() ?: 0
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
-                            text = parseLatencyMs(ui.status).toString(),
+                            text = lastLat.toString(),
                             color = pc.ink,
                             fontSize = 24.sp,
                             fontWeight = FontWeight.Bold,
@@ -904,12 +924,9 @@ private fun formatClockTime(ts: String): String {
 
 /* ---------- 小工具 ---------- */
 
-private fun parseLatencyMs(s: StatusDto?): Int {
-    // StatusDto 的 currentNode 格式 "TAG · Xms" — 只提数字
-    val raw = s?.currentNode ?: return 0
-    val m = Regex("(\\d+)\\s*ms").find(raw) ?: return 42
-    return m.groupValues[1].toIntOrNull() ?: 42
-}
+// parseLatencyMs 删 — 历史 bug: Go 侧 status.currentNode 只是 tag 名 (如 "RN-San-Jose-VLESS"),
+// 不含 "Xms" 后缀, regex 永远 miss → 永远返回默认 42。 UI 现在直接读
+// ui.latencyHistory.lastOrNull() (由 5s nodes() poll 填充, 30s testLatency 真测速触发更新)
 
 private fun guessCountryCode(name: String): String {
     val lower = name.lowercase()
