@@ -212,7 +212,12 @@ func NewClient(dataDir, clashAPIAddr, apiKey string) *Client {
 	// Phase 8: 注册 VPN 生命周期 tools, 用 clientVpnAdapter 间接读 c.vpnControl。
 	// Kotlin 在 PilottyApp.onCreate 里 SetVpnControl 注入真实 callback, 之前这些 tool 调用
 	// 会返回 "VPN 控制未接入" 错误 (nil-guard)。
-	pipeline.RegisterExtraTools(tool.RegisterVpnTools(&clientVpnAdapter{client: c}))
+	vpnAdapter := &clientVpnAdapter{client: c}
+	pipeline.RegisterExtraTools(tool.RegisterVpnTools(vpnAdapter))
+	// Phase 10-D: 同一个 VpnController 同时注入给 localEngine, 让"开启 vpn"
+	// 的 keyword 本地路由 (绕过 LLM) 可用。 关键:LLM API 自己需要 VPN 才能访问,
+	// 所以必须有本地闭环路径, 否则撞鸡生蛋死循环。
+	localEngine.SetVpnController(vpnAdapter)
 
 	// Phase 9 B1: 启动流量采样 goroutine。 1Hz poll, VPN 未运行/Clash API 不可达时静默跳过。
 	c.trafficOnce.Do(func() {

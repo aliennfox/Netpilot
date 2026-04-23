@@ -17,6 +17,7 @@ type Engine struct {
 	overlay   *overlay.ConfigOverlay
 	templates *template.TemplateStore
 	subMgr    *subscription.SubscriptionManager
+	vpnCtrl   tool.VpnController // 平台侧注入; nil 时 start_vpn/stop_vpn 返回 "未接入" 错误 (和 Agent tool 对齐)
 	actions   map[string]ActionFunc
 	groupTag  string // the primary selector group tag
 }
@@ -53,6 +54,11 @@ func NewEngine(adapter engine.EngineAdapter, pipeline *tool.ToolPipeline, primar
 		"set_dns_mode":        e.setDNSMode,
 		"live_connections":    e.liveConnections,
 		"show_connections":    e.showConnections,
+		// Phase 10-D: 本地路径的 VPN 生命周期, 绕过 LLM 走 VpnController, 解决"没开 VPN 时
+		// LLM API 根本连不上 → chat 叫它开 VPN 做不到"这种鸡生蛋 UX 死循环。
+		"start_vpn":  e.startVpn,
+		"stop_vpn":   e.stopVpn,
+		"vpn_status": e.vpnStatus,
 	}
 	return e
 }
@@ -70,6 +76,12 @@ func (e *Engine) SetTemplates(ts *template.TemplateStore) {
 // SetSubscriptionManager 设置订阅管理器
 func (e *Engine) SetSubscriptionManager(mgr *subscription.SubscriptionManager) {
 	e.subMgr = mgr
+}
+
+// SetVpnController 由平台层注入 (Android: PilottyApp 经 mobile.Client 转发的 clientVpnAdapter)。
+// 注入前 start_vpn / stop_vpn action 返回清晰错误 — 和 Agent tool 的 nil-guard 对齐。
+func (e *Engine) SetVpnController(ctrl tool.VpnController) {
+	e.vpnCtrl = ctrl
 }
 
 func (e *Engine) Execute(actionID string, params map[string]string) (string, error) {

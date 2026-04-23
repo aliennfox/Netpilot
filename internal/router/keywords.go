@@ -102,4 +102,23 @@ var KeywordMap = map[string][]string{
 	"show_history": {
 		"对话记录", "聊天记录", "/history",
 	},
+
+	// Phase 10-D: VPN 生命周期的本地快捷路由, 不经 LLM / Clash API。
+	// 重要: LLM API 本身需要 VPN 才能访问 (硅基流动在墙外), 所以 "开启 vpn" 必须本地闭环,
+	// 否则会撞 "Chat 叫它开 VPN 做不到,但又因为没开 VPN 根本联不上 LLM" 的鸡生蛋循环。
+	// 关键词覆盖带/不带空格两种写法 (substring 匹配) 和 中英双语。
+	"start_vpn": {
+		"开启vpn", "开启 vpn", "打开vpn", "打开 vpn", "启动vpn", "启动 vpn",
+		"开 vpn", "开vpn", "连vpn", "连 vpn", "连接vpn", "连接 vpn",
+		"turn on vpn", "start vpn", "enable vpn", "开启VPN", "打开VPN", "启动VPN",
+	},
+	"stop_vpn": {
+		"关闭vpn", "关闭 vpn", "停止vpn", "停止 vpn", "断开vpn", "断开 vpn",
+		"关vpn", "关 vpn", "停vpn", "停 vpn", "关掉vpn", "关掉 vpn",
+		"turn off vpn", "stop vpn", "disable vpn", "disconnect vpn",
+	},
+	"vpn_status": {
+		"vpn状态", "vpn 状态", "vpn在吗", "vpn 在吗", "vpn运行", "vpn 运行",
+		"vpn running", "vpn status", "is vpn on",
+	},
 }

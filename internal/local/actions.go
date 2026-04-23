@@ -13,6 +13,7 @@ import (
 	"github.com/foxnetpilot/netpilot/internal/engine"
 	"github.com/foxnetpilot/netpilot/internal/monitor"
 	"github.com/foxnetpilot/netpilot/internal/overlay"
+	"github.com/foxnetpilot/netpilot/internal/tool"
 )
 
 // groupTypes are proxy group types (not real nodes).
@@ -225,6 +226,53 @@ func (e *Engine) doRollback(params map[string]string) (string, error) {
 
 func (e *Engine) showTelemetry(_ map[string]string) (string, error) {
 	return e.pipeline.Telemetry().FormatRecent(10), nil
+}
+
+// startVpn Phase 10-D: 本地路径开启 VPN, 绕过 LLM / Clash API。
+// 使用场景: 用户在 chat 里说 "开启 vpn" —— LLM 本身需要 VPN 才能联网 (硅基流动在墙外),
+// 所以必须有纯本地、零网络依赖的 start 路径。 实际底层是 tool.VpnController, 和
+// Agent start_vpn tool 共用同一个 clientVpnAdapter 实例, 行为一致。
+func (e *Engine) startVpn(_ map[string]string) (string, error) {
+	if e.vpnCtrl == nil {
+		return "", fmt.Errorf("VPN 控制未接入 (平台层 SetVpnController 未调用)")
+	}
+	if e.vpnCtrl.IsRunning() {
+		return "VPN 已经在运行。", nil
+	}
+	// 首次启动会经过 VpnService.prepare() 系统授权弹框, 超时 6 秒足够
+	if err := tool.WaitVpnReady(e.vpnCtrl, 6*time.Second); err != nil {
+		// 授权是用户手动确认的, 等不到不代表坏 — 降级为"已发送请求"消息
+		if e.vpnCtrl.IsRunning() {
+			return "VPN 已启动。", nil
+		}
+		return "启动请求已发送。 若首次使用, 请在系统弹出的授权框里点允许; VPN 约 3-5 秒后就绪。", nil
+	}
+	return "VPN 已启动。", nil
+}
+
+// stopVpn Phase 10-D: 本地路径关闭 VPN
+func (e *Engine) stopVpn(_ map[string]string) (string, error) {
+	if e.vpnCtrl == nil {
+		return "", fmt.Errorf("VPN 控制未接入 (平台层 SetVpnController 未调用)")
+	}
+	if !e.vpnCtrl.IsRunning() {
+		return "VPN 未在运行。", nil
+	}
+	if err := e.vpnCtrl.RequestStop(); err != nil {
+		return "", fmt.Errorf("停止 VPN 失败: %w", err)
+	}
+	return "已请求停止 VPN。", nil
+}
+
+// vpnStatus Phase 10-D: 本地路径查 VPN 当前状态
+func (e *Engine) vpnStatus(_ map[string]string) (string, error) {
+	if e.vpnCtrl == nil {
+		return "", fmt.Errorf("VPN 控制未接入 (平台层 SetVpnController 未调用)")
+	}
+	if e.vpnCtrl.IsRunning() {
+		return "VPN 正在运行。", nil
+	}
+	return "VPN 未在运行。", nil
 }
 
 func (e *Engine) applyTemplate(params map[string]string) (string, error) {
