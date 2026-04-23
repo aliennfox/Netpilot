@@ -121,6 +121,11 @@ object PilottyRepository {
         PilottyCore.webDAVPull(url, user, pass, path)
     }
 
+    // Phase P1-B Net Check: Go 侧直接返回扁平 JSON (非 Envelope), 跑 ~3s
+    suspend fun netCheck(): NetCheckReportDto = withContext(Dispatchers.IO) {
+        json.decodeFromString(serializer(), PilottyCore.netCheck())
+    }
+
     // Phase 10-F-1 Failover (后端 Phase 2.5 就做完, UI 零入口, 本轮补齐)
     suspend fun startFailover(configJSON: String = ""): FailoverStatusDto = call {
         PilottyCore.startFailover(configJSON)

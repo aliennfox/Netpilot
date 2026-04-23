@@ -28,6 +28,7 @@ import (
 	"github.com/foxnetpilot/netpilot/internal/engine"
 	"github.com/foxnetpilot/netpilot/internal/failover"
 	"github.com/foxnetpilot/netpilot/internal/local"
+	"github.com/foxnetpilot/netpilot/internal/netcheck"
 	"github.com/foxnetpilot/netpilot/internal/observe"
 	"github.com/foxnetpilot/netpilot/internal/overlay"
 	"github.com/foxnetpilot/netpilot/internal/router"
@@ -926,6 +927,63 @@ func (c *Client) RemoveSubscription(id string) string {
 // UpdateAllSubscriptions 更新全部订阅。
 func (c *Client) UpdateAllSubscriptions() string {
 	return okJSON(map[string]string{"message": stripANSI(c.subMgr.UpdateAll())})
+}
+
+// NetCheck 跑一次网络自检, 返回 JSON 报告 (P1-B)。 Options 见 internal/netcheck;
+// Client 自动注入 VpnRunning / AgentReady / CurrentNode / NodeCount / RuleCount。
+// Kotlin 侧直接解析 JSON 按行渲染, 不走 Envelope。
+func (c *Client) NetCheck() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	opts := netcheck.Options{
+		VpnRunning: func() bool {
+			// Android 走 Kotlin 设置的 vpnControl callback 拿真实 VPN 状态 (M12 双轨决策);
+			// CLI / 测试路径下 vpnControl=nil, 兜底用 libcore.BoxInstance (3B-1 stub, 常返 false)
+			c.mu.Lock()
+			cb := c.vpnControl
+			box := c.box
+			c.mu.Unlock()
+			if cb != nil {
+				return cb.IsRunning()
+			}
+			return box != nil && box.IsRunning()
+		},
+		AgentReady: func() bool {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			return c.orchestrator != nil
+		},
+		CurrentNode: func() (string, int, error) {
+			g, err := c.adapter.GetProxyGroup("proxy-group")
+			if err != nil {
+				return "", 0, err
+			}
+			tag := g.Now
+			if tag == "" {
+				return "", 0, nil
+			}
+			// 从 All 里找对应 ProxyInfo 的最新延迟 (Phase 10-F 的 GetProxyGroup 已回填)
+			for _, p := range g.All {
+				if p.Tag == tag {
+					return tag, p.Latency, nil
+				}
+			}
+			return tag, 0, nil
+		},
+		NodeCount: func() int {
+			if g, err := c.adapter.GetProxyGroup("proxy-group"); err == nil {
+				return len(g.All)
+			}
+			return 0
+		},
+		RuleCount: func() int { return len(c.overlay.ListRules()) },
+	}
+	report := netcheck.Run(ctx, opts)
+	b, err := json.Marshal(report)
+	if err != nil {
+		return errJSON(err)
+	}
+	return string(b)
 }
 
 // ImportSubscriptionFromData 从本地文件字节流导入订阅 (SAF 本地文件导入路径)。

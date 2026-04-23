@@ -117,6 +117,9 @@ fun SettingsScreen(
         // Phase P1-A: Sniffing 档位 + IPv6 模式 (后端已就绪, 补 UI 入口)
         SniffingIpv6Section()
 
+        // Phase P1-B: 网络自检 (5 段探测)
+        NetCheckSection()
+
         // 分流规则 (原 Rules tab 内联) —— RulesSection 内部已有 Templates / Active rules
         // 两个 Kicker 作为子标题,不再在外层重复"分流规则" 标题
         RulesSection()

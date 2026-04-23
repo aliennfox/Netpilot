@@ -210,6 +210,22 @@ data class LogEntryDto(
     val msg: String = "",
 )
 
+// Phase P1-B Net Check 自检
+@Serializable
+data class NetCheckLineDto(
+    val section: String = "",
+    val level: String = "", // "ok" | "warn" | "fail"
+    val msg: String = "",
+    val detail: String = "",
+)
+
+@Serializable
+data class NetCheckReportDto(
+    val ts: Long = 0,
+    val lines: List<NetCheckLineDto> = emptyList(),
+    @SerialName("elapsed_ms") val elapsedMs: Long = 0,
+)
+
 // Phase 10-F-1 Failover
 @Serializable
 data class FailoverStatusDto(
