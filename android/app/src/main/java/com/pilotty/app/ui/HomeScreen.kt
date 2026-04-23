@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -261,6 +262,9 @@ fun HomeScreen(
     val pc = LocalPilottyColors.current
     val ui by vm.state.collectAsStateWithLifecycle()
     var input by remember { mutableStateOf("") }
+    // 点发送 ↑ 跳 Chat 时需要主动收 IME — 否则 MainActivity 里 imeVisible=true 会隐藏
+    // 底部 nav, 用户在 Chat 页看不到 Home tab, 回不来 (2026-04-24 用户反馈的 bug)
+    val focusManager = LocalFocusManager.current
     val missionState = when {
         !ui.tunRunning -> "warn"
         else -> "nominal"
@@ -633,6 +637,7 @@ fun HomeScreen(
                                     .clickable(enabled = input.isNotEmpty()) {
                                         AgentQueryBus.post(input)
                                         input = ""
+                                        focusManager.clearFocus() // 关 IME, 让底部 nav 在 Chat 屏里露出
                                         onNavigateChat()
                                     },
                                 contentAlignment = Alignment.Center,
