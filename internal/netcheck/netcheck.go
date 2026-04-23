@@ -172,8 +172,12 @@ func checkCounts(opts Options) Line {
 	if opts.RuleCount != nil {
 		rc = opts.RuleCount()
 	}
+	// nc=0 有两种可能: (1) 用户没导过节点 = 真缺;
+	// (2) VPN 未启动, Clash API 不可达, mobile.NodeCount 回退 0 但 overlay 里其实有节点。
+	// 第二种只影响"显示"不影响功能, 所以 warn 不 fail。 由调用方提供 overlay fallback 更准,
+	// 这里保守降级避免误导用户 "没节点要导入"。
 	if nc == 0 {
-		return Line{Section: "规则", Level: "fail", Msg: "没有可用节点", Detail: "Subs tab 导入订阅, 或用 QR / Deep Link 导入单节点"}
+		return Line{Section: "规则", Level: "warn", Msg: "节点数不可用", Detail: "VPN 未启动时 Clash API 不可达, 启动后重新自检可看到真实数量"}
 	}
 	return Line{Section: "规则", Level: "ok", Msg: fmt.Sprintf("节点 %d 个 · 规则 %d 条", nc, rc)}
 }

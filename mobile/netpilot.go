@@ -971,10 +971,22 @@ func (c *Client) NetCheck() string {
 			return tag, 0, nil
 		},
 		NodeCount: func() int {
+			// 优先走 Clash API (VPN 运行时的实时数据)
 			if g, err := c.adapter.GetProxyGroup("proxy-group"); err == nil {
 				return len(g.All)
 			}
-			return 0
+			// 兜底走 overlay outbounds (VPN 未启动时 Clash API 不可达)
+			// 过滤掉 direct / block / selector / urltest 等非实际节点类型
+			count := 0
+			for _, ob := range c.overlay.ListOutbounds() {
+				t, _ := ob["type"].(string)
+				switch t {
+				case "direct", "block", "selector", "urltest", "dns":
+					continue
+				}
+				count++
+			}
+			return count
 		},
 		RuleCount: func() int { return len(c.overlay.ListRules()) },
 	}
