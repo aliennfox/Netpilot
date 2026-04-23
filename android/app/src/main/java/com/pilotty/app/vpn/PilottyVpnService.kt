@@ -285,11 +285,22 @@ class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerH
             val ch = NotificationChannel(CHANNEL_ID, "Pilotty VPN", NotificationManager.IMPORTANCE_LOW)
             nm.createNotificationChannel(ch)
         }
+        // Phase 10-E-B: 加停止按钮, 锁屏下拉可直接关 VPN 不用先 unlock 进 App
+        val stopIntent = Intent(this, PilottyVpnService::class.java).apply {
+            action = ACTION_STOP
+        }
+        val stopPi = PendingIntent.getService(
+            this,
+            1,
+            stopIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Pilotty")
             .setContentText("VPN 已连接")
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setContentIntent(buildConfigureIntent())
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "停止", stopPi)
             .setOngoing(true)
             .build()
     }
