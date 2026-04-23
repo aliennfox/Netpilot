@@ -41,6 +41,8 @@ import com.pilotty.app.ui.observe.ConnectionsScreen
 import com.pilotty.app.ui.observe.LogsScreen
 import com.pilotty.app.ui.settings.SettingsScreen
 import com.pilotty.app.ui.settings.ThemeMode
+import com.pilotty.app.ui.settings.ThemePrefs
+import androidx.compose.runtime.collectAsState
 import com.pilotty.app.ui.subs.SubsScreen
 import com.pilotty.app.ui.theme.LocalPilottyColors
 import com.pilotty.app.ui.theme.PilottyTheme
@@ -58,8 +60,10 @@ class MainActivity : ComponentActivity() {
         // App 被 Deep Link 冷启动时, intent 在 onCreate 里读; 热启动走 onNewIntent
         handleIncomingUri(intent)
         handleTileIntent(intent)
+        val themePrefs = ThemePrefs.get(applicationContext)
         setContent {
-            var themeMode by rememberSaveable { mutableStateOf(ThemeMode.System) }
+            // Phase 10-E: ThemeMode 持久化, SharedPreferences 跨重启
+            val themeMode by themePrefs.mode.collectAsState()
             val dark = when (themeMode) {
                 ThemeMode.System -> isSystemInDarkTheme()
                 ThemeMode.Light -> false
@@ -72,7 +76,7 @@ class MainActivity : ComponentActivity() {
                         onStartVpn = { vpn.start() },
                         onStopVpn = { vpn.stop() },
                         themeMode = themeMode,
-                        onThemeChange = { themeMode = it },
+                        onThemeChange = { themePrefs.set(it) },
                     )
                 }
             }
