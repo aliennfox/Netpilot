@@ -86,6 +86,9 @@ fun SettingsScreen(
             }
         }
 
+        // Phase 10-C: 通知权限 (Android 13+) + 电池白名单 引导
+        BatteryAndPermsSection()
+
         // Agent · LLM apiKey 配置 (M8 最短路径)
         AgentApiKeySection()
 
