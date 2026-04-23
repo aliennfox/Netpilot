@@ -363,7 +363,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                     if (ui.sending) LiveDot()
                 }
                 Text(
-                    "deepseek-chat · 3 tools · ${ui.messages.count { it.role == "user" }} msgs",
+                    "deepseek-chat · ${ui.messages.count { it.role == "user" }} msgs",
                     color = pc.ink3,
                     fontSize = 10.5.sp,
                     fontFamily = FontFamily.Monospace,

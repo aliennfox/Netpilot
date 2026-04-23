@@ -550,6 +550,7 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - **参考优先**: sing-box 集成相关工程问题必须抄 `~/References/` 的作业,commit 里注明参考来源
 - **自规划协议**: 完成里程碑任务后,按 Self-Planning Protocol 自主输出 Step 1-4,不等用户下指令
 - **本地路由 substring match**: 写 chip / 快捷 query 前先 grep `internal/router/keywords.go`,substring 必须命中才会走 local action,否则回落到 LLM(apiKey 空时报"Agent 未启用")
+- **UI 重写必须保留 data binding**: 改 Android Composable 前先 `grep "PilottyRepository\." ui/**/*.kt` 列接入清单,重写后逐条校验每个 Repository 方法都被消费。**禁止 `private val XXX_SERIES = listOf(...)` 这种 hardcoded series 进 commit**(除非加 `// @VisualOnly` 注释+TODO)。后端缺对应 API 的 tile(如 NodeDetail 的 P50/P95/Jitter/Loss)必须加 "数据基于延迟估算, 非真实 telemetry" 小字 disclaimer,不能造假。根因:2026-04-24 Mission Control 重写撞过这个坑,Home Telemetry 4 tile 全 mock,用户反馈"以后别改 UI 就丢接入"
 
 ## Reference 资源清单
 

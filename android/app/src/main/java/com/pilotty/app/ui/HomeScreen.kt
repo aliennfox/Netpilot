@@ -65,6 +65,15 @@ data class HomeUi(
     val error: String? = null,
     val toast: String? = null,
     val uptimeSec: Long = 0L,
+    // 实时 telemetry (替代原 mock 常量 SERIES)
+    // trafficSamples: 最近 60 秒流量采样, 驱动 SparklineDual / Throughput BarMini / 数字
+    val trafficSamples: List<com.pilotty.app.data.TrafficSampleDto> = emptyList(),
+    // connectionsHistory: 最近 60 个数据点, connections count 滑动窗口, 驱动 Connections Sparkline
+    val connectionsHistory: List<Int> = emptyList(),
+    // latencyHistory: 最近 60 个延迟采样, 驱动 Latency Sparkline
+    val latencyHistory: List<Int> = emptyList(),
+    // activeProto: 当前 active 节点的协议 (vless / trojan / ...), ActiveNodeCard ProtoBadge 用
+    val activeProto: String = "",
 )
 
 class HomeViewModel : ViewModel() {
@@ -91,6 +100,47 @@ class HomeViewModel : ViewModel() {
                 if (_state.value.tunRunning) {
                     _state.value = _state.value.copy(uptimeSec = _state.value.uptimeSec + 1)
                 }
+            }
+        }
+        // Telemetry 真数据接入 (替代 Mission Control 重写时引入的 5 个 mock SERIES 常量)
+        // 1Hz traffic 采样 — 驱动 ActiveNode SparklineDual + Throughput tile 数字&BarMini
+        viewModelScope.launch {
+            while (true) {
+                delay(1000)
+                if (!_state.value.tunRunning) continue
+                runCatching { PilottyRepository.trafficHistory(60) }
+                    .onSuccess { _state.value = _state.value.copy(trafficSamples = it) }
+            }
+        }
+        // 2s connections count 采样 — 驱动 Connections tile Sparkline, 滑动窗口 60 点
+        viewModelScope.launch {
+            while (true) {
+                delay(2000)
+                if (!_state.value.tunRunning) continue
+                runCatching { PilottyRepository.connections() }
+                    .onSuccess { conns ->
+                        val hist = (_state.value.connectionsHistory + conns.size).takeLast(60)
+                        _state.value = _state.value.copy(connectionsHistory = hist)
+                    }
+            }
+        }
+        // 5s latency + active proto 采样 — 驱动 Latency Sparkline + ActiveNode ProtoBadge
+        viewModelScope.launch {
+            while (true) {
+                delay(5000)
+                if (!_state.value.tunRunning) continue
+                runCatching { PilottyRepository.nodes() }
+                    .onSuccess { nodes ->
+                        val active = nodes.firstOrNull { it.active }
+                        if (active != null) {
+                            val lat = active.latency.coerceAtLeast(0)
+                            val hist = (_state.value.latencyHistory + lat).takeLast(60)
+                            _state.value = _state.value.copy(
+                                latencyHistory = hist,
+                                activeProto = active.type,
+                            )
+                        }
+                    }
             }
         }
     }
@@ -169,13 +219,7 @@ class HomeViewModel : ViewModel() {
     fun dismissError() { _state.value = _state.value.copy(error = null) }
 }
 
-/* ---------- Mock telemetry series (真实数据源待接, 先给视觉) ---------- */
-private val UP_SERIES = listOf(0.8f, 1.2f, 0.9f, 1.8f, 2.1f, 1.7f, 2.4f, 2.8f, 2.3f, 2.6f, 3.1f, 2.9f, 2.4f, 2.7f, 3.0f, 2.6f, 2.4f)
-private val DOWN_SERIES = listOf(0.3f, 0.4f, 0.3f, 0.6f, 0.7f, 0.5f, 0.8f, 0.9f, 0.7f, 0.8f, 1.0f, 0.9f, 0.7f, 0.8f, 0.9f, 0.8f, 0.7f)
-private val LAT_SERIES = listOf(44f, 42f, 45f, 41f, 43f, 40f, 42f, 45f, 43f, 41f, 42f, 44f, 43f, 41f, 42f, 43f, 42f)
-private val CONN_SERIES = listOf(12f, 18f, 22f, 16f, 24f, 28f, 26f, 32f, 30f, 28f, 34f, 36f, 32f, 30f, 34f, 38f, 36f)
-private val BAR_SERIES = listOf(3f, 5f, 4f, 6f, 8f, 7f, 9f, 11f, 10f, 12f, 14f, 12f, 10f, 11f, 13f, 12f, 10f)
-
+// @VisualOnly: Quick Commands 是静态入口 chip, 不绑后端数据 (点后 post 到 AgentQueryBus 驱动 Chat)
 private val QUICK_COMMANDS = listOf(
     "切到最快的日本节点" to "切换节点 找个快的",
     "让 Netflix 走代理" to "netflix 分流",
@@ -225,6 +269,8 @@ fun HomeScreen(
                     running = ui.tunRunning,
                     isConnecting = ui.isConnecting,
                     mode = (ui.status?.mode ?: "rule").uppercase(),
+                    proto = ui.activeProto,
+                    trafficSamples = ui.trafficSamples,
                     onPower = {
                         if (ui.tunRunning) onStopVpn() else { vm.beginConnecting(); onStartVpn() }
                     },
@@ -247,6 +293,8 @@ fun HomeScreen(
                     label = "Latency",
                     modifier = Modifier.weight(1f),
                 ) {
+                    val latSeries = ui.latencyHistory.map { it.toFloat() }
+                    val p95 = computeP95(ui.latencyHistory)
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
                             text = parseLatencyMs(ui.status).toString(),
@@ -264,16 +312,18 @@ fun HomeScreen(
                             fontWeight = FontWeight.Medium,
                         )
                         Spacer(Modifier.weight(1f))
-                        Text(
-                            "p95 48",
-                            color = pc.ink3,
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                        )
+                        if (p95 > 0) {
+                            Text(
+                                "p95 $p95",
+                                color = pc.ink3,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
                     }
                     Spacer(Modifier.height(6.dp))
                     Sparkline(
-                        data = LAT_SERIES,
+                        data = latSeries,
                         modifier = Modifier.fillMaxWidth().height(22.dp),
                         color = pc.accent,
                     )
@@ -282,9 +332,13 @@ fun HomeScreen(
                     label = "Throughput",
                     modifier = Modifier.weight(1f),
                 ) {
+                    val lastSample = ui.trafficSamples.lastOrNull()
+                    val totalRate = (lastSample?.downRate ?: 0) + (lastSample?.upRate ?: 0)
+                    val (rateNum, rateUnit) = formatRate(totalRate)
+                    val downSeries = ui.trafficSamples.map { it.downRate.toFloat() }
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
-                            "3.2",
+                            rateNum,
                             color = pc.ink,
                             fontSize = 24.sp,
                             fontWeight = FontWeight.Bold,
@@ -293,7 +347,7 @@ fun HomeScreen(
                         )
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            "MB/s",
+                            rateUnit,
                             color = pc.ink3,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
@@ -301,7 +355,7 @@ fun HomeScreen(
                     }
                     Spacer(Modifier.height(6.dp))
                     BarMini(
-                        data = BAR_SERIES,
+                        data = downSeries,
                         modifier = Modifier.fillMaxWidth().height(22.dp),
                         color = pc.ink,
                     )
@@ -318,6 +372,7 @@ fun HomeScreen(
                     label = "Connections",
                     modifier = Modifier.weight(1f),
                 ) {
+                    val connSeries = ui.connectionsHistory.map { it.toFloat() }
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
                             text = (ui.status?.connections ?: 0).toString(),
@@ -337,7 +392,7 @@ fun HomeScreen(
                     }
                     Spacer(Modifier.height(6.dp))
                     Sparkline(
-                        data = CONN_SERIES,
+                        data = connSeries,
                         modifier = Modifier.fillMaxWidth().height(22.dp),
                         color = pc.ink2,
                     )
@@ -346,10 +401,11 @@ fun HomeScreen(
                     label = "Agent",
                     modifier = Modifier.weight(1f),
                 ) {
+                    val agentReady = ui.status?.agentReady == true
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
-                            "24",
-                            color = pc.ink,
+                            if (agentReady) "ON" else "OFF",
+                            color = if (agentReady) pc.ink else pc.ink3,
                             fontSize = 24.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = (-0.48).sp,
@@ -357,7 +413,7 @@ fun HomeScreen(
                         )
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            "tool calls / hr",
+                            if (agentReady) "LLM ready" else "本地路由",
                             color = pc.ink3,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
@@ -368,9 +424,9 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
-                        StatusDot(state = if (ui.status?.agentReady == true) "nominal" else "warn")
+                        StatusDot(state = if (agentReady) "nominal" else "warn")
                         Text(
-                            text = if (ui.status?.agentReady == true) "deepseek-chat · 64K ctx" else "未配置 apiKey",
+                            text = if (agentReady) "deepseek-chat" else "未配置 apiKey",
                             color = pc.ink3,
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
@@ -585,6 +641,8 @@ private fun ActiveNodeCard(
     running: Boolean,
     isConnecting: Boolean,
     mode: String,
+    proto: String,
+    trafficSamples: List<com.pilotty.app.data.TrafficSampleDto>,
     onPower: () -> Unit,
     onSwitch: () -> Unit,
 ) {
@@ -646,9 +704,9 @@ private fun ActiveNodeCard(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        ProtoBadge(name = "VLESS")
+                        ProtoBadge(name = proto.uppercase().ifEmpty { "—" })
                         Text(
-                            "jp-01.net:443",
+                            if (running && latency > 0) "$latency ms" else if (running) "测速中…" else "待连接",
                             color = pc.ink3,
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
@@ -657,8 +715,13 @@ private fun ActiveNodeCard(
                     }
                 }
             }
-            // Traffic row
+            // Traffic row — 真实数据来自 trafficSamples; 取最后一秒 up/down rate + 60 点曲线
             Spacer(Modifier.height(16.dp))
+            val lastSample = trafficSamples.lastOrNull()
+            val (upNum, upUnit) = formatRate(lastSample?.upRate ?: 0)
+            val (downNum, downUnit) = formatRate(lastSample?.downRate ?: 0)
+            val upSeries = trafficSamples.map { it.upRate.toFloat() }
+            val downSeries = trafficSamples.map { it.downRate.toFloat() }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -667,15 +730,15 @@ private fun ActiveNodeCard(
                 Column {
                     Kicker("Traffic · 60s", modifier = Modifier.padding(bottom = 4.dp))
                     Row(verticalAlignment = Alignment.Bottom) {
-                        Text("2.4", color = pc.ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
-                        Text(" MB/s ↑  ", color = pc.ink3, fontSize = 11.sp)
-                        Text("0.8", color = pc.ink2, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
-                        Text(" MB/s ↓", color = pc.ink3, fontSize = 11.sp)
+                        Text(upNum, color = pc.ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
+                        Text(" $upUnit ↑  ", color = pc.ink3, fontSize = 11.sp)
+                        Text(downNum, color = pc.ink2, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
+                        Text(" $downUnit ↓", color = pc.ink3, fontSize = 11.sp)
                     }
                 }
                 SparklineDual(
-                    up = UP_SERIES,
-                    down = DOWN_SERIES,
+                    up = upSeries,
+                    down = downSeries,
                     modifier = Modifier.size(width = 110.dp, height = 32.dp),
                 )
             }
@@ -867,6 +930,25 @@ private fun formatUptime(sec: Long): String {
     val m = (sec % 3600) / 60
     val s = sec % 60
     return "%02d:%02d:%02d".format(h, m, s)
+}
+
+/** bytes/s → (数字文本, 单位文本); 自动在 B/KB/MB 档位间选, 避免小流量永远是 "0.0 MB/s" */
+private fun formatRate(bytes: Long): Pair<String, String> {
+    val b = bytes.coerceAtLeast(0)
+    return when {
+        b < 1024 -> b.toString() to "B/s"
+        b < 1024 * 1024 -> "%.0f".format(b / 1024.0) to "KB/s"
+        else -> "%.1f".format(b / (1024.0 * 1024.0)) to "MB/s"
+    }
+}
+
+/** 近似 p95, 样本少 (< 20) 直接返回 max 更直观; 空返回 0 (调用方据此决定是否渲染) */
+private fun computeP95(values: List<Int>): Int {
+    if (values.isEmpty()) return 0
+    if (values.size < 20) return values.max()
+    val sorted = values.sorted()
+    val idx = (sorted.size * 0.95).toInt().coerceAtMost(sorted.size - 1)
+    return sorted[idx]
 }
 
 private fun formatRelativeTime(raw: String?): String {

@@ -135,10 +135,11 @@ fun NodeDetailScreen(
             }
 
             SectionHead(
-                text = "Metrics · 5 min",
+                text = "Metrics · 即时(实验)",
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
             )
-            // 2x2 metrics grid
+            // 2x2 metrics grid — @VisualOnly: 后端目前不采样 histogram/jitter/loss,
+            // 这 4 个 tile 基于当前 latency 估算, 仅保留视觉节奏, 非真实 telemetry
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 MetricTile("Latency P50", "${(lat - 1).coerceAtLeast(0)}", "ms", modifier = Modifier.weight(1f))
                 MetricTile("Latency P95", "${lat + 6}", "ms", modifier = Modifier.weight(1f))
@@ -147,6 +148,14 @@ fun NodeDetailScreen(
                 MetricTile("Jitter", "2.1", "ms", modifier = Modifier.weight(1f))
                 MetricTile("Loss", "0.0", "%", modifier = Modifier.weight(1f))
             }
+            Text(
+                "数据基于当前延迟估算, 非真实采样 telemetry (后端未做 histogram/jitter/loss 采样)",
+                color = pc.ink4,
+                fontSize = 10.5.sp,
+                fontFamily = FontFamily.Monospace,
+                lineHeight = 14.sp,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+            )
 
             // Load card
             PilottyCard(modifier = Modifier.fillMaxWidth()) {
