@@ -126,6 +126,13 @@ object PilottyRepository {
         json.decodeFromString(serializer(), PilottyCore.netCheck())
     }
 
+    // Phase P1-C DNS config
+    suspend fun dnsConfig(): DNSConfigDto = call { PilottyCore.dnsConfig() }
+    suspend fun setDnsConfig(cfg: DNSConfigDto): MessageDto = call {
+        PilottyCore.setDnsConfig(json.encodeToString(DNSConfigDto.serializer(), cfg))
+    }
+    suspend fun resetDnsConfig(): MessageDto = call { PilottyCore.resetDnsConfig() }
+
     // Phase 10-F-1 Failover (后端 Phase 2.5 就做完, UI 零入口, 本轮补齐)
     suspend fun startFailover(configJSON: String = ""): FailoverStatusDto = call {
         PilottyCore.startFailover(configJSON)

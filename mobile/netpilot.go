@@ -1131,6 +1131,62 @@ func (c *Client) Templates() string {
 	return okJSON(c.templates.List())
 }
 
+// --- Phase P1-C: 自定义 DNS / DoH / DoQ ---
+// 后端 overlay 只支持 DNS 整块替换 (SetDNS), 不做单个 server/rule CRUD。 UI 侧显示 server 列表
+// 能加能删能选 default, 内部还是调 overlay.SetDNS 整块写回 + Apply 热重载。 Rules 交给 Chat。
+
+// DNSConfig 返回当前 overlay DNS 配置 (nil 时返回 secure 模式默认)。
+func (c *Client) DNSConfig() string {
+	dns := c.overlay.GetDNS()
+	if dns == nil {
+		dns = overlay.DefaultDNSConfig("secure")
+	}
+	return okJSON(dns)
+}
+
+// SetDNSConfig 整块替换 DNS 配置, jsonStr 是 overlay.DNSConfig 的 JSON 序列化。
+func (c *Client) SetDNSConfig(jsonStr string) string {
+	var dns overlay.DNSConfig
+	if err := json.Unmarshal([]byte(jsonStr), &dns); err != nil {
+		return errJSON(fmt.Errorf("DNS JSON 解析失败: %v", err))
+	}
+	if len(dns.Servers) == 0 {
+		return errStr("至少保留一个 DNS server")
+	}
+	// Final 必须指向存在的 server tag, 防止配置非法
+	if dns.Final != "" {
+		found := false
+		for _, s := range dns.Servers {
+			if s.Tag == dns.Final {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return errStr("Final 指向的 server tag 不存在")
+		}
+	}
+	if err := c.overlay.SetDNS(&dns); err != nil {
+		return errJSON(err)
+	}
+	if err := c.overlay.Apply(c.adapter); err != nil {
+		return errJSON(fmt.Errorf("Apply 失败: %v", err))
+	}
+	return okJSON(map[string]string{"message": "DNS 配置已更新"})
+}
+
+// ResetDNSConfig 重置为 secure 模式默认 (proxy-dns DoT 8.8.8.8 + direct-dns UDP 223.5.5.5 + local)。
+func (c *Client) ResetDNSConfig() string {
+	def := overlay.DefaultDNSConfig("secure")
+	if err := c.overlay.SetDNS(def); err != nil {
+		return errJSON(err)
+	}
+	if err := c.overlay.Apply(c.adapter); err != nil {
+		return errJSON(fmt.Errorf("Apply 失败: %v", err))
+	}
+	return okJSON(map[string]string{"message": "已重置为默认"})
+}
+
 // WebDAVTest 测试 WebDAV 连接 (Phase 10-E-E)。 HEAD BaseURL + Basic Auth,
 // 不拉文件, 只验证 URL 可达 + 认证通过。
 func (c *Client) WebDAVTest(baseURL, user, pass string) string {

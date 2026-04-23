@@ -120,6 +120,9 @@ fun SettingsScreen(
         // Phase P1-B: 网络自检 (5 段探测)
         NetCheckSection()
 
+        // Phase P1-C: 自定义 DNS / DoH / DoQ (server 列表 CRUD + default 切换)
+        DNSConfigSection()
+
         // 分流规则 (原 Rules tab 内联) —— RulesSection 内部已有 Templates / Active rules
         // 两个 Kicker 作为子标题,不再在外层重复"分流规则" 标题
         RulesSection()

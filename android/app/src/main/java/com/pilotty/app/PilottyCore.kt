@@ -113,6 +113,11 @@ object PilottyCore {
     fun importNodeURI(uri: String): String        = require().importNodeURI(uri)
     fun importSubscriptionFromData(name: String, dataBase64: String): String = require().importSubscriptionFromData(name, dataBase64)
     fun netCheck(): String                         = require().netCheck()
+
+    // Phase P1-C: 自定义 DNS / DoH / DoQ
+    fun dnsConfig(): String                        = require().dnsConfig()
+    fun setDnsConfig(json: String): String         = require().setDNSConfig(json)
+    fun resetDnsConfig(): String                   = require().resetDNSConfig()
     fun rules(): String                           = require().rules()
     fun addRule(ruleJSON: String): String         = require().addRule(ruleJSON)
     fun removeRule(tag: String): String           = require().removeRule(tag)

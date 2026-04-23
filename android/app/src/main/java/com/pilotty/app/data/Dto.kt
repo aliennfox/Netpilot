@@ -210,6 +210,33 @@ data class LogEntryDto(
     val msg: String = "",
 )
 
+// Phase P1-C 自定义 DNS / DoH / DoQ
+@Serializable
+data class DNSServerDto(
+    val type: String = "", // "udp" | "tls" | "https" | "quic" | "h3" | "local"
+    val tag: String = "",
+    val server: String = "",
+    @SerialName("server_port") val serverPort: Int = 0,
+    val detour: String = "",
+)
+
+@Serializable
+data class DNSRuleDto(
+    val action: String = "", // "route" | "reject"
+    val server: String = "",
+    val outbound: String = "",
+    val domain: List<String> = emptyList(),
+    @SerialName("domain_suffix") val domainSuffix: List<String> = emptyList(),
+)
+
+@Serializable
+data class DNSConfigDto(
+    val servers: List<DNSServerDto> = emptyList(),
+    val rules: List<DNSRuleDto> = emptyList(),
+    val final: String = "",
+    val strategy: String = "",
+)
+
 // Phase P1-B Net Check 自检
 @Serializable
 data class NetCheckLineDto(
