@@ -350,7 +350,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -359,20 +359,30 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Text("Agent", color = pc.ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.15).sp)
-                    // sending=true 时顶部叠 LiveDot, 让用户在滚到底之外也能看到 "Agent 正在工作"
+                    Text("Agent", color = pc.ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.16).sp)
                     if (ui.sending) LiveDot()
                 }
                 Text(
-                    "deepseek-chat · ${ui.messages.count { it.role == "user" }} msgs",
+                    "deepseek-chat · 3 tools · ${ui.messages.count { it.role == "user" }} msgs",
                     color = pc.ink3,
                     fontSize = 10.5.sp,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 0.2.sp,
                 )
             }
-            TextButton(onClick = { vm.clear() }) {
-                Text("清空", color = pc.ink3, fontSize = 12.sp)
+            Surface(
+                color = pc.surface2,
+                shape = RoundedCornerShape(999.dp),
+                onClick = { vm.clear() },
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text("+", color = pc.ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("新会话", color = pc.ink, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
             }
         }
         HorizontalDivider(color = pc.hairline, thickness = 1.dp)
@@ -388,29 +398,52 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
         ) {
             items(ui.messages) { msg ->
                 val isUser = msg.role == "user"
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-                ) {
-                    Surface(
-                        color = if (isUser) pc.ink else pc.surface2,
-                        shape = if (isUser) RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp)
-                                else RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp),
+                if (isUser) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
                     ) {
-                        Column(Modifier.padding(horizontal = 13.dp, vertical = 9.dp)) {
-                            // 用户气泡用常规字体, assistant 气泡用 Monospace ——
-                            // 贴合 "资深网络运维工程师" 人设, 且让 "- tag : value" 形式的列表/ms
-                            // 数字对齐更稳。 中英混排下 Chinese 仍是全角, 但比 sans-serif 的不定宽好
+                        Surface(
+                            color = pc.ink,
+                            shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
+                        ) {
                             Text(
                                 msg.text,
-                                color = if (isUser) pc.bg else pc.ink,
-                                fontSize = if (isUser) 14.sp else 13.sp,
-                                lineHeight = if (isUser) 20.sp else 19.sp,
-                                letterSpacing = if (isUser) (-0.07).sp else 0.sp,
-                                fontFamily = if (isUser) FontFamily.Default else FontFamily.Monospace,
+                                color = pc.bg,
+                                fontSize = 14.sp,
+                                lineHeight = 20.sp,
+                                letterSpacing = (-0.07).sp,
+                                modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp),
                             )
-                            if (!isUser && msg.source.isNotEmpty()) {
-                                Spacer(Modifier.height(4.dp))
+                        }
+                    }
+                } else {
+                    // Mission Control 风格: 小 26dp accent 方块头像 + 纯 SansSerif 正文 + tool trace card
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Start,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 2.dp)
+                                .size(26.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(pc.accent),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("◢", color = pc.accentOnBg, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                msg.text,
+                                color = pc.ink,
+                                fontSize = 14.sp,
+                                lineHeight = 21.sp,
+                                letterSpacing = (-0.07).sp,
+                            )
+                            if (msg.source.isNotEmpty()) {
+                                Spacer(Modifier.height(6.dp))
                                 Text(
                                     "via ${msg.source}${if (msg.source == "local") " · 未调 Agent" else ""}",
                                     color = pc.ink4,
@@ -470,64 +503,67 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
             trackColor = pc.surface3,
         )
 
+        HorizontalDivider(color = pc.hairline, thickness = 1.dp)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(pc.surface)
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-                .padding(bottom = 96.dp),
+                .background(pc.bg)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(pc.bg)
-                    .border(1.dp, pc.hairlineStrong, RoundedCornerShape(16.dp))
-                    .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Surface(
+                color = pc.surface,
+                shape = RoundedCornerShape(16.dp),
+                shadowElevation = if (pc.isDark) 0.dp else 4.dp,
+                border = if (pc.isDark) androidx.compose.foundation.BorderStroke(1.dp, pc.hairline) else null,
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                Box(modifier = Modifier.weight(1f).heightIn(min = 36.dp, max = 140.dp)) {
-                    BasicTextField(
-                        value = input,
-                        onValueChange = { input = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        textStyle = TextStyle(
-                            color = pc.ink,
-                            fontSize = 14.sp,
-                            lineHeight = 20.sp,
-                            letterSpacing = (-0.07).sp,
-                        ),
-                        cursorBrush = SolidColor(pc.ink),
-                        maxLines = 6,
-                        enabled = !ui.sending,
-                    )
-                    if (input.isEmpty()) {
+                Row(
+                    modifier = Modifier.padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(modifier = Modifier.weight(1f).heightIn(min = 24.dp, max = 120.dp)) {
+                        BasicTextField(
+                            value = input,
+                            onValueChange = { input = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            textStyle = TextStyle(
+                                color = pc.ink,
+                                fontSize = 14.5.sp,
+                                lineHeight = 21.sp,
+                                letterSpacing = (-0.07).sp,
+                            ),
+                            cursorBrush = SolidColor(pc.ink),
+                            maxLines = 6,
+                            enabled = !ui.sending,
+                        )
+                        if (input.isEmpty()) {
+                            Text(
+                                "回复 Agent…",
+                                color = pc.ink3,
+                                fontSize = 14.5.sp,
+                                lineHeight = 21.sp,
+                            )
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (input.isNotBlank()) pc.accent else pc.surface2)
+                            .clickable(enabled = !ui.sending && input.isNotBlank()) {
+                                vm.send(input)
+                                input = ""
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Text(
-                            "Reply to agent…",
-                            color = pc.ink4,
-                            fontSize = 14.sp,
-                            lineHeight = 20.sp,
+                            "↑",
+                            color = if (input.isNotBlank()) pc.accentOnBg else pc.ink3,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
                         )
                     }
-                }
-                Box(
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (input.isNotBlank()) pc.accent else pc.surface3)
-                        .clickable(enabled = !ui.sending && input.isNotBlank()) {
-                            vm.send(input)
-                            input = ""
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        "↑",
-                        color = if (input.isNotBlank()) pc.accentOnBg else pc.ink4,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
                 }
             }
         }
@@ -647,6 +683,7 @@ class NodesViewModel : ViewModel() {
 @Composable
 fun NodesScreen(
     onNavigateSubs: () -> Unit = {},
+    onOpenDetail: (String) -> Unit = {},
     vm: NodesViewModel = viewModel(),
 ) {
     val pc = LocalPilottyColors.current
@@ -676,19 +713,19 @@ fun NodesScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(pc.bg)
-            .padding(horizontal = 20.dp),
+            .background(pc.bg),
     ) {
-        Spacer(Modifier.height(12.dp))
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column {
-                Text("Nodes", color = pc.ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.3).sp)
+                Text("节点", color = pc.ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.44).sp)
                 Text(
-                    "${filtered.size} of ${ui.nodes.size} · sorted by latency",
+                    "${filtered.size} / ${ui.nodes.size} · 按延迟排序",
                     color = pc.ink3,
                     fontSize = 10.5.sp,
                     fontFamily = FontFamily.Monospace,
@@ -698,36 +735,43 @@ fun NodesScreen(
             PilottyButton(
                 text = "测速全部",
                 onClick = { vm.testAll() },
-                variant = PilottyButtonVariant.Outline,
-                small = true,
+                variant = PilottyButtonVariant.Mono,
             )
         }
 
-        Spacer(Modifier.height(12.dp))
-        Box(
+        // 搜索栏 — Surface + shadow, 不再是 border outline
+        Surface(
+            color = pc.surface,
+            shape = RoundedCornerShape(12.dp),
+            shadowElevation = if (pc.isDark) 0.dp else 4.dp,
+            border = if (pc.isDark) androidx.compose.foundation.BorderStroke(1.dp, pc.hairline) else null,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(36.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(pc.bg)
-                .border(1.dp, pc.hairlineStrong, RoundedCornerShape(10.dp))
-                .padding(horizontal = 12.dp),
-            contentAlignment = Alignment.CenterStart,
+                .padding(horizontal = 20.dp),
         ) {
-            BasicTextField(
-                value = ui.query,
-                onValueChange = { vm.setQuery(it) },
-                textStyle = TextStyle(
-                    color = pc.ink,
-                    fontSize = 13.5.sp,
-                    letterSpacing = (-0.05).sp,
-                ),
-                cursorBrush = SolidColor(pc.ink),
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
-            if (ui.query.isEmpty()) {
-                Text("Search nodes…", color = pc.ink4, fontSize = 13.5.sp)
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp).height(40.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("⌕", color = pc.ink3, fontSize = 14.sp)
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    BasicTextField(
+                        value = ui.query,
+                        onValueChange = { vm.setQuery(it) },
+                        textStyle = TextStyle(
+                            color = pc.ink,
+                            fontSize = 13.5.sp,
+                            letterSpacing = (-0.05).sp,
+                        ),
+                        cursorBrush = SolidColor(pc.ink),
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                    if (ui.query.isEmpty()) {
+                        Text("搜索节点…", color = pc.ink3, fontSize = 13.5.sp)
+                    }
+                }
             }
         }
 
@@ -806,18 +850,32 @@ fun NodesScreen(
                 }
             }
         } else {
+            // Mission Control: 单一 card-group 容纳所有行 (非独立卡片)
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(bottom = 96.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
             ) {
-                items(filtered, key = { it.tag }) { node ->
-                    NodeCard(
-                        node = node,
-                        onClick = { vm.switchTo(node.tag) },
-                        onLongClick = { vm.testOne(node.tag) },
-                    )
+                item {
+                    Surface(
+                        color = pc.surface,
+                        shape = RoundedCornerShape(16.dp),
+                        shadowElevation = if (pc.isDark) 0.dp else 4.dp,
+                        border = if (pc.isDark) androidx.compose.foundation.BorderStroke(1.dp, pc.hairline) else null,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column {
+                            filtered.forEachIndexed { i, node ->
+                                if (i > 0) HorizontalDivider(color = pc.hairline, thickness = 1.dp)
+                                NodeCard(
+                                    node = node,
+                                    onClick = { vm.switchTo(node.tag) },
+                                    onLongClick = { vm.testOne(node.tag) },
+                                )
+                            }
+                        }
+                    }
                 }
+                item { Spacer(Modifier.height(24.dp)) }
             }
         }
     }
@@ -827,94 +885,78 @@ fun NodesScreen(
 @Composable
 private fun NodeCard(node: NodeDto, onClick: () -> Unit, onLongClick: () -> Unit = {}) {
     val pc = LocalPilottyColors.current
-    val slow = node.latency > 300
     val cc = node.tag.take(2).uppercase()
-    Box(modifier = Modifier.fillMaxWidth()) {
-        PilottyCard(
-            modifier = Modifier
-                .fillMaxWidth()
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-            strong = node.active,
-            soft = !node.active,
-        ) {
+    // Mission Control 三档: <100 nominal / <300 warn / >=300 alert
+    val latTier = when {
+        node.latency <= 0 -> "none"
+        node.latency < 100 -> "nominal"
+        node.latency < 300 -> "warn"
+        else -> "alert"
+    }
+    val latColor = when (latTier) {
+        "nominal" -> pc.ink
+        "warn" -> pc.warn
+        "alert" -> pc.error
+        else -> pc.ink3
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(if (node.active) pc.surface2 else androidx.compose.ui.graphics.Color.Transparent)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        FlagChip(code = cc)
+        Column(modifier = Modifier.weight(1f)) {
             Row(
-                modifier = Modifier.padding(start = 14.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                FlagChip(code = cc)
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Text(
-                            node.tag,
-                            color = pc.ink,
-                            fontSize = 14.sp,
-                            fontWeight = if (node.active) FontWeight.SemiBold else FontWeight.Medium,
-                            letterSpacing = (-0.05).sp,
-                        )
-                        if (node.active) LiveDot()
-                    }
-                    Spacer(Modifier.height(3.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            "${node.server}:${node.port}",
-                            color = pc.ink3,
-                            fontSize = 10.5.sp,
-                            fontFamily = FontFamily.Monospace,
-                            letterSpacing = 0.2.sp,
-                            maxLines = 1,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(3.dp))
-                                .border(1.dp, pc.hairlineStrong, RoundedCornerShape(3.dp))
-                                .padding(horizontal = 5.dp, vertical = 1.dp),
-                        ) {
-                            Text(
-                                node.type.uppercase(),
-                                color = pc.ink2,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                letterSpacing = 0.4.sp,
-                            )
-                        }
-                    }
-                }
                 Text(
-                    text = when {
-                        node.latency > 0 -> "${node.latency}ms"
-                        node.latency < 0 -> "失败"
-                        else -> "—"
-                    },
-                    color = when {
-                        node.latency < 0 -> pc.error
-                        slow -> pc.error
-                        node.active -> pc.accentInk
-                        else -> pc.ink
-                    },
-                    fontSize = 12.5.sp,
-                    fontWeight = if (node.active) FontWeight.Bold else FontWeight.SemiBold,
-                    fontFamily = FontFamily.Monospace,
+                    node.tag,
+                    color = pc.ink,
+                    fontSize = 14.sp,
+                    fontWeight = if (node.active) FontWeight.SemiBold else FontWeight.Medium,
+                    letterSpacing = (-0.05).sp,
+                    maxLines = 1,
                 )
+                if (node.active) LiveDot()
+            }
+            Spacer(Modifier.height(3.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    "${node.server}:${node.port}",
+                    color = pc.ink3,
+                    fontSize = 10.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 0.2.sp,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                ProtoBadge(name = node.type)
             }
         }
-        if (node.active) {
-            Box(
-                modifier = Modifier
-                    .width(3.dp)
-                    .fillMaxHeight()
-                    .padding(vertical = 10.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(pc.accent)
-                    .align(Alignment.CenterStart),
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text(
+                text = when {
+                    node.latency > 0 -> "${node.latency}ms"
+                    node.latency < 0 -> "失败"
+                    else -> "—"
+                },
+                color = latColor,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
             )
+            // load bar 占位 (当前无真实 load 数据; 设计稿用 0-100 pct)
+            if (node.latency > 0) {
+                LoadBar(pct = (node.latency / 4).coerceIn(10, 100), tone = if (latTier == "alert") "alert" else "nominal")
+            }
         }
     }
 }

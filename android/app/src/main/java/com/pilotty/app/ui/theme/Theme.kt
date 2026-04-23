@@ -15,26 +15,28 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
 /**
- * PilottyColorScheme — 暴露设计稿的三档灰 + accent + hairline,
- * 弥补 Material3 ColorScheme 的槽位不足。业务代码用
- * `LocalPilottyColors.current` 读取。
+ * PilottyColorScheme — Mission Control 设计系统的完整 token 槽位。
+ * 业务代码通过 `LocalPilottyColors.current` 读取, 不走 Material3 ColorScheme 的兜底。
  */
 data class PilottyColorScheme(
     val bg: Color,
     val surface: Color,
     val surface2: Color,
     val surface3: Color,
+    val stripe: Color,
     val ink: Color,
     val ink2: Color,
     val ink3: Color,
     val ink4: Color,
     val ink5: Color,
+    val monoInk: Color,
     val hairline: Color,
     val hairlineStrong: Color,
     val navBg: Color,
     val accent: Color,
     val accentInk: Color,
     val accentOnBg: Color,
+    val warn: Color,
     val error: Color,
     val isDark: Boolean,
 )
@@ -48,17 +50,20 @@ private fun buildLight() = PilottyColorScheme(
     surface = PilottyColors.Light.Surface,
     surface2 = PilottyColors.Light.Surface2,
     surface3 = PilottyColors.Light.Surface3,
+    stripe = PilottyColors.Light.Stripe,
     ink = PilottyColors.Light.Ink,
     ink2 = PilottyColors.Light.Ink2,
     ink3 = PilottyColors.Light.Ink3,
     ink4 = PilottyColors.Light.Ink4,
     ink5 = PilottyColors.Light.Ink5,
+    monoInk = PilottyColors.Light.MonoInk,
     hairline = PilottyColors.Light.Hairline,
     hairlineStrong = PilottyColors.Light.HairlineStrong,
     navBg = PilottyColors.Light.NavBg,
     accent = PilottyColors.Accent,
     accentInk = PilottyColors.AccentInk,
     accentOnBg = PilottyColors.AccentOnBg,
+    warn = PilottyColors.Warn,
     error = PilottyColors.Error,
     isDark = false,
 )
@@ -68,28 +73,30 @@ private fun buildDark() = PilottyColorScheme(
     surface = PilottyColors.Dark.Surface,
     surface2 = PilottyColors.Dark.Surface2,
     surface3 = PilottyColors.Dark.Surface3,
+    stripe = PilottyColors.Dark.Stripe,
     ink = PilottyColors.Dark.Ink,
     ink2 = PilottyColors.Dark.Ink2,
     ink3 = PilottyColors.Dark.Ink3,
     ink4 = PilottyColors.Dark.Ink4,
     ink5 = PilottyColors.Dark.Ink5,
+    monoInk = PilottyColors.Dark.MonoInk,
     hairline = PilottyColors.Dark.Hairline,
     hairlineStrong = PilottyColors.Dark.HairlineStrong,
     navBg = PilottyColors.Dark.NavBg,
     accent = PilottyColors.Accent,
     accentInk = PilottyColors.Accent,
     accentOnBg = PilottyColors.AccentOnBg,
+    warn = PilottyColors.Warn,
     error = PilottyColors.Error,
     isDark = true,
 )
 
 private val AppTypography = Typography(
-    // JetBrains Mono 仅在个别位置 (kicker / mono 数值) 用, 不替换默认字体
     labelSmall = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
         fontSize = 10.sp,
-        letterSpacing = 1.4.sp,
+        letterSpacing = 1.6.sp,
     ),
     bodyMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
@@ -105,9 +112,9 @@ private val AppTypography = Typography(
     ),
     titleLarge = TextStyle(
         fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 20.sp,
-        letterSpacing = (-0.3).sp,
+        fontWeight = FontWeight.Bold,
+        fontSize = 22.sp,
+        letterSpacing = (-0.44).sp,
     ),
 )
 
@@ -117,7 +124,6 @@ fun PilottyTheme(
     content: @Composable () -> Unit,
 ) {
     val pc = if (darkTheme) buildDark() else buildLight()
-    // 给 Material3 的 ColorScheme 填上最小子集, 避免 ripple / 系统组件默认色怪异
     val m3 = if (darkTheme) {
         darkColorScheme(
             primary = pc.accent,

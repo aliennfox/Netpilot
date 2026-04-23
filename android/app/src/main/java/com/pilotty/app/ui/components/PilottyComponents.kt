@@ -3,21 +3,18 @@ package com.pilotty.app.ui.components
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -25,8 +22,8 @@ import androidx.compose.ui.unit.sp
 import com.pilotty.app.ui.theme.LocalPilottyColors
 
 /**
- * 无边框抬升卡片 —— 对齐设计稿 .card (box-shadow 两层柔和阴影)。
- * Android 侧用 Material3 Surface + shadowElevation 逼近;shape 14dp 圆角。
+ * 设计稿 .card —— 16px 圆角, 20px padding (默认), shadow-only 无边框。
+ * soft = 14dp padding (card-tight), compact = 14x16 padding (card-compact)
  */
 @Composable
 fun PilottyCard(
@@ -36,17 +33,19 @@ fun PilottyCard(
     content: @Composable () -> Unit,
 ) {
     val pc = LocalPilottyColors.current
+    // Dark 下 shadow 不可见, 改用极细 hairline 边框
     val elevation = when {
+        pc.isDark -> 0.dp
         strong -> 6.dp
-        soft -> 1.dp
-        else -> 3.dp
+        soft -> 3.dp
+        else -> 4.dp
     }
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(16.dp),
         color = pc.surface,
         tonalElevation = 0.dp,
-        shadowElevation = if (pc.isDark) 0.dp else elevation,
+        shadowElevation = elevation,
         border = if (pc.isDark) BorderStroke(1.dp, pc.hairline) else null,
     ) {
         content()
@@ -54,18 +53,57 @@ fun PilottyCard(
 }
 
 /**
- * Kicker — 全大写小号行号, 用于分区标题。
+ * Card-group —— 多个 Row 垂直堆叠, 共享卡片外壳, 每行之间 hairline 分隔。
+ * 用于 Settings / NodeDetail Config / Agent Log 等列表。
  */
 @Composable
-fun Kicker(text: String, modifier: Modifier = Modifier) {
+fun CardGroup(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val pc = LocalPilottyColors.current
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        color = pc.surface,
+        tonalElevation = 0.dp,
+        shadowElevation = if (pc.isDark) 0.dp else 4.dp,
+        border = if (pc.isDark) BorderStroke(1.dp, pc.hairline) else null,
+    ) {
+        Column(content = content)
+    }
+}
+
+/**
+ * Kicker —— 全大写小号分区标题, 10sp + 1.6sp 字距。
+ */
+@Composable
+fun Kicker(text: String, modifier: Modifier = Modifier, color: Color? = null) {
     val pc = LocalPilottyColors.current
     Text(
         text = text.uppercase(),
         modifier = modifier,
-        color = pc.ink3,
+        color = color ?: pc.ink3,
         fontSize = 10.sp,
-        fontWeight = FontWeight.SemiBold,
-        letterSpacing = 1.4.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 1.6.sp,
+    )
+}
+
+/**
+ * SectionHead —— kicker 的放大版, 用于 Home / NodeDetail 分段头,
+ * 11sp + 1.8sp letter-spacing + ink2 字色 (比 kicker 略深)
+ */
+@Composable
+fun SectionHead(text: String, modifier: Modifier = Modifier) {
+    val pc = LocalPilottyColors.current
+    Text(
+        text = text.uppercase(),
+        modifier = modifier,
+        color = pc.ink2,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 1.98.sp,
     )
 }
 
@@ -98,14 +136,12 @@ fun LiveDot(modifier: Modifier = Modifier) {
         modifier = modifier.size(16.dp),
         contentAlignment = Alignment.Center,
     ) {
-        // 外层脉冲圈
         Box(
             modifier = Modifier
                 .size((6 * scale).dp.coerceAtMost(16.dp))
                 .clip(CircleShape)
                 .background(pc.accent.copy(alpha = alpha)),
         )
-        // 核心点
         Box(
             modifier = Modifier
                 .size(6.dp)
@@ -116,7 +152,7 @@ fun LiveDot(modifier: Modifier = Modifier) {
 }
 
 /**
- * 静态圆点 (无动画, 用于列表分隔 / 非活跃状态)。
+ * 静态圆点 (无动画)。
  */
 @Composable
 fun StaticDot(color: Color, modifier: Modifier = Modifier, size: Int = 6) {
@@ -129,21 +165,21 @@ fun StaticDot(color: Color, modifier: Modifier = Modifier, size: Int = 6) {
 }
 
 /**
- * 国家代码胸牌 —— 2 字母大写单字母色块。
+ * 国家代码胸牌 —— 2 字母大写, 28x20, 浅灰底色。
  */
 @Composable
 fun FlagChip(code: String, modifier: Modifier = Modifier) {
     val pc = LocalPilottyColors.current
     Box(
         modifier = modifier
-            .size(width = 26.dp, height = 18.dp)
-            .clip(RoundedCornerShape(4.dp))
-            .background(pc.surface3),
+            .size(width = 28.dp, height = 20.dp)
+            .clip(RoundedCornerShape(5.dp))
+            .background(pc.surface2),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = code.uppercase(),
-            color = pc.ink2,
+            color = pc.monoInk,
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 0.4.sp,
@@ -153,28 +189,33 @@ fun FlagChip(code: String, modifier: Modifier = Modifier) {
 }
 
 /**
- * 负载条 —— 灰底进度条, 宽 42dp。
+ * 负载条 —— 固定宽 48dp, 4dp 高, 用于 Nodes 列表。
  */
 @Composable
-fun LoadBar(pct: Int, modifier: Modifier = Modifier) {
+fun LoadBar(pct: Int, modifier: Modifier = Modifier, tone: String = "nominal") {
     val pc = LocalPilottyColors.current
+    val color = when (tone) {
+        "warn" -> pc.warn
+        "alert" -> pc.error
+        else -> pc.accent
+    }
     Box(
         modifier = modifier
-            .size(width = 42.dp, height = 4.dp)
+            .size(width = 48.dp, height = 4.dp)
             .clip(RoundedCornerShape(2.dp))
-            .background(pc.hairline),
+            .background(pc.surface2),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxHeight()
                 .fillMaxWidth(pct.coerceIn(0, 100) / 100f)
-                .background(pc.ink2),
+                .background(color),
         )
     }
 }
 
 /**
- * 胸牌 chip —— 固定高 30dp, 边框样式。用于筛选 / 模式切换。
+ * Chip —— 32dp 高, 12 padding, 选中时黑底白字 (active), 非选中 surface + shadow。
  */
 @Composable
 fun PilottyChip(
@@ -183,15 +224,17 @@ fun PilottyChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     leading: (@Composable () -> Unit)? = null,
+    height: Int = 32,
 ) {
     val pc = LocalPilottyColors.current
     val bg = if (selected) pc.ink else pc.surface
-    val fg = if (selected) pc.bg else pc.ink2
+    val fg = if (selected) pc.bg else pc.ink
     Surface(
-        modifier = modifier.height(30.dp),
-        shape = RoundedCornerShape(10.dp),
+        modifier = modifier.height(height.dp),
+        shape = RoundedCornerShape(999.dp),
         color = bg,
-        border = if (selected) null else BorderStroke(1.dp, pc.hairlineStrong),
+        shadowElevation = if (!selected && !pc.isDark) 3.dp else 0.dp,
+        border = if (pc.isDark && !selected) BorderStroke(1.dp, pc.hairline) else null,
         onClick = onClick,
     ) {
         Row(
@@ -212,52 +255,101 @@ fun PilottyChip(
 }
 
 /**
- * 按钮 —— 3 种 variant: primary (黑底白字) / accent (柠檬绿) / outline (默认)。
+ * Button —— 6 种 variant (Outline/Accent 是旧名 alias, 保留向后兼容)。
+ *   Primary: ink bg / bg fg, 48dp, 主 CTA
+ *   Power:   accent bg / accentOnBg fg, 48dp, uppercase — 断开 / 连接
+ *   Ghost:   outline border + ink 字, 40dp — 次要 action
+ *   Mono:    surface2 bg + ink fg, 36dp — 工具栏 small CTA
+ *   Outline: Ghost 旧名 (兼容)
+ *   Accent:  Power 旧名 (兼容)
  */
-enum class PilottyButtonVariant { Primary, Accent, Outline, Ghost }
+enum class PilottyButtonVariant { Primary, Power, Ghost, Mono, Outline, Accent }
 
 @Composable
 fun PilottyButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    variant: PilottyButtonVariant = PilottyButtonVariant.Outline,
-    small: Boolean = false,
+    variant: PilottyButtonVariant = PilottyButtonVariant.Ghost,
     leading: (@Composable () -> Unit)? = null,
     enabled: Boolean = true,
+    small: Boolean = false,
 ) {
     val pc = LocalPilottyColors.current
-    val (bg, fg, border) = when (variant) {
-        PilottyButtonVariant.Primary -> Triple(pc.ink, pc.bg, null)
-        PilottyButtonVariant.Accent -> Triple(pc.accent, PilottyColorsAccentOn, null)
-        PilottyButtonVariant.Outline -> Triple(pc.surface, pc.ink, BorderStroke(1.dp, pc.hairlineStrong))
-        PilottyButtonVariant.Ghost -> Triple(Color.Transparent, pc.ink2, null)
+    // 归一化旧变体名
+    val v = when (variant) {
+        PilottyButtonVariant.Outline -> PilottyButtonVariant.Ghost
+        PilottyButtonVariant.Accent -> PilottyButtonVariant.Power
+        else -> variant
     }
-    val height = if (small) 28.dp else 38.dp
-    val shape = if (small) RoundedCornerShape(8.dp) else RoundedCornerShape(10.dp)
+    val (bg, fg, border, baseHeight, fontWeight) = when (v) {
+        PilottyButtonVariant.Primary -> PilottyBtnSpec(pc.ink, pc.bg, null, 48.dp, FontWeight.SemiBold)
+        PilottyButtonVariant.Power -> PilottyBtnSpec(pc.accent, pc.accentOnBg, null, 48.dp, FontWeight.Bold)
+        PilottyButtonVariant.Ghost -> PilottyBtnSpec(Color.Transparent, pc.ink, BorderStroke(1.dp, pc.ink), 40.dp, FontWeight.Medium)
+        PilottyButtonVariant.Mono -> PilottyBtnSpec(pc.surface2, pc.ink, null, 36.dp, FontWeight.Medium)
+        else -> PilottyBtnSpec(Color.Transparent, pc.ink, BorderStroke(1.dp, pc.ink), 40.dp, FontWeight.Medium)
+    }
+    val height = if (small) (baseHeight - 8.dp).coerceAtLeast(28.dp) else baseHeight
     Surface(
         modifier = modifier.height(height),
-        shape = shape,
+        shape = RoundedCornerShape(999.dp),
         color = if (enabled) bg else bg.copy(alpha = 0.5f),
         border = border,
         onClick = onClick,
         enabled = enabled,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = if (small) 10.dp else 14.dp),
+            modifier = Modifier.padding(horizontal = if (small) 12.dp else 16.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         ) {
             leading?.invoke()
             Text(
                 text = text,
-                color = fg,
+                color = if (enabled) fg else fg.copy(alpha = 0.6f),
                 fontSize = if (small) 12.sp else 13.5.sp,
-                fontWeight = if (variant == PilottyButtonVariant.Accent) FontWeight.SemiBold else FontWeight.Medium,
-                letterSpacing = (-0.05).sp,
+                fontWeight = fontWeight,
+                letterSpacing = if (v == PilottyButtonVariant.Power) 0.4.sp else (-0.05).sp,
             )
         }
     }
 }
 
-private val PilottyColorsAccentOn = Color(0xFF1A2300)
+private data class PilottyBtnSpec(
+    val bg: Color,
+    val fg: Color,
+    val border: BorderStroke?,
+    val height: androidx.compose.ui.unit.Dp,
+    val fontWeight: FontWeight,
+)
+
+/**
+ * Toggle —— 36x22 胶囊开关, on 时 accent 底, off 时 ink4 底。
+ */
+@Composable
+fun PilottyToggle(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    scale: Float = 1f,
+) {
+    val pc = LocalPilottyColors.current
+    val track = if (checked) pc.accent else pc.ink4
+    val thumbBg = if (checked) pc.accentOnBg else Color.White
+    Box(
+        modifier = modifier
+            .size(width = (36 * scale).dp, height = (22 * scale).dp)
+            .clip(RoundedCornerShape((11 * scale).dp))
+            .background(track)
+            .clickable { onCheckedChange(!checked) }
+            .padding((2 * scale).dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size((18 * scale).dp)
+                .offset(x = if (checked) (16 * scale).dp else 0.dp)
+                .clip(CircleShape)
+                .background(thumbBg),
+        )
+    }
+}

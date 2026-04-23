@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pilotty.app.ui.RulesSection
 import com.pilotty.app.ui.components.Kicker
+import com.pilotty.app.ui.components.SectionHead
 import com.pilotty.app.ui.components.PilottyCard
 import com.pilotty.app.ui.components.PilottyChip
 import com.pilotty.app.ui.theme.LocalPilottyColors
@@ -30,6 +31,7 @@ fun SettingsScreen(
     onThemeChange: (ThemeMode) -> Unit,
     onNavigateLogs: () -> Unit = {},
     onNavigateConnections: () -> Unit = {},
+    onNavigateAgentTools: () -> Unit = {},
 ) {
     val pc = LocalPilottyColors.current
     Column(
@@ -45,23 +47,23 @@ fun SettingsScreen(
     ) {
         Spacer(Modifier.height(8.dp))
         Text(
-            "Settings",
+            "系统",
             color = pc.ink,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = (-0.3).sp,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.44).sp,
         )
         Text(
-            "主题 · 分流规则 · 账户",
+            "v1.4.2 · 主题 · 分流规则 · 账户",
             color = pc.ink3,
-            fontSize = 11.sp,
+            fontSize = 10.5.sp,
             fontFamily = FontFamily.Monospace,
             letterSpacing = 0.2.sp,
         )
 
         // 主题切换
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Kicker("主题")
+            SectionHead("主题")
             PilottyCard(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier.padding(14.dp),
@@ -92,6 +94,9 @@ fun SettingsScreen(
 
         // Agent · LLM apiKey 配置 (M8 最短路径)
         AgentApiKeySection()
+
+        // Mission Control 设计新增: Agent 工具权限矩阵入口 (09 屏)
+        AgentToolsEntry(onNavigateAgentTools = onNavigateAgentTools)
 
         // Per-App VPN (M14)
         PerAppVpnSection()
@@ -130,7 +135,7 @@ fun SettingsScreen(
         // 关于 — Phase 10-F-4: 版本号从 Go 层读, 不硬编; Go 侧含 sing-box / go 版本信息
         val coreVersion = remember { com.pilotty.app.data.PilottyRepository.version() }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Kicker("About")
+            SectionHead("About")
             PilottyCard(modifier = Modifier.fillMaxWidth(), soft = true) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Pilotty", color = pc.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
@@ -150,6 +155,32 @@ fun SettingsScreen(
 
 enum class ThemeMode { System, Light, Dark }
 
+/**
+ * Agent 工具权限矩阵的入口 —— 点击进入 AgentToolsScreen (09 屏)。
+ */
+@Composable
+private fun AgentToolsEntry(onNavigateAgentTools: () -> Unit) {
+    val pc = LocalPilottyColors.current
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionHead("Agent 工具")
+        PilottyCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onNavigateAgentTools() },
+            soft = true,
+        ) {
+            Column(Modifier.padding(14.dp)) {
+                Text("工具权限 · Auto 开关", color = pc.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "控制 Agent 可调用的工具, 每个工具独立 Enable / Auto 开关",
+                    color = pc.ink3,
+                    fontSize = 11.sp,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun ObserveEntriesSection(
     onNavigateLogs: () -> Unit,
@@ -157,7 +188,7 @@ private fun ObserveEntriesSection(
 ) {
     val pc = LocalPilottyColors.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Kicker("观测")
+        SectionHead("观测")
         PilottyCard(
             modifier = Modifier
                 .fillMaxWidth()

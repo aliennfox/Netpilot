@@ -1,6 +1,7 @@
 package com.pilotty.app.ui.subs
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -122,14 +123,15 @@ fun SubsScreen(vm: SubsViewModel = viewModel(), onNavigateQrScan: () -> Unit = {
                     }
                 }
             } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(ui.subscriptions, key = { it.id }) { sub ->
                         SubscriptionCard(
                             sub = sub,
                             onRemove = { removeTarget = sub },
+                            onUpdate = { vm.updateAll() },
                         )
                     }
-                    item { Spacer(Modifier.height(96.dp)) } // floating nav 留白
+                    item { Spacer(Modifier.height(24.dp)) }
                 }
             }
         }
@@ -217,55 +219,128 @@ private fun ImportConfirmDialog(
     )
 }
 
+/**
+ * Mission Control SubCard —— 设计稿 07 屏结构:
+ *   顶行: 名称 (15sp SemiBold) + mono URL ellipsized + chevron
+ *   中部: `NODES n | 分隔条 | UPDATED xxx` 水平 meta
+ *   下部: TRAFFIC kicker + used/total mono + Progress
+ *   底部: [更新] mono button + [删除] destructive text
+ */
 @Composable
-private fun SubscriptionCard(sub: SubscriptionDto, onRemove: () -> Unit) {
+private fun SubscriptionCard(sub: SubscriptionDto, onRemove: () -> Unit, onUpdate: () -> Unit = {}) {
     val pc = LocalPilottyColors.current
     PilottyCard(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
+        Column(Modifier.padding(20.dp)) {
+            // 顶行 name + URL + chevron
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(
-                    sub.name.ifEmpty { "未命名" },
-                    color = pc.ink,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                TextButton(onClick = onRemove) {
-                    Text("删除", color = pc.error, fontSize = 12.sp)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        sub.name.ifEmpty { "未命名" },
+                        color = pc.ink,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = (-0.075).sp,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        sub.url,
+                        color = pc.ink3,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                    )
                 }
+                Text(
+                    "›",
+                    color = pc.ink3,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
             }
-            Text(
-                sub.url,
-                color = pc.ink3,
-                fontSize = 11.5.sp,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1,
-            )
+            Spacer(Modifier.height(12.dp))
+            // 水平 meta: NODES | UPDATED
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Text(
-                    "${sub.nodeCount} 个节点",
-                    color = pc.ink2,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-                if (sub.autoUpdate) {
+                Column {
+                    com.pilotty.app.ui.components.Kicker("Nodes")
+                    Spacer(Modifier.height(3.dp))
                     Text(
-                        "·  自动更新 ${sub.intervalMinutes} min",
-                        color = pc.ink4,
-                        fontSize = 11.sp,
+                        sub.nodeCount.toString(),
+                        color = pc.ink,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(26.dp)
+                        .background(pc.hairline),
+                )
+                Column {
+                    com.pilotty.app.ui.components.Kicker("Updated")
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        if (sub.autoUpdate) "自动 · ${sub.intervalMinutes} min" else "手动",
+                        color = pc.ink2,
+                        fontSize = 13.sp,
+                        fontFamily = FontFamily.Monospace,
                     )
                 }
             }
-            sub.userInfo?.let { QuotaRow(it) }
+            // Quota block
+            sub.userInfo?.let { info ->
+                Spacer(Modifier.height(14.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    com.pilotty.app.ui.components.Kicker("Traffic")
+                    val used = info.upload + info.download
+                    Text(
+                        "${formatBytes(used)} / ${formatBytes(info.total)}" +
+                            (if (info.expire > 0) " · ${formatTimestamp(info.expire)}" else ""),
+                        color = pc.ink2,
+                        fontSize = 11.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                val used = info.upload + info.download
+                val pct = if (info.total > 0) (used.toFloat() / info.total.toFloat() * 100f).coerceIn(0f, 100f) else 0f
+                com.pilotty.app.ui.components.Progress(pct = pct, height = 6)
+            }
+            // 底部 actions
+            Spacer(Modifier.height(14.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PilottyButton(
+                    text = "更新",
+                    onClick = onUpdate,
+                    variant = PilottyButtonVariant.Mono,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onRemove) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text("删除", color = pc.error, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
         }
     }
 }

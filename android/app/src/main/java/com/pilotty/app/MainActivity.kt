@@ -148,11 +148,28 @@ fun PilottyApp(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    // Mission Control 设计: 底部 nav flush, 和内容共享 Column 布局 (非 floating)
+    // IME 弹起时仍隐藏 nav, 避免遮住输入保存按钮
+    val view = LocalView.current
+    var imeVisible by remember { mutableStateOf(false) }
+    DisposableEffect(view) {
+        val listener = android.view.ViewTreeObserver.OnGlobalLayoutListener {
+            val insets = ViewCompat.getRootWindowInsets(view)
+            imeVisible = insets?.isVisible(WindowInsetsCompat.Type.ime()) ?: false
+        }
+        view.viewTreeObserver.addOnGlobalLayoutListener(listener)
+        onDispose { view.viewTreeObserver.removeOnGlobalLayoutListener(listener) }
+    }
+
+    // 子页面 (node_detail / agent_tools / logs / connections / qr) 不显示底部 nav
+    val isSubPage = current.startsWith("node_detail") || current == "agent_tools" ||
+        current == "logs" || current == "connections" || current == "qr"
+
+    androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxSize()) {
         NavHost(
             navController = nav,
             startDestination = "home",
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.weight(1f).fillMaxSize(),
         ) {
             composable("home") {
                 HomeScreen(
@@ -162,7 +179,16 @@ fun PilottyApp(
                 )
             }
             composable("chat") { ChatScreen() }
-            composable("nodes") { NodesScreen(onNavigateSubs = { nav.navigate("subs") }) }
+            composable("nodes") {
+                NodesScreen(
+                    onNavigateSubs = { nav.navigate("subs") },
+                    onOpenDetail = { id -> nav.navigate("node_detail/$id") },
+                )
+            }
+            composable("node_detail/{nodeId}") { entry ->
+                val nodeId = entry.arguments?.getString("nodeId") ?: ""
+                com.pilotty.app.ui.NodeDetailScreen(nodeId = nodeId, onBack = { nav.popBackStack() })
+            }
             composable("subs") { SubsScreen(onNavigateQrScan = { nav.navigate("qr") }) }
             composable("settings") {
                 SettingsScreen(
@@ -170,7 +196,11 @@ fun PilottyApp(
                     onThemeChange = onThemeChange,
                     onNavigateLogs = { nav.navigate("logs") },
                     onNavigateConnections = { nav.navigate("connections") },
+                    onNavigateAgentTools = { nav.navigate("agent_tools") },
                 )
+            }
+            composable("agent_tools") {
+                com.pilotty.app.ui.settings.AgentToolsScreen(onBack = { nav.popBackStack() })
             }
             composable("logs") { LogsScreen(onBack = { nav.popBackStack() }) }
             composable("connections") { ConnectionsScreen(onBack = { nav.popBackStack() }) }
@@ -178,7 +208,6 @@ fun PilottyApp(
                 QrScanScreen(
                     onBack = { nav.popBackStack() },
                     onResult = { scanned ->
-                        // 统一走 ImportBus — 和 Deep Link / 剪贴板同一条路
                         com.pilotty.app.ui.import_.ImportBus.post(scanned)
                         nav.popBackStack()
                     },
@@ -186,20 +215,7 @@ fun PilottyApp(
             }
         }
 
-        // Phase 4: IME 打开时隐藏 floating nav, 避免它覆盖 Settings AgentApiKey 的保存/取消 按钮。
-        // 直接用 ViewTreeObserver + WindowInsetsCompat — 比 compose-foundation 的 isImeVisible 可靠
-        // (后者在没显式 setDecorFitsSystemWindows(false) 的情况下状态不刷新, 实测首帧就卡 true)。
-        val view = LocalView.current
-        var imeVisible by remember { mutableStateOf(false) }
-        DisposableEffect(view) {
-            val listener = android.view.ViewTreeObserver.OnGlobalLayoutListener {
-                val insets = ViewCompat.getRootWindowInsets(view)
-                imeVisible = insets?.isVisible(WindowInsetsCompat.Type.ime()) ?: false
-            }
-            view.viewTreeObserver.addOnGlobalLayoutListener(listener)
-            onDispose { view.viewTreeObserver.removeOnGlobalLayoutListener(listener) }
-        }
-        if (!imeVisible) {
+        if (!imeVisible && !isSubPage) {
             FloatingBottomNav(
                 items = navItems,
                 current = current,
@@ -212,7 +228,6 @@ fun PilottyApp(
                         }
                     }
                 },
-                modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
     }
