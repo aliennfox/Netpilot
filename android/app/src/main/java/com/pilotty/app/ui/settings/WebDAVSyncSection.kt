@@ -28,7 +28,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pilotty.app.data.PilottyRepository
-import com.pilotty.app.ui.components.Kicker
+import com.pilotty.app.ui.components.SectionHead
 import com.pilotty.app.ui.components.PilottyButton
 import com.pilotty.app.ui.components.PilottyButtonVariant
 import com.pilotty.app.ui.components.PilottyCard
@@ -82,7 +82,7 @@ fun WebDAVSyncSection() {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Kicker("WebDAV 同步")
+        SectionHead("WebDAV 同步")
         PilottyCard(modifier = Modifier.fillMaxWidth(), soft = true) {
             Column(Modifier.padding(14.dp)) {
                 Text(

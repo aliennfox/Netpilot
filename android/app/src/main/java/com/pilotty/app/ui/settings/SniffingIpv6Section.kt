@@ -24,7 +24,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.pilotty.app.ui.components.Kicker
+import com.pilotty.app.ui.components.SectionHead
 import com.pilotty.app.ui.components.PilottyCard
 import com.pilotty.app.ui.components.PilottyChip
 import com.pilotty.app.ui.theme.LocalPilottyColors
@@ -48,7 +48,7 @@ fun SniffingIpv6Section() {
     val snapshot by prefs.state.collectAsState()
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Kicker("网络引擎")
+        SectionHead("网络引擎")
         PilottyCard(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
 

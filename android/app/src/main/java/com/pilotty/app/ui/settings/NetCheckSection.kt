@@ -32,7 +32,7 @@ import androidx.compose.ui.unit.sp
 import com.pilotty.app.data.NetCheckLineDto
 import com.pilotty.app.data.NetCheckReportDto
 import com.pilotty.app.data.PilottyRepository
-import com.pilotty.app.ui.components.Kicker
+import com.pilotty.app.ui.components.SectionHead
 import com.pilotty.app.ui.components.PilottyButton
 import com.pilotty.app.ui.components.PilottyButtonVariant
 import com.pilotty.app.ui.components.PilottyCard
@@ -56,7 +56,7 @@ fun NetCheckSection() {
     var expandedIdx by remember { mutableStateOf<Int?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Kicker("网络自检")
+        SectionHead("网络自检")
         PilottyCard(modifier = Modifier.fillMaxWidth(), soft = true) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

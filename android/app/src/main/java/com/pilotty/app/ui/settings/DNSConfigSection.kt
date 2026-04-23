@@ -31,7 +31,7 @@ import androidx.compose.ui.unit.sp
 import com.pilotty.app.data.DNSConfigDto
 import com.pilotty.app.data.DNSServerDto
 import com.pilotty.app.data.PilottyRepository
-import com.pilotty.app.ui.components.Kicker
+import com.pilotty.app.ui.components.SectionHead
 import com.pilotty.app.ui.components.PilottyButton
 import com.pilotty.app.ui.components.PilottyButtonVariant
 import com.pilotty.app.ui.components.PilottyCard
@@ -88,7 +88,7 @@ fun DNSConfigSection() {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Kicker("DNS")
+        SectionHead("DNS")
         PilottyCard(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
 

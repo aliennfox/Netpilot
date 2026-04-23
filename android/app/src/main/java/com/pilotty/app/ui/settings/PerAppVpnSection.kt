@@ -31,7 +31,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.graphics.drawable.toBitmap
 import com.pilotty.app.perapp.InstalledAppsLoader
 import com.pilotty.app.perapp.PerAppVpnPrefs
-import com.pilotty.app.ui.components.Kicker
+import com.pilotty.app.ui.components.SectionHead
 import com.pilotty.app.ui.components.PilottyCard
 import com.pilotty.app.ui.components.PilottyChip
 import com.pilotty.app.ui.theme.LocalPilottyColors
@@ -53,7 +53,7 @@ fun PerAppVpnSection() {
     val pc = LocalPilottyColors.current
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Kicker("按 App 代理")
+        SectionHead("按 App 代理")
         PilottyCard(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(

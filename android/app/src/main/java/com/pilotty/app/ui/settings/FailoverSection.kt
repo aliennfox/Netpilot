@@ -26,7 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pilotty.app.data.FailoverStatusDto
 import com.pilotty.app.data.PilottyRepository
-import com.pilotty.app.ui.components.Kicker
+import com.pilotty.app.ui.components.SectionHead
 import com.pilotty.app.ui.components.PilottyCard
 import com.pilotty.app.ui.theme.LocalPilottyColors
 import kotlinx.coroutines.delay
@@ -68,7 +68,7 @@ fun FailoverSection() {
 
     val s = status
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Kicker("故障自动切换")
+        SectionHead("故障自动切换")
         PilottyCard(modifier = Modifier.fillMaxWidth(), soft = true) {
             Column(Modifier.padding(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

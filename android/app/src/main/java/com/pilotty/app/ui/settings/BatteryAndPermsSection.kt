@@ -33,7 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.pilotty.app.ui.components.Kicker
+import com.pilotty.app.ui.components.SectionHead
 import com.pilotty.app.ui.components.PilottyButton
 import com.pilotty.app.ui.components.PilottyButtonVariant
 import com.pilotty.app.ui.components.PilottyCard
@@ -75,7 +75,7 @@ fun BatteryAndPermsSection() {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Kicker("稳定性 & 权限")
+        SectionHead("稳定性 & 权限")
 
         // 通知权限 (Android 13+ 才需要 runtime prompt; API < 33 隐式授予)
         PilottyCard(modifier = Modifier.fillMaxWidth(), soft = true) {

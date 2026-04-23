@@ -15,7 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pilotty.app.agent.ApiKeyPrefs
-import com.pilotty.app.ui.components.Kicker
+import com.pilotty.app.ui.components.SectionHead
 import com.pilotty.app.ui.components.PilottyButton
 import com.pilotty.app.ui.components.PilottyButtonVariant
 import com.pilotty.app.ui.components.PilottyCard
@@ -40,7 +40,7 @@ fun AgentApiKeySection() {
     var visible by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Kicker("Agent · LLM")
+        SectionHead("Agent · LLM")
         PilottyCard(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("DeepSeek via 硅基流动", color = pc.ink, fontSize = 14.sp, fontWeight = FontWeight.Medium)

@@ -27,7 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pilotty.app.data.PilottyRepository
-import com.pilotty.app.ui.components.Kicker
+import com.pilotty.app.ui.components.SectionHead
 import com.pilotty.app.ui.components.PilottyButton
 import com.pilotty.app.ui.components.PilottyButtonVariant
 import com.pilotty.app.ui.components.PilottyCard
@@ -88,7 +88,7 @@ fun BackupRestoreSection() {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Kicker("备份 & 恢复")
+        SectionHead("备份 & 恢复")
         PilottyCard(modifier = Modifier.fillMaxWidth(), soft = true) {
             Column(Modifier.padding(14.dp)) {
                 Text("配置导出 / 导入", color = pc.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)

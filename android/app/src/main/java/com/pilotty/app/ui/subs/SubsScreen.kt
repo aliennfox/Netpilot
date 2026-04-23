@@ -59,22 +59,23 @@ fun SubsScreen(vm: SubsViewModel = viewModel(), onNavigateQrScan: () -> Unit = {
                 .padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment = Alignment.Top,
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Subscriptions",
+                        "订阅",
                         color = pc.ink,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = (-0.3).sp,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.44).sp,
                     )
+                    val totalNodes = ui.subscriptions.sumOf { it.nodeCount }
                     Text(
-                        "${ui.subscriptions.size} sources · tap 添加 to import",
+                        "${ui.subscriptions.size} sources · $totalNodes nodes",
                         color = pc.ink3,
                         fontSize = 10.5.sp,
                         letterSpacing = 0.2.sp,
@@ -90,7 +91,7 @@ fun SubsScreen(vm: SubsViewModel = viewModel(), onNavigateQrScan: () -> Unit = {
                         enabled = !ui.loading && ui.subscriptions.isNotEmpty(),
                     )
                     PilottyButton(
-                        text = "添加",
+                        text = "+",
                         onClick = { addDialogOpen = true },
                         variant = PilottyButtonVariant.Primary,
                         small = true,
@@ -111,14 +112,16 @@ fun SubsScreen(vm: SubsViewModel = viewModel(), onNavigateQrScan: () -> Unit = {
             if (ui.subscriptions.isEmpty() && !ui.loading) {
                 PilottyCard(modifier = Modifier.fillMaxWidth()) {
                     Column(
-                        Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text("还没有订阅", color = pc.ink, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        com.pilotty.app.ui.components.Kicker("Empty · NO SUBS")
+                        Text("还没有任何订阅", color = pc.ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                         Text(
-                            "点右上「添加」粘贴 URL 导入。支持 v2ray subscribe / clash / sing-box 格式。",
+                            "点右上「+」添加 —— 支持 Clash YAML · sing-box JSON · v2ray base64 三种格式。也可粘贴 vmess:// / ss:// / vless:// 等单节点 URI, 或从本地文件导入。",
                             color = pc.ink3,
                             fontSize = 12.5.sp,
+                            lineHeight = 19.sp,
                         )
                     }
                 }
