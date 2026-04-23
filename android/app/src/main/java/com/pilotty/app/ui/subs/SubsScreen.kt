@@ -28,7 +28,7 @@ import com.pilotty.app.ui.theme.LocalPilottyColors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SubsScreen(vm: SubsViewModel = viewModel()) {
+fun SubsScreen(vm: SubsViewModel = viewModel(), onNavigateQrScan: () -> Unit = {}) {
     val pc = LocalPilottyColors.current
     val ui by vm.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -138,6 +138,7 @@ fun SubsScreen(vm: SubsViewModel = viewModel()) {
     if (addDialogOpen) {
         AddSubscriptionDialog(
             onDismiss = { addDialogOpen = false },
+            onScanQr = onNavigateQrScan,
             onConfirm = { name, url ->
                 vm.addSubscription(name, url)
                 addDialogOpen = false
@@ -330,6 +331,7 @@ private fun pickImportableFromClipboard(ctx: android.content.Context): String? {
 private fun AddSubscriptionDialog(
     onDismiss: () -> Unit,
     onConfirm: (name: String, url: String) -> Unit,
+    onScanQr: () -> Unit = {},
 ) {
     val pc = LocalPilottyColors.current
     val ctx = LocalContext.current
@@ -342,13 +344,25 @@ private fun AddSubscriptionDialog(
         title = { Text("添加订阅", color = pc.ink) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (clipboardHit != null && url.isBlank()) {
+                // Phase 10-E-C: 扫码入口, 优先于剪贴板 (QR 是分享节点主流路径)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     PilottyButton(
-                        text = "使用剪贴板: " + clipboardHit.take(40) + if (clipboardHit.length > 40) "..." else "",
-                        onClick = { url = clipboardHit },
+                        text = "扫码导入",
+                        onClick = {
+                            onDismiss()
+                            onScanQr()
+                        },
                         variant = PilottyButtonVariant.Outline,
                         small = true,
                     )
+                    if (clipboardHit != null && url.isBlank()) {
+                        PilottyButton(
+                            text = "使用剪贴板",
+                            onClick = { url = clipboardHit },
+                            variant = PilottyButtonVariant.Outline,
+                            small = true,
+                        )
+                    }
                 }
                 OutlinedTextField(
                     value = name,

@@ -39,6 +39,7 @@ import com.pilotty.app.ui.components.NavItem
 import com.pilotty.app.ui.import_.ImportBus
 import com.pilotty.app.ui.observe.ConnectionsScreen
 import com.pilotty.app.ui.observe.LogsScreen
+import com.pilotty.app.ui.qr.QrScanScreen
 import com.pilotty.app.ui.settings.SettingsScreen
 import com.pilotty.app.ui.settings.ThemeMode
 import com.pilotty.app.ui.settings.ThemePrefs
@@ -162,7 +163,7 @@ fun PilottyApp(
             }
             composable("chat") { ChatScreen() }
             composable("nodes") { NodesScreen(onNavigateSubs = { nav.navigate("subs") }) }
-            composable("subs") { SubsScreen() }
+            composable("subs") { SubsScreen(onNavigateQrScan = { nav.navigate("qr") }) }
             composable("settings") {
                 SettingsScreen(
                     themeMode = themeMode,
@@ -173,6 +174,16 @@ fun PilottyApp(
             }
             composable("logs") { LogsScreen(onBack = { nav.popBackStack() }) }
             composable("connections") { ConnectionsScreen(onBack = { nav.popBackStack() }) }
+            composable("qr") {
+                QrScanScreen(
+                    onBack = { nav.popBackStack() },
+                    onResult = { scanned ->
+                        // 统一走 ImportBus — 和 Deep Link / 剪贴板同一条路
+                        com.pilotty.app.ui.import_.ImportBus.post(scanned)
+                        nav.popBackStack()
+                    },
+                )
+            }
         }
 
         // Phase 4: IME 打开时隐藏 floating nav, 避免它覆盖 Settings AgentApiKey 的保存/取消 按钮。
