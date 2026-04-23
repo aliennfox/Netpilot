@@ -107,6 +107,9 @@ fun SettingsScreen(
         // Phase 10-E-D: 配置备份 / 恢复
         BackupRestoreSection()
 
+        // Phase 10-E-E: WebDAV 云同步
+        WebDAVSyncSection()
+
         // 分流规则 (原 Rules tab 内联) —— RulesSection 内部已有 Templates / Active rules
         // 两个 Kicker 作为子标题,不再在外层重复"分流规则" 标题
         RulesSection()

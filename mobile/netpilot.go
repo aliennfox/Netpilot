@@ -31,6 +31,7 @@ import (
 	"github.com/foxnetpilot/netpilot/internal/overlay"
 	"github.com/foxnetpilot/netpilot/internal/router"
 	"github.com/foxnetpilot/netpilot/internal/subscription"
+	netsync "github.com/foxnetpilot/netpilot/internal/sync"
 	"github.com/foxnetpilot/netpilot/internal/template"
 	"github.com/foxnetpilot/netpilot/internal/tool"
 	"github.com/foxnetpilot/netpilot/libcore"
@@ -1050,6 +1051,64 @@ func (c *Client) ListBuiltinRuleSets() string {
 // Templates 返回内置模板列表。
 func (c *Client) Templates() string {
 	return okJSON(c.templates.List())
+}
+
+// WebDAVTest 测试 WebDAV 连接 (Phase 10-E-E)。 HEAD BaseURL + Basic Auth,
+// 不拉文件, 只验证 URL 可达 + 认证通过。
+func (c *Client) WebDAVTest(baseURL, user, pass string) string {
+	if baseURL == "" {
+		return errStr("WebDAV URL 为空")
+	}
+	cli := netsync.NewWebDAVClient(baseURL, user, pass)
+	if err := cli.TestConnection(); err != nil {
+		return errJSON(err)
+	}
+	return okJSON(map[string]string{"message": "连接成功"})
+}
+
+// WebDAVPush 把当前 overlay + 订阅备份推到 WebDAV path (Phase 10-E-E)。
+// path 示例: "pilotty-backup.json" —— 相对 baseURL 解析, 子目录需在云端先建好。
+// 内部走 backup.Manager.Export 拿 JSON → PUT 上传。
+func (c *Client) WebDAVPush(baseURL, user, pass, path string) string {
+	if path == "" {
+		return errStr("WebDAV path 为空")
+	}
+	mgr := backup.NewManager(c.overlay, c.subMgr.Store())
+	data, err := mgr.Export()
+	if err != nil {
+		return errJSON(fmt.Errorf("导出备份失败: %v", err))
+	}
+	cli := netsync.NewWebDAVClient(baseURL, user, pass)
+	if err := cli.Push(path, data); err != nil {
+		return errJSON(err)
+	}
+	return okJSON(map[string]string{"message": fmt.Sprintf("已上传 %d 字节到 %s", len(data), path)})
+}
+
+// WebDAVPull 从 WebDAV path 拉备份并覆盖当前 overlay + 订阅 (Phase 10-E-E)。
+// ⚠️ 覆盖操作, 调用方须先 UI 二次确认。
+func (c *Client) WebDAVPull(baseURL, user, pass, path string) string {
+	if path == "" {
+		return errStr("WebDAV path 为空")
+	}
+	cli := netsync.NewWebDAVClient(baseURL, user, pass)
+	data, err := cli.Pull(path)
+	if err != nil {
+		return errJSON(err)
+	}
+	mgr := backup.NewManager(c.overlay, c.subMgr.Store())
+	snap, err := mgr.Import(data)
+	if err != nil {
+		return errJSON(fmt.Errorf("解析备份失败: %v", err))
+	}
+	if err := c.overlay.Apply(c.adapter); err != nil {
+		return errJSON(fmt.Errorf("应用配置失败: %v", err))
+	}
+	return okJSON(map[string]interface{}{
+		"message":       fmt.Sprintf("已下载 %d 字节并应用", len(data)),
+		"exported_at":   snap.ExportedAt,
+		"imported_size": len(data),
+	})
 }
 
 // ApplyTemplate 应用指定模板。

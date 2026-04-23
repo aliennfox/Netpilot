@@ -105,4 +105,15 @@ object PilottyRepository {
     }
 
     suspend fun importBackup(data: String): MessageDto = call { PilottyCore.importBackup(data) }
+
+    // Phase 10-E-E WebDAV 同步
+    suspend fun webDAVTest(url: String, user: String, pass: String): MessageDto = call {
+        PilottyCore.webDAVTest(url, user, pass)
+    }
+    suspend fun webDAVPush(url: String, user: String, pass: String, path: String): MessageDto = call {
+        PilottyCore.webDAVPush(url, user, pass, path)
+    }
+    suspend fun webDAVPull(url: String, user: String, pass: String, path: String): MessageDto = call {
+        PilottyCore.webDAVPull(url, user, pass, path)
+    }
 }

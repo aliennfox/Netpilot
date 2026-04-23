@@ -127,6 +127,11 @@ object PilottyCore {
     fun connections(): String                     = require().connections()
     fun recentLogs(n: Int): String                = require().recentLogs(n.toLong())
     fun clearTrafficHistory()                     = require().clearTrafficHistory()
+
+    // Phase 10-E-E WebDAV 同步
+    fun webDAVTest(url: String, user: String, pass: String): String = require().webDAVTest(url, user, pass)
+    fun webDAVPush(url: String, user: String, pass: String, path: String): String = require().webDAVPush(url, user, pass, path)
+    fun webDAVPull(url: String, user: String, pass: String, path: String): String = require().webDAVPull(url, user, pass, path)
     fun agentReady(): Boolean                     = require().agentReady()
     fun version(): String                         = require().version()
 
