@@ -980,6 +980,68 @@ func (c *Client) RemoveRule(tag string) string {
 	return okJSON(map[string]string{"message": "规则已删除"})
 }
 
+// RuleSets 返回 overlay 中已声明的 rule-set 列表 (M20 / 10-A2)。
+func (c *Client) RuleSets() string {
+	return okJSON(c.overlay.ListRuleSets())
+}
+
+// AddRuleSet 添加/覆盖一条 rule-set 声明 (M20 / 10-A2)。
+// setJSON 是 overlay.RuleSetConfig 的 JSON 序列化,格式:
+//
+//	{"tag":"my-list","type":"remote","format":"binary","url":"https://.../foo.srs","update_interval":"7d"}
+//
+// Source 由服务端固定填 "user", 避免客户端伪造成 "builtin:*"。
+func (c *Client) AddRuleSet(setJSON string) string {
+	var rs overlay.RuleSetConfig
+	if err := json.Unmarshal([]byte(setJSON), &rs); err != nil {
+		return errJSON(fmt.Errorf("rule-set JSON 解析失败: %v", err))
+	}
+	rs.Source = "user"
+	if err := c.overlay.AddRuleSet(rs); err != nil {
+		return errJSON(err)
+	}
+	if err := c.overlay.Apply(c.adapter); err != nil {
+		return errJSON(fmt.Errorf("应用 rule-set 失败: %v", err))
+	}
+	return okJSON(map[string]string{"message": "rule-set 已添加"})
+}
+
+// RemoveRuleSet 按 tag 删除一个 rule-set 声明 (M20 / 10-A2)。
+// 不会自动清理还在引用该 tag 的 rule, 上层应先删引用方。
+func (c *Client) RemoveRuleSet(tag string) string {
+	if tag == "" {
+		return errStr("tag is required")
+	}
+	if err := c.overlay.RemoveRuleSet(tag); err != nil {
+		return errJSON(err)
+	}
+	if err := c.overlay.Apply(c.adapter); err != nil {
+		return errJSON(fmt.Errorf("应用 rule-set 失败: %v", err))
+	}
+	return okJSON(map[string]string{"message": "rule-set 已删除"})
+}
+
+// EnableBuiltinRuleSet 启用一个预置 rule-set (geoip-cn / geosite-cn 等) (M20 / 10-A2)。
+func (c *Client) EnableBuiltinRuleSet(alias string) string {
+	if err := c.overlay.EnableBuiltinRuleSet(alias); err != nil {
+		return errJSON(err)
+	}
+	if err := c.overlay.Apply(c.adapter); err != nil {
+		return errJSON(fmt.Errorf("应用 rule-set 失败: %v", err))
+	}
+	return okJSON(map[string]string{"message": "内置 rule-set 已启用"})
+}
+
+// ListBuiltinRuleSets 返回所有可用的内置别名 + 其配置, 供 UI 展示选单 (M20 / 10-A2)。
+func (c *Client) ListBuiltinRuleSets() string {
+	aliases := overlay.BuiltinRuleSetAliases()
+	out := make([]overlay.RuleSetConfig, 0, len(aliases))
+	for _, a := range aliases {
+		out = append(out, overlay.BuiltinRuleSets[a])
+	}
+	return okJSON(out)
+}
+
 // Templates 返回内置模板列表。
 func (c *Client) Templates() string {
 	return okJSON(c.templates.List())

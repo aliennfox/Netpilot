@@ -260,6 +260,15 @@ func (e *Engine) applyTemplate(params map[string]string) (string, error) {
 	// 确定出站节点：替换 __BEST_PROXY__ 占位符
 	proxyTarget := e.resolveBestProxy()
 
+	// rule-set 必须先于引用它的 rule 注册(否则 sing-box 合并时拒载)
+	ruleSetCount := 0
+	for _, rs := range tmpl.RuleSets {
+		if err := e.overlay.AddRuleSet(rs); err != nil {
+			return "", fmt.Errorf("添加 rule-set 失败 (tag=%s): %w", rs.Tag, err)
+		}
+		ruleSetCount++
+	}
+
 	ruleCount := 0
 	for _, rule := range tmpl.Rules {
 		r := rule // copy
@@ -269,7 +278,8 @@ func (e *Engine) applyTemplate(params map[string]string) (string, error) {
 		if err := e.overlay.AddRule(r); err != nil {
 			return "", fmt.Errorf("添加规则失败: %w", err)
 		}
-		ruleCount += len(r.DomainSuffix) + len(r.Domain) + len(r.IPCidr) + len(r.ProcessName)
+		ruleCount += len(r.DomainSuffix) + len(r.Domain) + len(r.IPCidr) + len(r.ProcessName) +
+			len(r.RuleSet) + len(r.Geoip) + len(r.Geosite) + len(r.DomainKeyword)
 	}
 
 	// 应用（合并+重载）
@@ -277,8 +287,8 @@ func (e *Engine) applyTemplate(params map[string]string) (string, error) {
 		return "", fmt.Errorf("应用配置失败: %w", err)
 	}
 
-	return fmt.Sprintf("\033[32m已应用模板: %s\n已添加 %d 条匹配规则 → %s\n规则已生效。\033[0m",
-		tmpl.Name, ruleCount, proxyTarget), nil
+	return fmt.Sprintf("\033[32m已应用模板: %s\n已启用 %d 个规则集 + %d 条匹配规则\033[0m",
+		tmpl.Name, ruleSetCount, ruleCount), nil
 }
 
 func (e *Engine) listTemplates(_ map[string]string) (string, error) {

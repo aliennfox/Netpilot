@@ -900,6 +900,9 @@ data class RulesUi(
     val templates: List<TemplateDto> = emptyList(),
     /** AddRule 时 chip 可选的出口: 内置 direct/reject + 订阅里存在的 group tag (去重). */
     val availableOutbounds: List<String> = listOf("direct", "reject"),
+    // Phase 10-A2 rule-set
+    val ruleSets: List<RuleSetConfigDto> = emptyList(),
+    val builtinRuleSets: List<RuleSetConfigDto> = emptyList(),
     val toast: String? = null,
     val error: String? = null,
 )
@@ -915,6 +918,8 @@ class RulesViewModel : ViewModel() {
         try {
             val r = PilottyRepository.rules()
             val t = PilottyRepository.templates()
+            val rs = runCatching { PilottyRepository.ruleSets() }.getOrDefault(emptyList())
+            val builtin = runCatching { PilottyRepository.listBuiltinRuleSets() }.getOrDefault(emptyList())
             // Phase 4: 从当前节点列表动态推导可用出口 group
             //   - direct / reject 是 sing-box 内置 outbound, 永远可用
             //   - 去掉 "" (overlay 里可能有无 groupTag 的节点, 当内置处理)
@@ -927,9 +932,32 @@ class RulesViewModel : ViewModel() {
                 rules = r,
                 templates = t,
                 availableOutbounds = outbounds,
+                ruleSets = rs,
+                builtinRuleSets = builtin,
             )
         } catch (e: Throwable) {
             _state.value = _state.value.copy(loading = false, error = e.message)
+        }
+    }
+
+    // Phase 10-A2 rule-set CRUD
+    fun enableBuiltinRuleSet(alias: String) = viewModelScope.launch {
+        try {
+            val m = PilottyRepository.enableBuiltinRuleSet(alias)
+            _state.value = _state.value.copy(toast = m.message.ifEmpty { "已启用 $alias" })
+            refresh()
+        } catch (e: Throwable) {
+            _state.value = _state.value.copy(error = e.message)
+        }
+    }
+
+    fun removeRuleSet(tag: String) = viewModelScope.launch {
+        try {
+            val m = PilottyRepository.removeRuleSet(tag)
+            _state.value = _state.value.copy(toast = m.message.ifEmpty { "已移除 $tag" })
+            refresh()
+        } catch (e: Throwable) {
+            _state.value = _state.value.copy(error = e.message)
         }
     }
 
@@ -974,6 +1002,8 @@ fun RulesSection(vm: RulesViewModel = viewModel()) {
     val ui by vm.state.collectAsStateWithLifecycle()
     var addDialogOpen by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<RouteRuleDto?>(null) }
+    var enableRSDialogOpen by remember { mutableStateOf(false) }
+    var deleteRSTarget by remember { mutableStateOf<RuleSetConfigDto?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         ui.error?.let { Text("错误: $it", color = pc.error, fontSize = 12.sp) }
@@ -998,6 +1028,73 @@ fun RulesSection(vm: RulesViewModel = viewModel()) {
                     if (t.description.isNotEmpty()) {
                         Spacer(Modifier.height(2.dp))
                         Text(t.description, color = pc.ink3, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        // Phase 10-A2: Rule sets (geoip / geosite / 自定义远程规则包)
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Kicker("Rule sets · ${ui.ruleSets.size}")
+            PilottyButton(
+                text = "+ 启用内置",
+                onClick = { enableRSDialogOpen = true },
+                variant = PilottyButtonVariant.Outline,
+                small = true,
+            )
+        }
+        if (ui.ruleSets.isEmpty()) {
+            Text(
+                "尚未启用规则集。 geoip-cn / geosite-cn 等预设可实现 \"国内直连,国外代理\" 等分流场景。",
+                color = pc.ink4,
+                fontSize = 11.5.sp,
+            )
+        } else {
+            ui.ruleSets.forEach { rs ->
+                PilottyCard(modifier = Modifier.fillMaxWidth(), soft = true) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                rs.tag,
+                                color = pc.ink,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            val hint = buildString {
+                                append(rs.type)
+                                if (rs.format.isNotEmpty()) append(" · ${rs.format}")
+                                if (rs.updateInterval.isNotEmpty()) append(" · ${rs.updateInterval}")
+                            }
+                            Text(hint, color = pc.ink3, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        }
+                        Text(
+                            rs.source.ifEmpty { "-" },
+                            color = pc.ink4,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "×",
+                            color = pc.error,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clickable { deleteRSTarget = rs }
+                                .padding(horizontal = 6.dp),
+                        )
                     }
                 }
             }
@@ -1053,8 +1150,17 @@ fun RulesSection(vm: RulesViewModel = viewModel()) {
                     val parts = buildList {
                         if (r.domainSuffix.isNotEmpty()) add("suffix×${r.domainSuffix.size}")
                         if (r.domain.isNotEmpty()) add("domain×${r.domain.size}")
+                        if (r.domainKeyword.isNotEmpty()) add("kw×${r.domainKeyword.size}")
+                        if (r.domainRegex.isNotEmpty()) add("regex×${r.domainRegex.size}")
                         if (r.ipCidr.isNotEmpty()) add("ip×${r.ipCidr.size}")
                         if (r.processName.isNotEmpty()) add("proc×${r.processName.size}")
+                        if (r.port.isNotEmpty()) add("port×${r.port.size}")
+                        if (r.portRange.isNotEmpty()) add("portR×${r.portRange.size}")
+                        if (r.network.isNotEmpty()) add("net=${r.network.joinToString("/")}")
+                        if (r.protocol.isNotEmpty()) add("proto=${r.protocol.joinToString("/")}")
+                        if (r.ruleSet.isNotEmpty()) add("rs=${r.ruleSet.joinToString(",")}")
+                        if (r.geoip.isNotEmpty()) add("geoip=${r.geoip.joinToString(",")}")
+                        if (r.geosite.isNotEmpty()) add("geosite=${r.geosite.joinToString(",")}")
                     }
                     Text(
                         "→ ${r.outbound}  ${parts.joinToString("  ")}",
@@ -1070,6 +1176,7 @@ fun RulesSection(vm: RulesViewModel = viewModel()) {
     if (addDialogOpen) {
         AddRuleDialog(
             availableOutbounds = ui.availableOutbounds,
+            availableRuleSetTags = ui.ruleSets.map { it.tag },
             onDismiss = { addDialogOpen = false },
             onConfirm = { ruleJSON ->
                 vm.addRule(ruleJSON)
@@ -1095,11 +1202,112 @@ fun RulesSection(vm: RulesViewModel = viewModel()) {
             },
         )
     }
+
+    if (enableRSDialogOpen) {
+        EnableBuiltinRuleSetDialog(
+            builtins = ui.builtinRuleSets,
+            enabledTags = ui.ruleSets.map { it.tag }.toSet(),
+            onDismiss = { enableRSDialogOpen = false },
+            onEnable = { alias ->
+                vm.enableBuiltinRuleSet(alias)
+                enableRSDialogOpen = false
+            },
+        )
+    }
+
+    deleteRSTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteRSTarget = null },
+            containerColor = pc.surface,
+            title = { Text("移除规则集", color = pc.ink) },
+            text = {
+                Column {
+                    Text("确定移除规则集「${target.tag}」?", color = pc.ink2)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "若仍有 rule 引用此 tag, sing-box 重载会失败;请先在 Active rules 里调整对应规则。",
+                        color = pc.ink4,
+                        fontSize = 11.sp,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.removeRuleSet(target.tag)
+                    deleteRSTarget = null
+                }) { Text("移除", color = pc.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteRSTarget = null }) { Text("取消", color = pc.ink2) }
+            },
+        )
+    }
+}
+
+@Composable
+private fun EnableBuiltinRuleSetDialog(
+    builtins: List<RuleSetConfigDto>,
+    enabledTags: Set<String>,
+    onDismiss: () -> Unit,
+    onEnable: (alias: String) -> Unit,
+) {
+    val pc = LocalPilottyColors.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = pc.surface,
+        title = { Text("启用内置规则集", color = pc.ink) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "选一个预置规则集启用。 SagerNet 官方二进制格式, 每 7 天自动更新。",
+                    color = pc.ink3,
+                    fontSize = 11.sp,
+                )
+                builtins.forEach { rs ->
+                    val already = rs.tag in enabledTags
+                    PilottyCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = !already) { onEnable(rs.tag) },
+                        soft = true,
+                    ) {
+                        Column(Modifier.padding(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    rs.tag,
+                                    color = if (already) pc.ink4 else pc.ink,
+                                    fontSize = 13.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                                if (already) {
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("已启用", color = pc.accentInk, fontSize = 10.sp)
+                                }
+                            }
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                rs.url.ifEmpty { rs.path },
+                                color = pc.ink4,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("关闭", color = pc.ink2) }
+        },
+    )
 }
 
 @Composable
 private fun AddRuleDialog(
     availableOutbounds: List<String>,
+    availableRuleSetTags: List<String>,
     onDismiss: () -> Unit,
     onConfirm: (ruleJSON: String) -> Unit,
 ) {
@@ -1107,22 +1315,71 @@ private fun AddRuleDialog(
     var description by remember { mutableStateOf("") }
     var matcherType by remember { mutableStateOf("domain_suffix") }
     var matcherValue by remember { mutableStateOf("") }
-    // 默认选 availableOutbounds 里的首项 (direct) — 不再写死 "direct" (兼容未来 reject 消失的情况)
+    // rule_set 是多选 tag, 其它 matcher 走 matcherValue 文本框
+    var ruleSetSelected by remember { mutableStateOf(setOf<String>()) }
+    // 默认选 availableOutbounds 里的首项 (direct)
     var outbound by remember { mutableStateOf(availableOutbounds.firstOrNull() ?: "direct") }
 
-    val matcherTypes = listOf("domain_suffix", "domain", "ip_cidr", "process_name")
-    // Phase 4: outbounds 从 RulesViewModel 注入, 动态反映当前节点的 group tag (含 direct/reject 内置)
+    // Phase 10-A2 扩到 13 个 matcher。 顺序按"最常用 → 最罕见"
+    val matcherTypes = listOf(
+        "domain_suffix", "domain", "domain_keyword", "domain_regex",
+        "ip_cidr", "geoip", "geosite", "rule_set",
+        "port", "port_range", "network", "protocol", "process_name",
+    )
+    val matcherLabel: (String) -> String = {
+        when (it) {
+            "domain_suffix" -> "后缀"
+            "domain" -> "域名"
+            "domain_keyword" -> "关键词"
+            "domain_regex" -> "正则"
+            "ip_cidr" -> "IP 段"
+            "process_name" -> "进程"
+            "port" -> "端口"
+            "port_range" -> "端口段"
+            "network" -> "网络"
+            "protocol" -> "协议"
+            "rule_set" -> "规则集"
+            "geoip" -> "GeoIP"
+            "geosite" -> "GeoSite"
+            else -> it
+        }
+    }
     val outbounds = availableOutbounds.ifEmpty { listOf("direct", "reject") }
 
     fun buildRuleJSON(): String? {
-        val value = matcherValue.trim()
-        if (value.isEmpty()) return null
         val tag = "user-" + System.currentTimeMillis().toString(36)
-        val desc = description.trim().ifEmpty { "$matcherType=$value → $outbound" }
-        val escapedVals = value.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-            .joinToString(",") { "\"" + it.replace("\\", "\\\\").replace("\"", "\\\"") + "\"" }
-        val matcherField = matcherType
-        return """{"tag":"$tag","$matcherField":[$escapedVals],"outbound":"$outbound","description":"${desc.replace("\"", "\\\"")}"}"""
+
+        // 拼 matcher 字段
+        val matcherFieldJSON: String = when (matcherType) {
+            "rule_set" -> {
+                if (ruleSetSelected.isEmpty()) return null
+                val arr = ruleSetSelected.joinToString(",") { "\"" + it + "\"" }
+                "\"rule_set\":[$arr]"
+            }
+            "port" -> {
+                val ints = matcherValue.split(",").mapNotNull { it.trim().toIntOrNull() }
+                if (ints.isEmpty()) return null
+                "\"port\":[${ints.joinToString(",")}]"
+            }
+            else -> {
+                val value = matcherValue.trim()
+                if (value.isEmpty()) return null
+                val escapedVals = value.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                    .joinToString(",") { "\"" + it.replace("\\", "\\\\").replace("\"", "\\\"") + "\"" }
+                "\"$matcherType\":[$escapedVals]"
+            }
+        }
+        val descText = description.trim().ifEmpty {
+            if (matcherType == "rule_set") "rule_set=${ruleSetSelected.joinToString(",")} → $outbound"
+            else "$matcherType=${matcherValue.trim()} → $outbound"
+        }
+        val escapedDesc = descText.replace("\"", "\\\"")
+        return """{"tag":"$tag",$matcherFieldJSON,"outbound":"$outbound","description":"$escapedDesc"}"""
+    }
+
+    val canConfirm: Boolean = when (matcherType) {
+        "rule_set" -> ruleSetSelected.isNotEmpty()
+        else -> matcherValue.isNotBlank()
     }
 
     AlertDialog(
@@ -1142,39 +1399,77 @@ private fun AddRuleDialog(
                     ),
                 )
                 Text("匹配条件", color = pc.ink4, fontSize = 11.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     matcherTypes.forEach { mt ->
                         PilottyChip(
-                            text = when (mt) {
-                                "domain_suffix" -> "域名后缀"
-                                "domain" -> "完整域名"
-                                "ip_cidr" -> "IP 段"
-                                "process_name" -> "进程名"
-                                else -> mt
-                            },
+                            text = matcherLabel(mt),
                             selected = matcherType == mt,
                             onClick = { matcherType = mt },
                         )
                     }
                 }
-                OutlinedTextField(
-                    value = matcherValue,
-                    onValueChange = { matcherValue = it },
-                    label = { Text(when (matcherType) {
-                        "domain_suffix" -> "值 (逗号分隔,如 google.com,youtube.com)"
-                        "domain" -> "值 (完整域名,逗号分隔)"
-                        "ip_cidr" -> "值 (如 10.0.0.0/8,192.168.0.0/16)"
-                        "process_name" -> "值 (如 com.tencent.mm)"
-                        else -> "值"
-                    }) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = pc.ink,
-                        unfocusedBorderColor = pc.hairlineStrong,
-                    ),
-                )
+
+                if (matcherType == "rule_set") {
+                    if (availableRuleSetTags.isEmpty()) {
+                        Text(
+                            "当前没有已启用的规则集。 先到上方 Rule sets 区启用 geoip-cn / geosite-cn 等内置项,再回来引用。",
+                            color = pc.ink4,
+                            fontSize = 11.5.sp,
+                        )
+                    } else {
+                        Text("选择规则集 (可多选)", color = pc.ink4, fontSize = 11.sp)
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            availableRuleSetTags.forEach { t ->
+                                val selected = t in ruleSetSelected
+                                PilottyChip(
+                                    text = t,
+                                    selected = selected,
+                                    onClick = {
+                                        ruleSetSelected = if (selected) ruleSetSelected - t
+                                        else ruleSetSelected + t
+                                    },
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = matcherValue,
+                        onValueChange = { matcherValue = it },
+                        label = {
+                            Text(
+                                when (matcherType) {
+                                    "domain_suffix" -> "值 (逗号分隔,如 google.com,youtube.com)"
+                                    "domain" -> "值 (完整域名,逗号分隔)"
+                                    "domain_keyword" -> "值 (域名子串,如 google,youtube)"
+                                    "domain_regex" -> "值 (Go 正则, 逗号分隔)"
+                                    "ip_cidr" -> "值 (如 10.0.0.0/8,192.168.0.0/16)"
+                                    "process_name" -> "值 (如 com.tencent.mm)"
+                                    "port" -> "值 (逗号分隔整数,如 80,443,853)"
+                                    "port_range" -> "值 (如 8000:9000, 可多段逗号分隔)"
+                                    "network" -> "值 (tcp / udp, 逗号分隔)"
+                                    "protocol" -> "值 (http / tls / quic / dns, 逗号分隔)"
+                                    "geoip" -> "值 (如 cn,private —— 仍需在 Rule sets 区启用 geoip-xxx)"
+                                    "geosite" -> "值 (如 cn,category-ads-all —— 仍需启用对应 geosite-xxx)"
+                                    else -> "值"
+                                }
+                            )
+                        },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = pc.ink,
+                            unfocusedBorderColor = pc.hairlineStrong,
+                        ),
+                    )
+                }
+
                 Text("出口", color = pc.ink4, fontSize = 11.sp)
-                // 可横向滚动 (group 可能很多,长行吃不下时允许划动)
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1192,8 +1487,14 @@ private fun AddRuleDialog(
         confirmButton = {
             TextButton(
                 onClick = { buildRuleJSON()?.let(onConfirm) },
-                enabled = matcherValue.isNotBlank(),
-            ) { Text("添加", color = if (matcherValue.isNotBlank()) pc.accentInk else pc.ink4, fontWeight = FontWeight.SemiBold) }
+                enabled = canConfirm,
+            ) {
+                Text(
+                    "添加",
+                    color = if (canConfirm) pc.accentInk else pc.ink4,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消", color = pc.ink2) }

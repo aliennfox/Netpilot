@@ -142,8 +142,17 @@ data class RouteRuleDto(
     val tag: String = "",
     @SerialName("domain_suffix") val domainSuffix: List<String> = emptyList(),
     val domain: List<String> = emptyList(),
+    @SerialName("domain_keyword") val domainKeyword: List<String> = emptyList(),
+    @SerialName("domain_regex") val domainRegex: List<String> = emptyList(),
     @SerialName("ip_cidr") val ipCidr: List<String> = emptyList(),
     @SerialName("process_name") val processName: List<String> = emptyList(),
+    val port: List<Int> = emptyList(),
+    @SerialName("port_range") val portRange: List<String> = emptyList(),
+    val network: List<String> = emptyList(),
+    val protocol: List<String> = emptyList(),
+    @SerialName("rule_set") val ruleSet: List<String> = emptyList(),
+    val geoip: List<String> = emptyList(),
+    val geosite: List<String> = emptyList(),
     val outbound: String = "",
     val description: String = "",
     val source: String = "",
@@ -155,6 +164,19 @@ data class TemplateDto(
     val name: String = "",
     val description: String = "",
     val keywords: List<String> = emptyList(),
+)
+
+// Phase 10-A2 rule-set 声明, 对应 Go overlay.RuleSetConfig
+@Serializable
+data class RuleSetConfigDto(
+    val tag: String = "",
+    val type: String = "", // "remote" | "local"
+    val format: String = "",
+    val url: String = "",
+    val path: String = "",
+    @SerialName("download_detour") val downloadDetour: String = "",
+    @SerialName("update_interval") val updateInterval: String = "",
+    val source: String = "",
 )
 
 @Serializable

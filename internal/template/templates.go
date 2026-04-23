@@ -12,10 +12,52 @@ type Template struct {
 	Description string                   `json:"description"`
 	Keywords    []string                 `json:"keywords"`
 	Rules       []overlay.RouteRule      `json:"rules"`
+	RuleSets    []overlay.RuleSetConfig  `json:"rule_sets,omitempty"`
 	Outbounds   []map[string]interface{} `json:"outbounds,omitempty"`
 }
 
+// DirectPlaceholder 保持显式用, 便于未来 cn-direct 之外的"走直连"模板扩展
+const DirectPlaceholder = "direct-out"
+
 var builtinTemplates = []*Template{
+	{
+		ID:          "cn-direct",
+		Name:        "国内直连 + 国外代理",
+		Description: "启用 geoip-cn/geoip-private/geosite-cn 三个官方规则集,国内目标直连,其余走代理",
+		Keywords:    []string{"国内直连", "国内", "直连", "cn", "china", "大陆", "geoip"},
+		RuleSets: []overlay.RuleSetConfig{
+			overlay.BuiltinRuleSets["geoip-cn"],
+			overlay.BuiltinRuleSets["geoip-private"],
+			overlay.BuiltinRuleSets["geosite-cn"],
+		},
+		Rules: []overlay.RouteRule{
+			{
+				Tag:         "_agent:cn-direct",
+				RuleSet:     []string{"geoip-cn", "geoip-private", "geosite-cn"},
+				Outbound:    DirectPlaceholder,
+				Description: "国内目标直连 (geoip + geosite 匹配)",
+				Source:      "template:cn-direct",
+			},
+		},
+	},
+	{
+		ID:          "block-ads",
+		Name:        "广告拦截",
+		Description: "启用 geosite-category-ads-all 规则集, 拦截广告域名",
+		Keywords:    []string{"广告", "ads", "ad", "去广告", "block"},
+		RuleSets: []overlay.RuleSetConfig{
+			overlay.BuiltinRuleSets["geosite-category-ads-all"],
+		},
+		Rules: []overlay.RouteRule{
+			{
+				Tag:         "_agent:block-ads",
+				RuleSet:     []string{"geosite-category-ads-all"},
+				Outbound:    "reject",
+				Description: "广告域名直接拦截",
+				Source:      "template:block-ads",
+			},
+		},
+	},
 	{
 		ID:          "netflix",
 		Name:        "Netflix 流媒体",

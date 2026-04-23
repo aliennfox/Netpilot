@@ -27,6 +27,11 @@ func MergeConfigs(basePath string, overlay *OverlayData) ([]byte, error) {
 		return json.MarshalIndent(config, "", "  ")
 	}
 
+	// 合并 rule-set 声明 (顶层, 必须先于 rules 处理, 否则 rule 里引用空 tag 会被 sing-box 拒)
+	if len(overlay.RuleSets) > 0 {
+		mergeRuleSets(config, overlay.RuleSets)
+	}
+
 	// 合并路由规则
 	if len(overlay.RouteRules) > 0 {
 		mergeRouteRules(config, overlay.RouteRules)
@@ -77,11 +82,38 @@ func mergeRouteRules(config map[string]interface{}, rules []RouteRule) {
 		if len(r.Domain) > 0 {
 			rule["domain"] = toInterfaceSlice(r.Domain)
 		}
+		if len(r.DomainKeyword) > 0 {
+			rule["domain_keyword"] = toInterfaceSlice(r.DomainKeyword)
+		}
+		if len(r.DomainRegex) > 0 {
+			rule["domain_regex"] = toInterfaceSlice(r.DomainRegex)
+		}
 		if len(r.IPCidr) > 0 {
 			rule["ip_cidr"] = toInterfaceSlice(r.IPCidr)
 		}
 		if len(r.ProcessName) > 0 {
 			rule["process_name"] = toInterfaceSlice(r.ProcessName)
+		}
+		if len(r.Port) > 0 {
+			rule["port"] = toInterfaceIntSlice(r.Port)
+		}
+		if len(r.PortRange) > 0 {
+			rule["port_range"] = toInterfaceSlice(r.PortRange)
+		}
+		if len(r.Network) > 0 {
+			rule["network"] = toInterfaceSlice(r.Network)
+		}
+		if len(r.Protocol) > 0 {
+			rule["protocol"] = toInterfaceSlice(r.Protocol)
+		}
+		if len(r.RuleSet) > 0 {
+			rule["rule_set"] = toInterfaceSlice(r.RuleSet)
+		}
+		if len(r.Geoip) > 0 {
+			rule["geoip"] = toInterfaceSlice(r.Geoip)
+		}
+		if len(r.Geosite) > 0 {
+			rule["geosite"] = toInterfaceSlice(r.Geosite)
 		}
 		overlayRules = append(overlayRules, rule)
 	}
@@ -202,6 +234,90 @@ func toInterfaceSlice(ss []string) []interface{} {
 		result[i] = s
 	}
 	return result
+}
+
+func toInterfaceIntSlice(ns []int) []interface{} {
+	result := make([]interface{}, len(ns))
+	for i, n := range ns {
+		result[i] = n
+	}
+	return result
+}
+
+// mergeRuleSets 把 overlay.RuleSets 写入 route.rule_set 顶层。
+// 与 base config 已有的 rule_set 合并时按 tag 去重,overlay 同 tag 覆盖 base
+// (允许用户通过改 overlay 调整默认 ruleset 的 update_interval 等)。
+func mergeRuleSets(config map[string]interface{}, sets []RuleSetConfig) {
+	routeRaw, ok := config["route"]
+	if !ok {
+		routeRaw = map[string]interface{}{}
+		config["route"] = routeRaw
+	}
+	route, ok := routeRaw.(map[string]interface{})
+	if !ok {
+		route = map[string]interface{}{}
+		config["route"] = route
+	}
+
+	// 收集 base 已有的 rule_set (按 tag 索引)
+	existingByTag := map[string]int{}
+	var existing []interface{}
+	if raw, ok := route["rule_set"]; ok {
+		if arr, ok := raw.([]interface{}); ok {
+			existing = arr
+			for i, item := range existing {
+				if m, ok := item.(map[string]interface{}); ok {
+					if tag, _ := m["tag"].(string); tag != "" {
+						existingByTag[tag] = i
+					}
+				}
+			}
+		}
+	}
+
+	for _, rs := range sets {
+		if rs.Tag == "" {
+			continue
+		}
+		obj := ruleSetConfigToMap(rs)
+		if idx, has := existingByTag[rs.Tag]; has {
+			existing[idx] = obj
+		} else {
+			existingByTag[rs.Tag] = len(existing)
+			existing = append(existing, obj)
+		}
+	}
+	route["rule_set"] = existing
+}
+
+// ruleSetConfigToMap 把 RuleSetConfig 平铺成 sing-box 能吃的 map.
+// Format 为空且 URL/Path 扩展名能推出时, sing-box 自己兜底推断,
+// 所以我们只把用户显式填的写进去, 不主动注入默认值。
+func ruleSetConfigToMap(rs RuleSetConfig) map[string]interface{} {
+	m := map[string]interface{}{
+		"type": rs.Type,
+		"tag":  rs.Tag,
+	}
+	if rs.Format != "" {
+		m["format"] = rs.Format
+	}
+	switch rs.Type {
+	case "remote":
+		if rs.URL != "" {
+			m["url"] = rs.URL
+		}
+		if rs.DownloadDetour != "" {
+			m["download_detour"] = rs.DownloadDetour
+		}
+		if rs.UpdateInterval != "" {
+			m["update_interval"] = rs.UpdateInterval
+		}
+	case "local":
+		if rs.Path != "" {
+			m["path"] = rs.Path
+		}
+	}
+	return m
 }
 
 // mergeDNS 将 overlay DNS 配置写入最终配置；如果 overlay 没有 DNS 且 base 也没有，注入默认配置

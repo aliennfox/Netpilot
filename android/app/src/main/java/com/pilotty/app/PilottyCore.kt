@@ -116,6 +116,11 @@ object PilottyCore {
     fun removeRule(tag: String): String           = require().removeRule(tag)
     fun templates(): String                       = require().templates()
     fun applyTemplate(id: String): String         = require().applyTemplate(id)
+    fun ruleSets(): String                        = require().ruleSets()
+    fun addRuleSet(setJSON: String): String       = require().addRuleSet(setJSON)
+    fun removeRuleSet(tag: String): String        = require().removeRuleSet(tag)
+    fun enableBuiltinRuleSet(alias: String): String = require().enableBuiltinRuleSet(alias)
+    fun listBuiltinRuleSets(): String             = require().listBuiltinRuleSets()
     fun agentReady(): Boolean                     = require().agentReady()
     fun version(): String                         = require().version()
 

@@ -11,15 +11,53 @@ import (
 )
 
 // RouteRule 是 overlay 中的一条路由规则
+//
+// sing-box v1.13.8 rule schema 参考: option/rule.go:DefaultRule
+// matcher 都是 Listable[string/int/bool], 空切片在 JSON 里 omit。
+// rule_set / geoip / geosite 必须在 overlay.RuleSets 顶层先声明后引用,
+// 引用失败会被 sing-box 拒绝加载。
 type RouteRule struct {
-	Tag          string   `json:"tag"`
-	DomainSuffix []string `json:"domain_suffix,omitempty"`
-	Domain       []string `json:"domain,omitempty"`
-	IPCidr       []string `json:"ip_cidr,omitempty"`
-	ProcessName  []string `json:"process_name,omitempty"`
-	Outbound     string   `json:"outbound"`
-	Description  string   `json:"description"`
-	Source       string   `json:"source"` // "agent" | "template:xxx" | "user"
+	Tag           string   `json:"tag"`
+	DomainSuffix  []string `json:"domain_suffix,omitempty"`
+	Domain        []string `json:"domain,omitempty"`
+	DomainKeyword []string `json:"domain_keyword,omitempty"`
+	DomainRegex   []string `json:"domain_regex,omitempty"`
+	IPCidr        []string `json:"ip_cidr,omitempty"`
+	ProcessName   []string `json:"process_name,omitempty"`
+	Port          []int    `json:"port,omitempty"`
+	PortRange     []string `json:"port_range,omitempty"` // eg "8000:9000"
+	Network       []string `json:"network,omitempty"`    // "tcp" | "udp"
+	Protocol      []string `json:"protocol,omitempty"`   // "http" | "tls" | "quic" | "dns" | ...
+	RuleSet       []string `json:"rule_set,omitempty"`   // 引用 OverlayData.RuleSets[].Tag
+	Geoip         []string `json:"geoip,omitempty"`      // sing-box deprecated 字段 (建议改用 rule_set)
+	Geosite       []string `json:"geosite,omitempty"`    // sing-box deprecated 字段 (建议改用 rule_set)
+	Outbound      string   `json:"outbound"`
+	Description   string   `json:"description"`
+	Source        string   `json:"source"` // "agent" | "template:xxx" | "user"
+}
+
+// RuleSetConfig 是 overlay 里声明的 sing-box rule-set.
+// 会被 merger 写到 merged.json 的 route.rule_set 顶层数组, 供 rule.rule_set 引用.
+//
+// Type:
+//   - "remote" (必填 URL; UpdateInterval 默认 7d 由 merger 兜底)
+//   - "local"  (必填 Path)
+//
+// Format:
+//   - "binary" (.srs, sing-box 官方默认, 体积小)
+//   - "source" (.json, 可读但大几倍)
+//     为空时 merger 按 URL/Path 扩展名自动填。
+//
+// 参考: sing-box 1.13.8 option/rule_set.go:RuleSet.
+type RuleSetConfig struct {
+	Tag            string `json:"tag"`
+	Type           string `json:"type"`   // "remote" | "local"
+	Format         string `json:"format"` // "binary" | "source"
+	URL            string `json:"url,omitempty"`
+	Path           string `json:"path,omitempty"`
+	DownloadDetour string `json:"download_detour,omitempty"` // remote 下载走哪个 outbound
+	UpdateInterval string `json:"update_interval,omitempty"` // 如 "7d" "24h", remote only
+	Source         string `json:"source"`                    // "builtin:alias" | "user" | "template:xxx"
 }
 
 // DNSServer 是 overlay 中的 DNS 服务器配置（sing-box 1.12+ 新格式）
@@ -51,6 +89,7 @@ type DNSConfig struct {
 // OverlayData 是持久化到文件的 overlay 数据
 type OverlayData struct {
 	RouteRules []RouteRule              `json:"route_rules"`
+	RuleSets   []RuleSetConfig          `json:"rule_sets,omitempty"`
 	Outbounds  []map[string]interface{} `json:"outbounds,omitempty"`
 	DNS        *DNSConfig               `json:"dns,omitempty"`
 }
@@ -150,6 +189,77 @@ func (o *ConfigOverlay) ListRules() []RouteRule {
 	result := make([]RouteRule, len(o.data.RouteRules))
 	copy(result, o.data.RouteRules)
 	return result
+}
+
+// AddRuleSet 添加/覆盖一条 rule-set 声明
+func (o *ConfigOverlay) AddRuleSet(rs RuleSetConfig) error {
+	if rs.Tag == "" {
+		return fmt.Errorf("rule_set 缺 tag")
+	}
+	switch rs.Type {
+	case "remote":
+		if rs.URL == "" {
+			return fmt.Errorf("remote rule_set 缺 url (tag=%s)", rs.Tag)
+		}
+	case "local":
+		if rs.Path == "" {
+			return fmt.Errorf("local rule_set 缺 path (tag=%s)", rs.Tag)
+		}
+	default:
+		return fmt.Errorf("不支持的 rule_set type: %q (tag=%s)", rs.Type, rs.Tag)
+	}
+
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for i, existing := range o.data.RuleSets {
+		if existing.Tag == rs.Tag {
+			o.data.RuleSets[i] = rs
+			return o.saveLocked()
+		}
+	}
+	o.data.RuleSets = append(o.data.RuleSets, rs)
+	return o.saveLocked()
+}
+
+// RemoveRuleSet 按 tag 删除一个 rule-set 声明。被引用的 rule 不会自动清理,
+// 所以返回失败时上层应考虑先把引用该 tag 的 rule 清掉。
+func (o *ConfigOverlay) RemoveRuleSet(tag string) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	found := false
+	var kept []RuleSetConfig
+	for _, rs := range o.data.RuleSets {
+		if rs.Tag == tag {
+			found = true
+			continue
+		}
+		kept = append(kept, rs)
+	}
+	if !found {
+		return fmt.Errorf("rule_set %q 不存在", tag)
+	}
+	o.data.RuleSets = kept
+	return o.saveLocked()
+}
+
+// ListRuleSets 返回所有 rule-set 声明的副本
+func (o *ConfigOverlay) ListRuleSets() []RuleSetConfig {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	out := make([]RuleSetConfig, len(o.data.RuleSets))
+	copy(out, o.data.RuleSets)
+	return out
+}
+
+// EnableBuiltinRuleSet 把一个内置别名(geoip-cn / geosite-cn / ...)加入 overlay。
+// 如果同 tag 已存在, 用内置配置覆盖(允许用户通过"关闭+再启用"的方式重置被改过的条目)。
+func (o *ConfigOverlay) EnableBuiltinRuleSet(alias string) error {
+	rs, ok := BuiltinRuleSets[alias]
+	if !ok {
+		return fmt.Errorf("未知 builtin rule-set: %q (可选: %v)", alias, BuiltinRuleSetAliases())
+	}
+	return o.AddRuleSet(rs)
 }
 
 // ListOutbounds 列出所有 overlay 外加节点 (订阅/Agent 注入的)。
@@ -343,10 +453,12 @@ func (o *ConfigOverlay) GetData() OverlayData {
 	defer o.mu.RUnlock()
 	result := OverlayData{
 		RouteRules: make([]RouteRule, len(o.data.RouteRules)),
+		RuleSets:   make([]RuleSetConfig, len(o.data.RuleSets)),
 		Outbounds:  make([]map[string]interface{}, len(o.data.Outbounds)),
 		DNS:        o.data.DNS,
 	}
 	copy(result.RouteRules, o.data.RouteRules)
+	copy(result.RuleSets, o.data.RuleSets)
 	copy(result.Outbounds, o.data.Outbounds)
 	return result
 }

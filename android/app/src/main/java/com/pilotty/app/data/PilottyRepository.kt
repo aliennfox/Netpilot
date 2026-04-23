@@ -60,6 +60,13 @@ object PilottyRepository {
     suspend fun removeRule(tag: String): MessageDto = call { PilottyCore.removeRule(tag) }
     suspend fun templates(): List<TemplateDto> = call { PilottyCore.templates() }
 
+    // Phase 10-A2 rule-set (geoip / geosite / custom remote-or-local)
+    suspend fun ruleSets(): List<RuleSetConfigDto> = call { PilottyCore.ruleSets() }
+    suspend fun addRuleSet(setJSON: String): MessageDto = call { PilottyCore.addRuleSet(setJSON) }
+    suspend fun removeRuleSet(tag: String): MessageDto = call { PilottyCore.removeRuleSet(tag) }
+    suspend fun enableBuiltinRuleSet(alias: String): MessageDto = call { PilottyCore.enableBuiltinRuleSet(alias) }
+    suspend fun listBuiltinRuleSets(): List<RuleSetConfigDto> = call { PilottyCore.listBuiltinRuleSets() }
+
     suspend fun snapshots(): List<SnapshotDto> = call { PilottyCore.snapshots() }
     suspend fun rollback(id: String = ""): MessageDto = call { PilottyCore.rollback(id) }
 
