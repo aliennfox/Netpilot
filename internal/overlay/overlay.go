@@ -31,6 +31,7 @@ type RouteRule struct {
 	RuleSet       []string `json:"rule_set,omitempty"`   // 引用 OverlayData.RuleSets[].Tag
 	Geoip         []string `json:"geoip,omitempty"`      // sing-box deprecated 字段 (建议改用 rule_set)
 	Geosite       []string `json:"geosite,omitempty"`    // sing-box deprecated 字段 (建议改用 rule_set)
+	IPIsPrivate   bool     `json:"ip_is_private,omitempty"` // sing-box 原生, 匹配 RFC1918 / loopback / 链路本地 IP; 替代 geoip-private 外部 .srs
 	Outbound      string   `json:"outbound"`
 	Description   string   `json:"description"`
 	Source        string   `json:"source"` // "agent" | "template:xxx" | "user"

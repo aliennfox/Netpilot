@@ -3,6 +3,7 @@ package overlay
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 )
 
@@ -32,9 +33,14 @@ func MergeConfigs(basePath string, overlay *OverlayData) ([]byte, error) {
 		mergeRuleSets(config, overlay.RuleSets)
 	}
 
-	// 合并路由规则
+	// 收集合并后 (overlay + base) 的所有合法 rule_set tag, 给 mergeRouteRules 做 sanity filter。
+	// 用途: 规则里引用的 rule_set tag 若找不到对应声明 (例如 SagerNet 上游删了某 .srs,
+	// 用户 overlay 里的老 template 还在引用) → 日志 warn + 跳过, 不让 libbox init 因 404 整体崩溃。
+	validRuleSets := collectValidRuleSetTags(config)
+
+	// 合并路由规则 (带 sanity filter)
 	if len(overlay.RouteRules) > 0 {
-		mergeRouteRules(config, overlay.RouteRules)
+		mergeRouteRules(config, overlay.RouteRules, validRuleSets)
 	}
 
 	// 合并出站节点
@@ -48,8 +54,45 @@ func MergeConfigs(basePath string, overlay *OverlayData) ([]byte, error) {
 	return json.MarshalIndent(config, "", "  ")
 }
 
-// mergeRouteRules 将 overlay 规则插入到 route.rules 开头
-func mergeRouteRules(config map[string]interface{}, rules []RouteRule) {
+// collectValidRuleSetTags 从合并后的 config.route.rule_set 顶层收集所有合法 tag,
+// 供 mergeRouteRules 过滤规则里的引用。 返回 nil 表示 "不过滤" (route.rule_set 不存在或非数组)。
+func collectValidRuleSetTags(config map[string]interface{}) map[string]bool {
+	route, ok := config["route"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	raw, ok := route["rule_set"]
+	if !ok {
+		return nil
+	}
+	arr, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make(map[string]bool, len(arr))
+	for _, rs := range arr {
+		if m, ok := rs.(map[string]interface{}); ok {
+			if t, ok := m["tag"].(string); ok && t != "" {
+				out[t] = true
+			}
+		}
+	}
+	return out
+}
+
+// ruleHasNonRuleSetMatcher 判断一条规则除 RuleSet 之外是否还有其他匹配字段。
+// 若 RuleSet 全被过滤空 + 无其他 matcher → 规则无意义, 应整条跳过 (sing-box 会拒 "只有 outbound 的 rule")。
+func ruleHasNonRuleSetMatcher(r RouteRule) bool {
+	return len(r.DomainSuffix) > 0 || len(r.Domain) > 0 || len(r.DomainKeyword) > 0 ||
+		len(r.DomainRegex) > 0 || len(r.IPCidr) > 0 || len(r.ProcessName) > 0 ||
+		len(r.Port) > 0 || len(r.PortRange) > 0 || len(r.Network) > 0 ||
+		len(r.Protocol) > 0 || len(r.Geoip) > 0 || len(r.Geosite) > 0 ||
+		r.IPIsPrivate
+}
+
+// mergeRouteRules 将 overlay 规则插入到 route.rules 开头。
+// validRuleSets 为 nil 表示不做过滤 (向后兼容); 非 nil 时剔除规则里找不到声明的 rule_set 引用。
+func mergeRouteRules(config map[string]interface{}, rules []RouteRule, validRuleSets map[string]bool) {
 	// 确保 route 字段存在
 	routeRaw, ok := config["route"]
 	if !ok {
@@ -73,6 +116,25 @@ func mergeRouteRules(config map[string]interface{}, rules []RouteRule) {
 	// 将 overlay 规则转为 sing-box route rule 格式，插入开头
 	var overlayRules []interface{}
 	for _, r := range rules {
+		// Sanity filter: 剔除指向不存在的 rule_set tag (防 404 / 老 template / 上游删文件)
+		ruleSetTags := r.RuleSet
+		if validRuleSets != nil && len(ruleSetTags) > 0 {
+			filtered := make([]string, 0, len(ruleSetTags))
+			for _, t := range ruleSetTags {
+				if validRuleSets[t] {
+					filtered = append(filtered, t)
+				} else {
+					log.Printf("[overlay] 规则 %q 引用的 rule_set %q 未声明, 已跳过 (可能是上游 .srs 已删除)", r.Tag, t)
+				}
+			}
+			ruleSetTags = filtered
+		}
+		// 全部 rule_set 被过滤 + 规则本身没其他 matcher → 整条规则无意义, 跳过
+		if len(r.RuleSet) > 0 && len(ruleSetTags) == 0 && !ruleHasNonRuleSetMatcher(r) {
+			log.Printf("[overlay] 规则 %q 所有 rule_set 引用失效且无其他匹配条件, 整条跳过", r.Tag)
+			continue
+		}
+
 		rule := map[string]interface{}{
 			"outbound": r.Outbound,
 		}
@@ -106,14 +168,17 @@ func mergeRouteRules(config map[string]interface{}, rules []RouteRule) {
 		if len(r.Protocol) > 0 {
 			rule["protocol"] = toInterfaceSlice(r.Protocol)
 		}
-		if len(r.RuleSet) > 0 {
-			rule["rule_set"] = toInterfaceSlice(r.RuleSet)
+		if len(ruleSetTags) > 0 {
+			rule["rule_set"] = toInterfaceSlice(ruleSetTags)
 		}
 		if len(r.Geoip) > 0 {
 			rule["geoip"] = toInterfaceSlice(r.Geoip)
 		}
 		if len(r.Geosite) > 0 {
 			rule["geosite"] = toInterfaceSlice(r.Geosite)
+		}
+		if r.IPIsPrivate {
+			rule["ip_is_private"] = true
 		}
 		overlayRules = append(overlayRules, rule)
 	}

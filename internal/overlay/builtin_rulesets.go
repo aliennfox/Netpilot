@@ -24,14 +24,10 @@ var BuiltinRuleSets = map[string]RuleSetConfig{
 		UpdateInterval: "7d",
 		Source:         "builtin:geoip-cn",
 	},
-	"geoip-private": {
-		Tag:            "geoip-private",
-		Type:           "remote",
-		Format:         "binary",
-		URL:            "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-private.srs",
-		UpdateInterval: "7d",
-		Source:         "builtin:geoip-private",
-	},
+	// 注:原 "geoip-private" 条目已移除 — SagerNet 从 sing-geoip/rule-set 分支删了该 .srs
+	// (sing-box 内置原生 `ip_is_private: true` 匹配替代, 见 RouteRule.IPIsPrivate)。
+	// 任何引用 "geoip-private" 的 overlay / template 都应改用 IPIsPrivate 字段,
+	// 迁移期间 merger 的 sanity filter 会自动跳过失效引用。
 	"geosite-cn": {
 		Tag:            "geosite-cn",
 		Type:           "remote",

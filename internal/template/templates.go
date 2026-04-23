@@ -23,17 +23,25 @@ var builtinTemplates = []*Template{
 	{
 		ID:          "cn-direct",
 		Name:        "国内直连 + 国外代理",
-		Description: "启用 geoip-cn/geoip-private/geosite-cn 三个官方规则集,国内目标直连,其余走代理",
+		Description: "启用 geoip-cn / geosite-cn 官方规则集, 配合 sing-box 原生 ip_is_private 匹配, 国内目标 + 私网直连, 其余走代理",
 		Keywords:    []string{"国内直连", "国内", "直连", "cn", "china", "大陆", "geoip"},
 		RuleSets: []overlay.RuleSetConfig{
 			overlay.BuiltinRuleSets["geoip-cn"],
-			overlay.BuiltinRuleSets["geoip-private"],
 			overlay.BuiltinRuleSets["geosite-cn"],
 		},
 		Rules: []overlay.RouteRule{
 			{
+				// 私网直连 (RFC1918 / loopback / 链路本地) — 用 sing-box 原生 ip_is_private
+				// 替代原 geoip-private rule-set (SagerNet 已从上游删除该 .srs)
+				Tag:         "_agent:private-direct",
+				IPIsPrivate: true,
+				Outbound:    DirectPlaceholder,
+				Description: "私网 IP 直连 (RFC1918 / loopback)",
+				Source:      "template:cn-direct",
+			},
+			{
 				Tag:         "_agent:cn-direct",
-				RuleSet:     []string{"geoip-cn", "geoip-private", "geosite-cn"},
+				RuleSet:     []string{"geoip-cn", "geosite-cn"},
 				Outbound:    DirectPlaceholder,
 				Description: "国内目标直连 (geoip + geosite 匹配)",
 				Source:      "template:cn-direct",

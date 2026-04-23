@@ -45,8 +45,11 @@ func TestMergeConfigs_RuleSetsAndMatchers(t *testing.T) {
 	basePath := writeBaseConfig(t)
 
 	overlay := &OverlayData{
+		// geosite-cn 必须声明 (否则 merger 的 sanity filter 会从 rule.rule_set 里过滤掉它的引用,
+		// 断言 checkList("rule_set", [geoip-cn, geosite-cn]) 会失败)
 		RuleSets: []RuleSetConfig{
 			BuiltinRuleSets["geoip-cn"],
+			BuiltinRuleSets["geosite-cn"],
 			{
 				Tag: "custom-remote", Type: "remote", URL: "https://x.example.com/list.srs",
 				DownloadDetour: "proxy-group", UpdateInterval: "24h",
@@ -87,10 +90,10 @@ func TestMergeConfigs_RuleSetsAndMatchers(t *testing.T) {
 		t.Fatalf("missing route")
 	}
 
-	// 1) rule_set 顶层
+	// 1) rule_set 顶层 (geoip-cn + geosite-cn + custom-remote + local-srs)
 	rsArr, ok := route["rule_set"].([]interface{})
-	if !ok || len(rsArr) != 3 {
-		t.Fatalf("route.rule_set want 3 items, got %+v", route["rule_set"])
+	if !ok || len(rsArr) != 4 {
+		t.Fatalf("route.rule_set want 4 items, got %+v", route["rule_set"])
 	}
 	byTag := map[string]map[string]interface{}{}
 	for _, item := range rsArr {
