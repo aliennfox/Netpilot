@@ -61,6 +61,7 @@ data class HomeUi(
     val tunRunning: Boolean = false,
     val isConnecting: Boolean = false,
     val snapshots: List<com.pilotty.app.data.SnapshotDto> = emptyList(),
+    val pendingRollback: com.pilotty.app.data.SnapshotDto? = null,
     val error: String? = null,
     val toast: String? = null,
     val uptimeSec: Long = 0L,
@@ -134,7 +135,30 @@ class HomeViewModel : ViewModel() {
         }
         try {
             val r = PilottyRepository.rollback("")
-            _state.value = _state.value.copy(toast = r.message.ifEmpty { "已回滚" })
+            _state.value = _state.value.copy(toast = r.message.ifEmpty { "已回滚到最新快照" })
+            refresh()
+        } catch (e: Throwable) {
+            _state.value = _state.value.copy(error = e.message)
+        }
+    }
+
+    /** 用户在 Safety card 点某条快照 → 弹 confirm Dialog (pendingRollback 非空时显示) */
+    fun requestRollback(snap: com.pilotty.app.data.SnapshotDto) {
+        _state.value = _state.value.copy(pendingRollback = snap)
+    }
+
+    fun cancelRollback() { _state.value = _state.value.copy(pendingRollback = null) }
+
+    fun confirmRollback() = viewModelScope.launch {
+        val snap = _state.value.pendingRollback ?: return@launch
+        _state.value = _state.value.copy(pendingRollback = null)
+        if (!com.pilotty.app.PilottyCore.tunRunning.value) {
+            _state.value = _state.value.copy(toast = "请先启动 VPN 再回滚")
+            return@launch
+        }
+        try {
+            val r = PilottyRepository.rollback(snap.id)
+            _state.value = _state.value.copy(toast = r.message.ifEmpty { "已回滚到 ${snap.id}" })
             refresh()
         } catch (e: Throwable) {
             _state.value = _state.value.copy(error = e.message)
@@ -355,16 +379,16 @@ fun HomeScreen(
                 }
             }
 
-            // Agent Log
+            // Safety · 最近变更 (D2)
             SectionHead(
-                text = "Agent Log · Last 3",
+                text = "Safety · 最近变更",
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 12.dp),
             )
             Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                 AgentLogCard(
-                    snapCount = ui.snapshots.size,
-                    snapTime = formatRelativeTime(ui.snapshots.firstOrNull()?.timestamp),
-                    onRollback = { vm.rollbackLatest() },
+                    snapshots = ui.snapshots,
+                    onRollbackAt = { vm.requestRollback(it) },
+                    onRollbackLatest = { vm.rollbackLatest() },
                 )
             }
 
@@ -433,6 +457,49 @@ fun HomeScreen(
             }
 
             Spacer(Modifier.height(80.dp))
+        }
+
+        // D2 Safety: 回滚确认 Dialog, 点某条 snapshot 触发 vm.requestRollback()
+        ui.pendingRollback?.let { snap ->
+            val primary = snap.activeProxies["proxy-group"] ?: snap.activeProxies.values.firstOrNull().orEmpty()
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { vm.cancelRollback() },
+                containerColor = pc.surface,
+                title = { Text("回滚到此快照?", color = pc.ink) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "时间: ${formatClockTime(snap.timestamp)} · 快照 ${snap.id.takeLast(8)}",
+                            color = pc.ink2,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                        if (primary.isNotEmpty()) {
+                            Text(
+                                "当时 active: $primary",
+                                color = pc.ink2,
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                        Text(
+                            "回滚后 proxy-group 会切回这个节点, 该快照之后的所有变更会丢失。",
+                            color = pc.ink3,
+                            fontSize = 11.5.sp,
+                        )
+                    }
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = { vm.confirmRollback() }) {
+                        Text("回滚", color = pc.accentInk, fontWeight = FontWeight.SemiBold)
+                    }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { vm.cancelRollback() }) {
+                        Text("取消", color = pc.ink2)
+                    }
+                },
+            )
         }
 
         // 粘性自然语言输入栏 —— 挂在 bottom, 位于 BottomNav 之上
@@ -635,62 +702,77 @@ private fun ActiveNodeCard(
     }
 }
 
-/* ---------- Agent Log card ---------- */
-
+/* ---------- Safety card (D2) ----------
+ * 渲染真实 snapshots (由 Tool Pipeline 在每次写操作前保存)。
+ * 每条一行: TraceDot · 时间 · 主节点 tag · "↩" 单条回滚。
+ * 底部状态行 + "回滚最新" 大按钮。
+ * 空态提示 "暂无快照", 按钮禁用。
+ */
 @Composable
 private fun AgentLogCard(
-    snapCount: Int,
-    snapTime: String,
-    onRollback: () -> Unit,
+    snapshots: List<com.pilotty.app.data.SnapshotDto>,
+    onRollbackAt: (com.pilotty.app.data.SnapshotDto) -> Unit,
+    onRollbackLatest: () -> Unit,
 ) {
     val pc = LocalPilottyColors.current
-    val logs = listOf(
-        Triple("09:38:12", "switch_node", "target=jp-01") to ("ok" to "440ms"),
-        Triple("09:38:09", "test_latency", "candidates=3") to ("ok" to "1.2s"),
-        Triple("09:38:07", "list_nodes", "region=JP sort=latency") to ("ok" to "180ms"),
-    )
+    val recent = snapshots.take(3)
     CardGroup(modifier = Modifier.fillMaxWidth()) {
-        logs.forEachIndexed { i, (meta, result) ->
-            val (ts, tool, args) = meta
-            val (status, dur) = result
-            val bg = if (i % 2 == 1) pc.stripe else androidx.compose.ui.graphics.Color.Transparent
+        if (recent.isEmpty()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(bg)
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    .padding(horizontal = 16.dp, vertical = 18.dp),
+                horizontalArrangement = Arrangement.Center,
             ) {
-                TraceDot(state = status)
                 Text(
-                    ts,
+                    "尚无变更记录 —— 切节点 / 改规则 / 应用模板后会自动保存",
                     color = pc.ink3,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.width(56.dp),
-                )
-                Text(
-                    tool,
-                    color = pc.ink,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    fontFamily = FontFamily.Monospace,
-                )
-                Text(
-                    "($args)",
-                    color = pc.ink2,
                     fontSize = 11.5.sp,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
                 )
-                Text(
-                    dur,
-                    color = pc.ink3,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                )
+            }
+        } else {
+            recent.forEachIndexed { i, snap ->
+                val bg = if (i % 2 == 1) pc.stripe else androidx.compose.ui.graphics.Color.Transparent
+                val (tool, target) = inferActionFromSnapshot(snap, recent.getOrNull(i + 1))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(bg)
+                        .clickable { onRollbackAt(snap) }
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    TraceDot(state = "ok")
+                    Text(
+                        formatClockTime(snap.timestamp),
+                        color = pc.ink3,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.width(56.dp),
+                    )
+                    Text(
+                        tool,
+                        color = pc.ink,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    Text(
+                        "($target)",
+                        color = pc.ink2,
+                        fontSize = 11.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                    )
+                    Text(
+                        "↩",
+                        color = pc.ink3,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
             }
         }
         RowDivider()
@@ -701,18 +783,59 @@ private fun AgentLogCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val latestTime = formatRelativeTime(snapshots.firstOrNull()?.timestamp)
             Text(
-                if (snapCount > 0) "最近快照 · $snapTime" else "暂无快照",
+                if (snapshots.isNotEmpty()) "共 ${snapshots.size} 次快照 · 最新 $latestTime"
+                else "点条目可单独回滚, 或按右侧按钮回滚最新",
                 color = pc.ink3,
                 fontSize = 11.5.sp,
+                maxLines = 1,
             )
             PilottyButton(
-                text = "回滚",
-                onClick = onRollback,
+                text = "回滚最新",
+                onClick = onRollbackLatest,
                 variant = PilottyButtonVariant.Mono,
-                enabled = snapCount > 0,
+                enabled = snapshots.isNotEmpty(),
             )
         }
+    }
+}
+
+/**
+ * 从两个相邻 snapshot 对比 active_proxies, 推断用户做了什么:
+ * - 发现 proxy-group 的值变了 → "switch_node(newTag)"
+ * - 没变化或没 prev → "snapshot(当前 primary tag)"
+ *
+ * 实际 Go 侧 snapshot 只记 active_proxies, 不记 tool 名 ——
+ * 这里做"差分推断"给用户更可读的标签。 未来 D3 通过 snapshot.tool 字段能直接拿到更准信息。
+ */
+private fun inferActionFromSnapshot(
+    curr: com.pilotty.app.data.SnapshotDto,
+    prev: com.pilotty.app.data.SnapshotDto?,
+): Pair<String, String> {
+    val currPrimary = curr.activeProxies["proxy-group"] ?: curr.activeProxies.values.firstOrNull().orEmpty()
+    if (prev != null) {
+        val prevPrimary = prev.activeProxies["proxy-group"] ?: prev.activeProxies.values.firstOrNull().orEmpty()
+        if (prevPrimary.isNotEmpty() && currPrimary.isNotEmpty() && prevPrimary != currPrimary) {
+            return "switch_node" to currPrimary
+        }
+    }
+    return "snapshot" to currPrimary.ifEmpty { "initial" }
+}
+
+/** RFC3339 → "HH:mm:ss". 解析失败返回原串前 8 位, 避免空白。 */
+private fun formatClockTime(ts: String): String {
+    if (ts.isEmpty()) return "—"
+    return try {
+        val parser = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault()).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+            isLenient = true
+        }
+        val clean = ts.substringBefore('.').substringBefore('+').substringBefore('Z')
+        val d = parser.parse(clean) ?: return ts.take(8)
+        java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(d)
+    } catch (_: Throwable) {
+        ts.take(8)
     }
 }
 
