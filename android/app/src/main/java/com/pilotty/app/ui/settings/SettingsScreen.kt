@@ -1,6 +1,7 @@
 package com.pilotty.app.ui.settings
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -26,6 +27,8 @@ import com.pilotty.app.ui.theme.LocalPilottyColors
 fun SettingsScreen(
     themeMode: ThemeMode,
     onThemeChange: (ThemeMode) -> Unit,
+    onNavigateLogs: () -> Unit = {},
+    onNavigateConnections: () -> Unit = {},
 ) {
     val pc = LocalPilottyColors.current
     Column(
@@ -92,6 +95,12 @@ fun SettingsScreen(
         // Kill Switch 引导 (M15 方式 A)
         KillSwitchSection()
 
+        // Phase 9B-UI1: 观测 (实时日志 / 活跃连接) — 两个入口卡
+        ObserveEntriesSection(
+            onNavigateLogs = onNavigateLogs,
+            onNavigateConnections = onNavigateConnections,
+        )
+
         // 分流规则 (原 Rules tab 内联) —— RulesSection 内部已有 Templates / Active rules
         // 两个 Kicker 作为子标题,不再在外层重复"分流规则" 标题
         RulesSection()
@@ -117,3 +126,44 @@ fun SettingsScreen(
 }
 
 enum class ThemeMode { System, Light, Dark }
+
+@Composable
+private fun ObserveEntriesSection(
+    onNavigateLogs: () -> Unit,
+    onNavigateConnections: () -> Unit,
+) {
+    val pc = LocalPilottyColors.current
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Kicker("观测")
+        PilottyCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onNavigateLogs() },
+            soft = true,
+        ) {
+            Column(Modifier.padding(14.dp)) {
+                Text("实时日志", color = pc.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "看 sing-box 内核运行时输出,调试 DNS/规则匹配",
+                    color = pc.ink3,
+                    fontSize = 11.sp,
+                )
+            }
+        }
+        PilottyCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onNavigateConnections() },
+            soft = true,
+        ) {
+            Column(Modifier.padding(14.dp)) {
+                Text("活跃连接", color = pc.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "按下载流量倒排 — 看哪个 App 正在走哪个节点",
+                    color = pc.ink3,
+                    fontSize = 11.sp,
+                )
+            }
+        }
+    }
+}

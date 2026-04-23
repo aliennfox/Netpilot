@@ -67,6 +67,23 @@ object PilottyRepository {
     suspend fun enableBuiltinRuleSet(alias: String): MessageDto = call { PilottyCore.enableBuiltinRuleSet(alias) }
     suspend fun listBuiltinRuleSets(): List<RuleSetConfigDto> = call { PilottyCore.listBuiltinRuleSets() }
 
+    // Phase 9B 观测: TrafficHistory / Connections / RecentLogs 不走 envelope, 直接是 JSON 数组
+    // (Go 侧 mobile.TrafficHistory 等返回的就是 []{...}, 不包一层 Envelope)
+    suspend fun trafficHistory(n: Int = 0): List<TrafficSampleDto> = withContext(Dispatchers.IO) {
+        json.decodeFromString(serializer(), PilottyCore.trafficHistory(n))
+    }
+    suspend fun connections(): List<ConnectionDto> = withContext(Dispatchers.IO) {
+        // Connections() 走的是 okJSON(envelope), 要剥壳
+        val env = json.decodeFromString(Envelope.serializer(), PilottyCore.connections())
+        if (!env.success) throw PilottyException(env.error ?: "connections fail")
+        val data = env.data ?: return@withContext emptyList()
+        json.decodeFromJsonElement(serializer(), data)
+    }
+    suspend fun recentLogs(n: Int = 0): List<LogEntryDto> = withContext(Dispatchers.IO) {
+        json.decodeFromString(serializer(), PilottyCore.recentLogs(n))
+    }
+    fun clearTrafficHistory() = PilottyCore.clearTrafficHistory()
+
     suspend fun snapshots(): List<SnapshotDto> = call { PilottyCore.snapshots() }
     suspend fun rollback(id: String = ""): MessageDto = call { PilottyCore.rollback(id) }
 

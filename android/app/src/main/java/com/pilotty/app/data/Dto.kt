@@ -179,6 +179,37 @@ data class RuleSetConfigDto(
     val source: String = "",
 )
 
+// Phase 9B 观测 DTO
+@Serializable
+data class TrafficSampleDto(
+    val t: Long = 0,        // Unix epoch seconds
+    val up: Long = 0,       // 累计上传
+    val down: Long = 0,     // 累计下载
+    @SerialName("up_rate") val upRate: Long = 0,     // 当秒增量
+    @SerialName("down_rate") val downRate: Long = 0, // 当秒增量
+)
+
+@Serializable
+data class ConnectionDto(
+    val id: String = "",
+    val destination: String = "",
+    val protocol: String = "",
+    @SerialName("process_name") val processName: String = "",
+    val upload: Long = 0,
+    val download: Long = 0,
+    @SerialName("start_time") val startTime: String = "",
+    @SerialName("duration_ms") val durationMs: Long = 0,
+    val chain: List<String> = emptyList(),
+    val rule: String = "",
+)
+
+@Serializable
+data class LogEntryDto(
+    val ts: Long = 0,            // Unix epoch milliseconds
+    val level: String = "",      // "I" / "W" / "E" / "D"
+    val msg: String = "",
+)
+
 @Serializable
 data class SnapshotDto(
     val id: String = "",

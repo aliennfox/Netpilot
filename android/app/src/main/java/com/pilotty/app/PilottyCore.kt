@@ -121,6 +121,12 @@ object PilottyCore {
     fun removeRuleSet(tag: String): String        = require().removeRuleSet(tag)
     fun enableBuiltinRuleSet(alias: String): String = require().enableBuiltinRuleSet(alias)
     fun listBuiltinRuleSets(): String             = require().listBuiltinRuleSets()
+
+    // Phase 9B 观测: ring buffer 已在 Go 侧就绪, Kotlin 侧按需轮询
+    fun trafficHistory(n: Int): String            = require().trafficHistory(n.toLong())
+    fun connections(): String                     = require().connections()
+    fun recentLogs(n: Int): String                = require().recentLogs(n.toLong())
+    fun clearTrafficHistory()                     = require().clearTrafficHistory()
     fun agentReady(): Boolean                     = require().agentReady()
     fun version(): String                         = require().version()
 

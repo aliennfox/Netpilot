@@ -37,6 +37,8 @@ import com.pilotty.app.ui.NodesScreen
 import com.pilotty.app.ui.components.FloatingBottomNav
 import com.pilotty.app.ui.components.NavItem
 import com.pilotty.app.ui.import_.ImportBus
+import com.pilotty.app.ui.observe.ConnectionsScreen
+import com.pilotty.app.ui.observe.LogsScreen
 import com.pilotty.app.ui.settings.SettingsScreen
 import com.pilotty.app.ui.settings.ThemeMode
 import com.pilotty.app.ui.subs.SubsScreen
@@ -158,8 +160,15 @@ fun PilottyApp(
             composable("nodes") { NodesScreen(onNavigateSubs = { nav.navigate("subs") }) }
             composable("subs") { SubsScreen() }
             composable("settings") {
-                SettingsScreen(themeMode = themeMode, onThemeChange = onThemeChange)
+                SettingsScreen(
+                    themeMode = themeMode,
+                    onThemeChange = onThemeChange,
+                    onNavigateLogs = { nav.navigate("logs") },
+                    onNavigateConnections = { nav.navigate("connections") },
+                )
             }
+            composable("logs") { LogsScreen(onBack = { nav.popBackStack() }) }
+            composable("connections") { ConnectionsScreen(onBack = { nav.popBackStack() }) }
         }
 
         // Phase 4: IME 打开时隐藏 floating nav, 避免它覆盖 Settings AgentApiKey 的保存/取消 按钮。
