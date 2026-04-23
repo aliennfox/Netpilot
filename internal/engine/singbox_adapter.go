@@ -373,8 +373,30 @@ func (a *SingBoxAdapter) TestLatencyBatch(tags []string, testURL string, timeout
 func (a *SingBoxAdapter) CloseConnection(id string) error {
 	return fmt.Errorf("not implemented: CloseConnection")
 }
+// GetTrafficStats 返回自 sing-box 启动以来的累计上/下行 bytes。
+// 用途: mobile 层 Client.trafficSamplerLoop 1Hz poll, 写进 TrafficRing, 由 ring 算每秒 delta (UpRate/DownRate)。
+//
+// 选 /connections 的 uploadTotal/downloadTotal 而不是 /traffic 的原因:
+//   - /traffic 返回的是 "自上次请求以来" 的瞬时量, 依赖调用频率, 不稳
+//   - /connections 的 total 是从进程启动累加, 语义明确
+//   - 多调一次 /connections 对本地 HTTP 可接受 (几 ms)
+//
+// 副作用: 不像 /traffic 那样是纯流量通道, 拿 /connections 会顺带解码连接数组。
+// 当前频率 1Hz + 本地环回, 不构成性能问题; 若未来要优化可加 ?summary=1 参数或缓存。
 func (a *SingBoxAdapter) GetTrafficStats() (*TrafficStats, error) {
-	return nil, fmt.Errorf("not implemented: GetTrafficStats")
+	resp, err := a.httpClient.Get(a.baseURL + "/connections")
+	if err != nil {
+		return nil, fmt.Errorf("代理控制通道不可达 (VPN 未启动): %w", err)
+	}
+	defer resp.Body.Close()
+	var raw struct {
+		UploadTotal   int64 `json:"uploadTotal"`
+		DownloadTotal int64 `json:"downloadTotal"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("decode /connections total: %w", err)
+	}
+	return &TrafficStats{Upload: raw.UploadTotal, Download: raw.DownloadTotal}, nil
 }
 func (a *SingBoxAdapter) SubscribeLogs(level string) (<-chan LogEntry, func()) {
 	ch := make(chan LogEntry)
