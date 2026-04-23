@@ -95,6 +95,69 @@ object ConfigMerger {
         }
     }
 
+    /**
+     * 注入 Sniffing 档位 + IPv6 模式偏好 (Phase P1-A)。
+     *
+     * 动作:
+     *  - sniff=false → route.rules 里移除 action="sniff" 那条 (base 默认塞了)
+     *  - ipv6Mode → dns.strategy 改写成对应值 + 按需调整 tun inbound address (去除 IPv4/IPv6 段)
+     *
+     * 容错: 任何 JSON 异常 → 返回原字符串, 不影响主配置加载。
+     */
+    fun injectSniffingIpv6(configJson: String, snapshot: SniffingIpv6Prefs.Snapshot): String {
+        return try {
+            val root = JSONObject(configJson)
+
+            if (!snapshot.sniff) {
+                val route = root.optJSONObject("route")
+                val rules = route?.optJSONArray("rules")
+                if (rules != null) {
+                    val filtered = JSONArray()
+                    for (i in 0 until rules.length()) {
+                        val r = rules.optJSONObject(i) ?: continue
+                        if (r.optString("action") == "sniff") continue
+                        filtered.put(r)
+                    }
+                    route.put("rules", filtered)
+                }
+            }
+
+            val dns = root.optJSONObject("dns")
+            dns?.put("strategy", snapshot.ipv6Mode.raw)
+
+            val inbounds = root.optJSONArray("inbounds")
+            if (inbounds != null) {
+                for (i in 0 until inbounds.length()) {
+                    val inb = inbounds.optJSONObject(i) ?: continue
+                    if (inb.optString("type") != "tun") continue
+                    val addrs = inb.optJSONArray("address") ?: continue
+                    val filtered = JSONArray()
+                    for (j in 0 until addrs.length()) {
+                        val a = addrs.optString(j)
+                        val isV6 = a.contains(":")
+                        when (snapshot.ipv6Mode) {
+                            SniffingIpv6Prefs.Ipv6Mode.Ipv4Only -> if (!isV6) filtered.put(a)
+                            SniffingIpv6Prefs.Ipv6Mode.Ipv6Only -> if (isV6) filtered.put(a)
+                            else -> filtered.put(a)
+                        }
+                    }
+                    if (filtered.length() == 0) {
+                        // 避免双栈都被剥光的退化 (选了 v6Only 但 base 只给了 v4 etc), 保留原样
+                        Log.w(TAG, "injectSniffingIpv6: tun address 被过滤空, 回退保留原 address")
+                    } else {
+                        inb.put("address", filtered)
+                    }
+                }
+            }
+
+            Log.i(TAG, "injectSniffingIpv6 sniff=${snapshot.sniff} ipv6=${snapshot.ipv6Mode.raw}")
+            root.toString()
+        } catch (t: Throwable) {
+            Log.w(TAG, "injectSniffingIpv6 failed, config unchanged", t)
+            configJson
+        }
+    }
+
     private fun mergeInbounds(merged: JSONObject, base: JSONObject) {
         val mInbounds = merged.optJSONArray("inbounds") ?: JSONArray().also { merged.put("inbounds", it) }
         val hasTun = (0 until mInbounds.length()).any {

@@ -255,6 +255,7 @@ class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerH
         val mergedFile = File(filesDir, "merged.json")
 
         val perAppSnap = PerAppVpnPrefs.get(this).state.value
+        val sniffSnap = SniffingIpv6Prefs.get(this).state.value
 
         if (mergedFile.exists() && mergedFile.length() > 0) {
             Log.i(TAG, "using config ${mergedFile.path}")
@@ -265,11 +266,13 @@ class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerH
                 Log.w(TAG, "tun base asset missing, merged.json used as-is (may lack tun inbound!)")
                 merged
             }
-            return ConfigMerger.injectPerAppRules(withTun, perAppSnap)
+            val withPerApp = ConfigMerger.injectPerAppRules(withTun, perAppSnap)
+            return ConfigMerger.injectSniffingIpv6(withPerApp, sniffSnap)
         }
         if (tunBaseFile.exists() && tunBaseFile.length() > 0) {
             Log.i(TAG, "using config ${tunBaseFile.path} (no merged.json)")
-            return ConfigMerger.injectPerAppRules(tunBaseFile.readText(), perAppSnap)
+            val withPerApp = ConfigMerger.injectPerAppRules(tunBaseFile.readText(), perAppSnap)
+            return ConfigMerger.injectSniffingIpv6(withPerApp, sniffSnap)
         }
         error("no sing-box config found; expected ${mergedFile.path} or ${tunBaseFile.path}")
     }
