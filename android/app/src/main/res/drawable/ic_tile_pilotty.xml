@@ -1,0 +1,14 @@
+<!--
+  Pilotty QS Tile icon (24dp). 用简单的盾形 + 对勾: VPN 语义 + 安全感。
+  白色描边/纯色填充, 系统 Tile 会按 dark/light 主题染色, 不要自己调色。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?android:attr/colorControlNormal">
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M12,2L4,5v6c0,5 3.5,9.5 8,11c4.5,-1.5 8,-6 8,-11V5L12,2zM10.5,16.2L7.3,13l1.4,-1.4l1.8,1.8l4.8,-4.8l1.4,1.4L10.5,16.2z" />
+</vector>

@@ -42,6 +42,7 @@ import com.pilotty.app.ui.settings.ThemeMode
 import com.pilotty.app.ui.subs.SubsScreen
 import com.pilotty.app.ui.theme.LocalPilottyColors
 import com.pilotty.app.ui.theme.PilottyTheme
+import com.pilotty.app.vpn.PilottyTileService
 import com.pilotty.app.vpn.StartVpnBus
 import com.pilotty.app.vpn.VpnController
 import androidx.compose.runtime.LaunchedEffect
@@ -54,6 +55,7 @@ class MainActivity : ComponentActivity() {
         vpn = VpnController(this).also { it.registerLauncher() }
         // App 被 Deep Link 冷启动时, intent 在 onCreate 里读; 热启动走 onNewIntent
         handleIncomingUri(intent)
+        handleTileIntent(intent)
         setContent {
             var themeMode by rememberSaveable { mutableStateOf(ThemeMode.System) }
             val dark = when (themeMode) {
@@ -78,6 +80,16 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleIncomingUri(intent)
+        handleTileIntent(intent)
+    }
+
+    /** QS Tile 点击启动 VPN 时, 由 tile 的 startActivityAndCollapse 带这个 action 进来;
+     *  Activity 完成 VpnService.prepare() 授权流程 (tile 本身不是 Activity 做不了)。 */
+    private fun handleTileIntent(intent: Intent?) {
+        if (intent?.action == PilottyTileService.ACTION_START_VPN_FROM_TILE) {
+            Log.i("MainActivity", "tile → start VPN")
+            vpn.start()
+        }
     }
 
     /**
