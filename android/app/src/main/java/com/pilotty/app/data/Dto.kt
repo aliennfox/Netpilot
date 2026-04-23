@@ -210,6 +210,18 @@ data class LogEntryDto(
     val msg: String = "",
 )
 
+// Phase 10-F-1 Failover
+@Serializable
+data class FailoverStatusDto(
+    val running: Boolean = false,
+    val group: String = "",
+    @SerialName("current_node") val currentNode: String = "",
+    @SerialName("consecutive_fails") val consecutiveFails: Int = 0,
+    @SerialName("last_switch_at") val lastSwitchAt: String = "",
+    @SerialName("last_switch_to") val lastSwitchTo: String = "",
+    @SerialName("last_error") val lastError: String = "",
+)
+
 @Serializable
 data class SnapshotDto(
     val id: String = "",

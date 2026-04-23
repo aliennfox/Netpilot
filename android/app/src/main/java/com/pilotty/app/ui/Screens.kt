@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -620,6 +621,27 @@ class NodesViewModel : ViewModel() {
     }
 
     fun dismissToast() { _state.value = _state.value.copy(toast = null) }
+
+    /**
+     * Phase 10-F-2: 单节点测速。 长按节点卡触发 —— 只测这一个, 不折腾别人。
+     * VPN 未启动时不自动拉, 直接提示用户 (单节点测速多数是"验证刚切的节点是否恢复", VPN
+     * 此时通常已在跑, 不用像 testAll 那样做 auto-start 流程)。
+     */
+    fun testOne(tag: String) = viewModelScope.launch {
+        if (!com.pilotty.app.PilottyCore.tunRunning.value) {
+            _state.value = _state.value.copy(toast = "VPN 未运行, 单节点测速需要先开 VPN")
+            return@launch
+        }
+        _state.value = _state.value.copy(toast = "正在测 $tag ...")
+        try {
+            PilottyRepository.testLatency(tag)
+            // 测完刷新节点列表拿最新 latency
+            val n2 = PilottyRepository.nodes()
+            _state.value = _state.value.copy(nodes = n2, toast = "$tag 测速完成")
+        } catch (e: Throwable) {
+            _state.value = _state.value.copy(toast = "测速失败: ${e.message}")
+        }
+    }
 }
 
 @Composable
@@ -790,15 +812,20 @@ fun NodesScreen(
                 contentPadding = PaddingValues(bottom = 96.dp),
             ) {
                 items(filtered, key = { it.tag }) { node ->
-                    NodeCard(node = node, onClick = { vm.switchTo(node.tag) })
+                    NodeCard(
+                        node = node,
+                        onClick = { vm.switchTo(node.tag) },
+                        onLongClick = { vm.testOne(node.tag) },
+                    )
                 }
             }
         }
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun NodeCard(node: NodeDto, onClick: () -> Unit) {
+private fun NodeCard(node: NodeDto, onClick: () -> Unit, onLongClick: () -> Unit = {}) {
     val pc = LocalPilottyColors.current
     val slow = node.latency > 300
     val cc = node.tag.take(2).uppercase()
@@ -806,7 +833,7 @@ private fun NodeCard(node: NodeDto, onClick: () -> Unit) {
         PilottyCard(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onClick),
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick),
             strong = node.active,
             soft = !node.active,
         ) {
@@ -955,6 +982,33 @@ class RulesViewModel : ViewModel() {
         try {
             val m = PilottyRepository.removeRuleSet(tag)
             _state.value = _state.value.copy(toast = m.message.ifEmpty { "已移除 $tag" })
+            refresh()
+        } catch (e: Throwable) {
+            _state.value = _state.value.copy(error = e.message)
+        }
+    }
+
+    /**
+     * Phase 10-F-3: 添加自定义 remote rule-set (如 MetaCubeX 国内镜像 https://github.com/
+     * MetaCubeX/meta-rules-dat/raw/sing/geo/geoip/cn.srs)。 之前只有 5 个 SagerNet builtin,
+     * UI 零入口, 用户想换镜像得改 overlay.json。
+     */
+    fun addCustomRuleSet(tag: String, url: String, updateInterval: String) = viewModelScope.launch {
+        try {
+            val t = tag.trim()
+            val u = url.trim()
+            val ui = updateInterval.trim().ifEmpty { "7d" }
+            if (t.isEmpty() || u.isEmpty()) {
+                _state.value = _state.value.copy(error = "tag 和 URL 不能为空")
+                return@launch
+            }
+            // type=remote 由后端强制校验, source 会被 mobile 层固定覆盖成 "user"
+            val escT = t.replace("\\", "\\\\").replace("\"", "\\\"")
+            val escU = u.replace("\\", "\\\\").replace("\"", "\\\"")
+            val escI = ui.replace("\\", "\\\\").replace("\"", "\\\"")
+            val json = """{"tag":"$escT","type":"remote","format":"binary","url":"$escU","update_interval":"$escI"}"""
+            val m = PilottyRepository.addRuleSet(json)
+            _state.value = _state.value.copy(toast = m.message.ifEmpty { "已添加 $t" })
             refresh()
         } catch (e: Throwable) {
             _state.value = _state.value.copy(error = e.message)
@@ -1212,6 +1266,10 @@ fun RulesSection(vm: RulesViewModel = viewModel()) {
                 vm.enableBuiltinRuleSet(alias)
                 enableRSDialogOpen = false
             },
+            onCustom = { tag, url, interval ->
+                vm.addCustomRuleSet(tag, url, interval)
+                enableRSDialogOpen = false
+            },
         )
     }
 
@@ -1250,54 +1308,131 @@ private fun EnableBuiltinRuleSetDialog(
     enabledTags: Set<String>,
     onDismiss: () -> Unit,
     onEnable: (alias: String) -> Unit,
+    onCustom: (tag: String, url: String, updateInterval: String) -> Unit = { _, _, _ -> },
 ) {
     val pc = LocalPilottyColors.current
+    // Phase 10-F-3: 切换"内置"和"自定义"两个 mode, 都在同一 Dialog 里避免多层弹框
+    var customMode by remember { mutableStateOf(false) }
+    var customTag by remember { mutableStateOf("") }
+    var customUrl by remember { mutableStateOf("") }
+    var customInterval by remember { mutableStateOf("7d") }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = pc.surface,
-        title = { Text("启用内置规则集", color = pc.ink) },
+        title = { Text(if (customMode) "添加自定义规则集" else "启用规则集", color = pc.ink) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "选一个预置规则集启用。 SagerNet 官方二进制格式, 每 7 天自动更新。",
-                    color = pc.ink3,
-                    fontSize = 11.sp,
-                )
-                builtins.forEach { rs ->
-                    val already = rs.tag in enabledTags
-                    PilottyCard(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = !already) { onEnable(rs.tag) },
-                        soft = true,
-                    ) {
-                        Column(Modifier.padding(10.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    rs.tag,
-                                    color = if (already) pc.ink4 else pc.ink,
-                                    fontSize = 13.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Medium,
-                                )
-                                if (already) {
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("已启用", color = pc.accentInk, fontSize = 10.sp)
+                // 模式切换 chip
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    PilottyChip(
+                        text = "内置预设",
+                        selected = !customMode,
+                        onClick = { customMode = false },
+                    )
+                    PilottyChip(
+                        text = "自定义 URL",
+                        selected = customMode,
+                        onClick = { customMode = true },
+                    )
+                }
+
+                if (!customMode) {
+                    Text(
+                        "选一个预置规则集启用。 SagerNet 官方二进制格式, 每 7 天自动更新。",
+                        color = pc.ink3,
+                        fontSize = 11.sp,
+                    )
+                    builtins.forEach { rs ->
+                        val already = rs.tag in enabledTags
+                        PilottyCard(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = !already) { onEnable(rs.tag) },
+                            soft = true,
+                        ) {
+                            Column(Modifier.padding(10.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        rs.tag,
+                                        color = if (already) pc.ink4 else pc.ink,
+                                        fontSize = 13.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                    if (already) {
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("已启用", color = pc.accentInk, fontSize = 10.sp)
+                                    }
                                 }
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    rs.url.ifEmpty { rs.path },
+                                    color = pc.ink4,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                )
                             }
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                rs.url.ifEmpty { rs.path },
-                                color = pc.ink4,
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                            )
                         }
                     }
+                } else {
+                    Text(
+                        "用 MetaCubeX 国内镜像或自建 ruleset。 URL 必须以 .srs / .json 结尾, sing-box 按扩展名判格式。",
+                        color = pc.ink3,
+                        fontSize = 11.sp,
+                    )
+                    OutlinedTextField(
+                        value = customTag,
+                        onValueChange = { customTag = it },
+                        label = { Text("tag (规则集标识)") },
+                        placeholder = { Text("例如: geoip-cn-metacubex") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = pc.ink,
+                            unfocusedBorderColor = pc.hairlineStrong,
+                        ),
+                    )
+                    OutlinedTextField(
+                        value = customUrl,
+                        onValueChange = { customUrl = it },
+                        label = { Text("URL") },
+                        placeholder = { Text("https://.../xx.srs") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = pc.ink,
+                            unfocusedBorderColor = pc.hairlineStrong,
+                        ),
+                    )
+                    OutlinedTextField(
+                        value = customInterval,
+                        onValueChange = { customInterval = it },
+                        label = { Text("更新间隔 (如 7d / 24h)") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = pc.ink,
+                            unfocusedBorderColor = pc.hairlineStrong,
+                        ),
+                    )
                 }
             }
         },
-        confirmButton = {},
+        confirmButton = {
+            if (customMode) {
+                TextButton(
+                    onClick = {
+                        onCustom(customTag, customUrl, customInterval)
+                        customTag = ""; customUrl = ""
+                    },
+                    enabled = customTag.isNotBlank() && customUrl.isNotBlank(),
+                ) {
+                    Text(
+                        "添加",
+                        color = if (customTag.isNotBlank() && customUrl.isNotBlank()) pc.accentInk else pc.ink4,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("关闭", color = pc.ink2) }
         },

@@ -7,6 +7,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.imePadding
@@ -110,18 +111,22 @@ fun SettingsScreen(
         // Phase 10-E-E: WebDAV 云同步
         WebDAVSyncSection()
 
+        // Phase 10-F-1: Failover UI (后端 Phase 2.5 做完未接 UI, 本轮补齐)
+        FailoverSection()
+
         // 分流规则 (原 Rules tab 内联) —— RulesSection 内部已有 Templates / Active rules
         // 两个 Kicker 作为子标题,不再在外层重复"分流规则" 标题
         RulesSection()
 
-        // 关于
+        // 关于 — Phase 10-F-4: 版本号从 Go 层读, 不硬编; Go 侧含 sing-box / go 版本信息
+        val coreVersion = remember { com.pilotty.app.data.PilottyRepository.version() }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Kicker("About")
             PilottyCard(modifier = Modifier.fillMaxWidth(), soft = true) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Pilotty", color = pc.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "版本 0.1.0 · sing-box + gomobile",
+                        coreVersion.ifEmpty { "版本未知 · sing-box + gomobile" },
                         color = pc.ink3,
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
