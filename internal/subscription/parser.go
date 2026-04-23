@@ -15,7 +15,7 @@ import (
 // NodeConfig 是解析后的通用节点配置
 type NodeConfig struct {
 	Name     string
-	Type     string // "shadowsocks" | "trojan" | "vmess" | "vless" | "hysteria" | "hysteria2" | "wireguard" | "tuic" | "anytls" | "shadowtls" | "ssh" | "naive"
+	Type     string // "shadowsocks" | "trojan" | "vmess" | "vless" | "hysteria" | "hysteria2" | "wireguard" | "tuic" | "anytls" | "shadowtls" | "ssh" | "naive" | "socks" | "http"
 	Server   string
 	Port     int
 	Password string // ss / trojan / hysteria2 / anytls / shadowtls / tuic-token-fallback
@@ -235,6 +235,14 @@ func parseLine(line string) (NodeConfig, error) {
 		return parseSSH(line)
 	case strings.HasPrefix(line, "naive+https://"):
 		return parseNaive(line)
+	case strings.HasPrefix(line, "socks5://"),
+		strings.HasPrefix(line, "socks4a://"),
+		strings.HasPrefix(line, "socks4://"),
+		strings.HasPrefix(line, "socks://"):
+		return parseSocks(line)
+	case strings.HasPrefix(line, "http://"),
+		strings.HasPrefix(line, "https://"):
+		return parseHTTP(line)
 	case strings.HasPrefix(line, "ssr://"),
 		strings.HasPrefix(line, "trojan-go://"),
 		strings.HasPrefix(line, "mieru://"),
@@ -325,6 +333,119 @@ func parseNaive(uri string) (NodeConfig, error) {
 	node.Name = decodeURIComponent(u.Fragment)
 	if node.Name == "" {
 		node.Name = fmt.Sprintf("naive-%s", host)
+	}
+	return node, nil
+}
+
+// parseSocks 解析 socks(5|4|4a|无版本)URI。
+// 格式:
+//
+//	socks://host:port[#name]
+//	socks://user:password@host:port[#name]
+//	socks://BASE64(user:password)@host:port[#name]   (v2rayN 变体,password 空时 user 当 base64 试解)
+//	socks5:// / socks4:// / socks4a://
+//
+// 参考: NekoBox `io/nekohasekai/sagernet/fmt/socks/SOCKSFmt.kt:parseSOCKS`
+// 把 socks*:// 换成 http:// 借 url.Parse 抽 userinfo/host/port/fragment。
+func parseSocks(uri string) (NodeConfig, error) {
+	node := NodeConfig{Type: "socks", Extra: map[string]string{}}
+
+	version := "5"
+	switch {
+	case strings.HasPrefix(uri, "socks4a://"):
+		version = "4a"
+	case strings.HasPrefix(uri, "socks4://"):
+		version = "4"
+	}
+	node.Extra["version"] = version
+
+	rest := uri
+	if idx := strings.Index(rest, "://"); idx != -1 {
+		rest = rest[idx+3:]
+	}
+	u, err := url.Parse("http://" + rest)
+	if err != nil {
+		return node, fmt.Errorf("解析 socks URI 失败: %w", err)
+	}
+	if u.Host == "" {
+		return node, fmt.Errorf("socks URI 缺 host")
+	}
+	host, port, err := parseHostPort(u.Host)
+	if err != nil {
+		return node, fmt.Errorf("socks host:port: %w", err)
+	}
+	node.Server = host
+	node.Port = port
+
+	if u.User != nil {
+		user := u.User.Username()
+		pw, _ := u.User.Password()
+		// v2rayN: 无 password 时 user 可能是 base64(user:password)
+		if pw == "" && user != "" {
+			if dec := tryBase64Decode(user); dec != "" {
+				if colon := strings.Index(dec, ":"); colon != -1 {
+					user = dec[:colon]
+					pw = dec[colon+1:]
+				}
+			}
+		}
+		if user != "" {
+			node.Extra["username"] = user
+		}
+		if pw != "" {
+			node.Password = pw
+		}
+	}
+
+	node.Name = decodeURIComponent(u.Fragment)
+	if node.Name == "" {
+		node.Name = fmt.Sprintf("socks-%s:%d", host, port)
+	}
+	return node, nil
+}
+
+// parseHTTP 解析 http(s):// 代理 URI。
+// 格式:
+//
+//	http://host:port[#name]
+//	http://user:password@host:port[?sni=...][#name]
+//	https://user:password@host:port[?sni=...][#name]   (TLS on)
+//
+// 参考: NekoBox `io/nekohasekai/sagernet/fmt/http/HttpFmt.kt:parseHttp`
+// 订阅内容里出现的 http(s):// 才进到 parseLine; 订阅 URL 本身在 FetchAndParse 先被消费。
+func parseHTTP(uri string) (NodeConfig, error) {
+	node := NodeConfig{Type: "http", Extra: map[string]string{}}
+	u, err := url.Parse(uri)
+	if err != nil {
+		return node, fmt.Errorf("解析 http URI 失败: %w", err)
+	}
+	if u.Scheme == "https" {
+		node.TLS = true
+	}
+	if u.Host == "" {
+		return node, fmt.Errorf("http URI 缺 host")
+	}
+	host, port, err := parseHostPort(u.Host)
+	if err != nil {
+		return node, fmt.Errorf("http host:port: %w", err)
+	}
+	node.Server = host
+	node.Port = port
+
+	if u.User != nil {
+		if user := u.User.Username(); user != "" {
+			node.Extra["username"] = user
+		}
+		if pw, set := u.User.Password(); set && pw != "" {
+			node.Password = pw
+		}
+	}
+	if sni := u.Query().Get("sni"); sni != "" {
+		node.SNI = sni
+	}
+	node.Name = decodeURIComponent(u.Fragment)
+	if node.Name == "" {
+		node.Name = fmt.Sprintf("http-%s:%d", host, port)
 	}
 	return node, nil
 }

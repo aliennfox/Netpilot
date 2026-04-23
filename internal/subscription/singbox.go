@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // sing-box 原生 JSON 订阅解析 (M12)
@@ -171,6 +172,54 @@ func singboxOutboundToNode(ob map[string]interface{}) (NodeConfig, error) {
 		if v := sbInt(ob, "version"); v > 0 {
 			node.Extra["version"] = strconv.Itoa(v)
 		}
+		node.TLS = true
+	case "socks":
+		node.Password = sbStr(ob, "password")
+		if u := sbStr(ob, "username"); u != "" {
+			node.Extra["username"] = u
+		}
+		if v := sbStr(ob, "version"); v != "" {
+			node.Extra["version"] = v
+		} else {
+			node.Extra["version"] = "5"
+		}
+	case "http":
+		node.Password = sbStr(ob, "password")
+		if u := sbStr(ob, "username"); u != "" {
+			node.Extra["username"] = u
+		}
+	case "ssh":
+		// SSH outbound 字段直接透传; user 放 Extra 以匹配 convertSSH 的契约
+		if u := sbStr(ob, "user"); u != "" {
+			node.Extra["user"] = u
+		}
+		node.Password = sbStr(ob, "password")
+		for _, k := range []string{"private_key_path", "private_key_passphrase", "client_version"} {
+			if v := sbStr(ob, k); v != "" {
+				node.Extra[k] = v
+			}
+		}
+		// private_key / host_key / host_key_algorithms 是 listable, 取原始 Listable 合成 ; 分隔
+		for _, k := range []string{"private_key", "host_key", "host_key_algorithms"} {
+			if list, ok := ob[k].([]interface{}); ok {
+				var parts []string
+				for _, item := range list {
+					if s, ok := item.(string); ok && s != "" {
+						parts = append(parts, s)
+					}
+				}
+				if len(parts) > 0 {
+					node.Extra[k] = strings.Join(parts, ";")
+				}
+			} else if s := sbStr(ob, k); s != "" {
+				node.Extra[k] = s
+			}
+		}
+	case "naive":
+		if u := sbStr(ob, "username"); u != "" {
+			node.Extra["username"] = u
+		}
+		node.Password = sbStr(ob, "password")
 		node.TLS = true
 	case "wireguard":
 		node.Extra["private_key"] = sbStr(ob, "private_key")

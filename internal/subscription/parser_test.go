@@ -645,6 +645,285 @@ func TestConvertNaive(t *testing.T) {
 	}
 }
 
+// TestParseSocks 覆盖 socks/socks5/socks4/socks4a URI 解析,含 v2rayN base64 兜底
+func TestParseSocks(t *testing.T) {
+	userInfoB64 := base64.StdEncoding.EncodeToString([]byte("alice:secret"))
+	tests := []struct {
+		name     string
+		uri      string
+		server   string
+		port     int
+		user     string
+		password string
+		version  string
+		label    string
+		wantErr  bool
+	}{
+		{
+			name:     "socks5 plain auth",
+			uri:      "socks5://alice:secret@1.2.3.4:1080#Home-SOCKS",
+			server:   "1.2.3.4",
+			port:     1080,
+			user:     "alice",
+			password: "secret",
+			version:  "5",
+			label:    "Home-SOCKS",
+		},
+		{
+			name:    "socks no auth, bare host:port",
+			uri:     "socks://10.0.0.1:1080#Local",
+			server:  "10.0.0.1",
+			port:    1080,
+			version: "5",
+			label:   "Local",
+		},
+		{
+			name:     "socks v2rayN base64 userinfo",
+			uri:      "socks://" + userInfoB64 + "@proxy.example.com:1080#v2rayN-style",
+			server:   "proxy.example.com",
+			port:     1080,
+			user:     "alice",
+			password: "secret",
+			version:  "5",
+			label:    "v2rayN-style",
+		},
+		{
+			name:    "socks4 version detection",
+			uri:     "socks4://bob@legacy.lan:1080#Legacy",
+			server:  "legacy.lan",
+			port:    1080,
+			user:    "bob",
+			version: "4",
+			label:   "Legacy",
+		},
+		{
+			name:    "socks4a version detection",
+			uri:     "socks4a://remote.lan:1080",
+			server:  "remote.lan",
+			port:    1080,
+			version: "4a",
+		},
+		{
+			name:    "missing port",
+			uri:     "socks5://host-only",
+			wantErr: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseSocks(tc.uri)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %+v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Server != tc.server || got.Port != tc.port {
+				t.Errorf("host/port: want %s:%d got %s:%d", tc.server, tc.port, got.Server, got.Port)
+			}
+			if got.Extra["username"] != tc.user {
+				t.Errorf("user: want %q got %q", tc.user, got.Extra["username"])
+			}
+			if got.Password != tc.password {
+				t.Errorf("password: want %q got %q", tc.password, got.Password)
+			}
+			if got.Extra["version"] != tc.version {
+				t.Errorf("version: want %q got %q", tc.version, got.Extra["version"])
+			}
+			if tc.label != "" && got.Name != tc.label {
+				t.Errorf("name: want %q got %q", tc.label, got.Name)
+			}
+		})
+	}
+}
+
+// TestConvertSocks 验证 sing-box outbound 必填字段 + version default
+func TestConvertSocks(t *testing.T) {
+	// v5 with auth
+	node := NodeConfig{
+		Type: "socks", Server: "1.2.3.4", Port: 1080,
+		Password: "secret", Extra: map[string]string{"username": "alice", "version": "5"},
+	}
+	ob, err := ConvertToSingboxOutbound(node)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if ob["type"] != "socks" || ob["server"] != "1.2.3.4" || ob["server_port"] != 1080 {
+		t.Errorf("base: %+v", ob)
+	}
+	if ob["version"] != "5" || ob["username"] != "alice" || ob["password"] != "secret" {
+		t.Errorf("auth: %+v", ob)
+	}
+
+	// v4a without auth, default version applied
+	node2 := NodeConfig{
+		Type: "socks", Server: "remote.lan", Port: 1080,
+		Extra: map[string]string{"version": "4a"},
+	}
+	ob2, err := ConvertToSingboxOutbound(node2)
+	if err != nil {
+		t.Fatalf("convert2: %v", err)
+	}
+	if ob2["version"] != "4a" {
+		t.Errorf("v4a: %+v", ob2)
+	}
+	if _, has := ob2["username"]; has {
+		t.Errorf("no auth should not emit username field: %+v", ob2)
+	}
+
+	// version defaulted to 5 when Extra 缺失
+	node3 := NodeConfig{Type: "socks", Server: "x", Port: 1, Extra: map[string]string{}}
+	ob3, err := ConvertToSingboxOutbound(node3)
+	if err != nil {
+		t.Fatalf("convert3: %v", err)
+	}
+	if ob3["version"] != "5" {
+		t.Errorf("default version should be 5, got %+v", ob3["version"])
+	}
+}
+
+// TestParseHTTP 覆盖 http:// / https:// 代理 URI,含 userinfo + sni query
+func TestParseHTTP(t *testing.T) {
+	tests := []struct {
+		name     string
+		uri      string
+		server   string
+		port     int
+		user     string
+		password string
+		tls      bool
+		sni      string
+		label    string
+		wantErr  bool
+	}{
+		{
+			name:   "http no auth",
+			uri:    "http://proxy.corp:8080#Corp",
+			server: "proxy.corp",
+			port:   8080,
+			label:  "Corp",
+		},
+		{
+			name:     "http with auth",
+			uri:      "http://alice:secret@10.0.0.2:3128#LAN",
+			server:   "10.0.0.2",
+			port:     3128,
+			user:     "alice",
+			password: "secret",
+			label:    "LAN",
+		},
+		{
+			name:     "https TLS on",
+			uri:      "https://alice:secret@proxy.example.com:443#HTTPS-Proxy",
+			server:   "proxy.example.com",
+			port:     443,
+			user:     "alice",
+			password: "secret",
+			tls:      true,
+			label:    "HTTPS-Proxy",
+		},
+		{
+			name:   "https with sni query",
+			uri:    "https://proxy.example.com:443?sni=cdn.example.com#SNI-override",
+			server: "proxy.example.com",
+			port:   443,
+			tls:    true,
+			sni:    "cdn.example.com",
+			label:  "SNI-override",
+		},
+		{
+			name:    "missing port",
+			uri:     "http://host-only",
+			wantErr: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseHTTP(tc.uri)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %+v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Server != tc.server || got.Port != tc.port {
+				t.Errorf("host/port: want %s:%d got %s:%d", tc.server, tc.port, got.Server, got.Port)
+			}
+			if got.Extra["username"] != tc.user {
+				t.Errorf("user: want %q got %q", tc.user, got.Extra["username"])
+			}
+			if got.Password != tc.password {
+				t.Errorf("password: want %q got %q", tc.password, got.Password)
+			}
+			if got.TLS != tc.tls {
+				t.Errorf("tls: want %v got %v", tc.tls, got.TLS)
+			}
+			if got.SNI != tc.sni {
+				t.Errorf("sni: want %q got %q", tc.sni, got.SNI)
+			}
+			if tc.label != "" && got.Name != tc.label {
+				t.Errorf("name: want %q got %q", tc.label, got.Name)
+			}
+		})
+	}
+}
+
+// TestConvertHTTP 验证 sing-box http outbound: TLS 段仅在 node.TLS 时出现
+func TestConvertHTTP(t *testing.T) {
+	// 明文 http
+	plain := NodeConfig{
+		Type: "http", Server: "proxy.corp", Port: 8080,
+		Password: "pw", Extra: map[string]string{"username": "alice"},
+	}
+	ob, err := ConvertToSingboxOutbound(plain)
+	if err != nil {
+		t.Fatalf("convert plain: %v", err)
+	}
+	if ob["type"] != "http" || ob["server"] != "proxy.corp" || ob["server_port"] != 8080 {
+		t.Errorf("base: %+v", ob)
+	}
+	if ob["username"] != "alice" || ob["password"] != "pw" {
+		t.Errorf("auth: %+v", ob)
+	}
+	if _, has := ob["tls"]; has {
+		t.Errorf("明文 http 不应有 tls 块: %+v", ob)
+	}
+
+	// https 带 SNI
+	tls := NodeConfig{
+		Type: "http", Server: "proxy.example.com", Port: 443,
+		Password: "pw", SNI: "cdn.example.com", TLS: true,
+		Extra: map[string]string{"username": "alice", "insecure": "true"},
+	}
+	ob2, err := ConvertToSingboxOutbound(tls)
+	if err != nil {
+		t.Fatalf("convert tls: %v", err)
+	}
+	tlsMap, ok := ob2["tls"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected tls map: %+v", ob2)
+	}
+	if tlsMap["enabled"] != true || tlsMap["server_name"] != "cdn.example.com" || tlsMap["insecure"] != true {
+		t.Errorf("tls: %+v", tlsMap)
+	}
+
+	// https 无 SNI 时 server_name 回落到 server
+	tls2 := NodeConfig{Type: "http", Server: "proxy.example.com", Port: 443, TLS: true, Extra: map[string]string{}}
+	ob3, err := ConvertToSingboxOutbound(tls2)
+	if err != nil {
+		t.Fatalf("convert tls2: %v", err)
+	}
+	if tm := ob3["tls"].(map[string]interface{}); tm["server_name"] != "proxy.example.com" {
+		t.Errorf("server_name fallback: %+v", tm)
+	}
+}
+
 // TestParseLine_UnsupportedSkipsGracefully Phase 9 A4: 不支持协议在 parser 层被拒, ParseSubscription 不崩
 func TestParseLine_UnsupportedSkipsGracefully(t *testing.T) {
 	// base64 一条 ssr + 一条合法 ss 的订阅, 期望保留 ss 跳过 ssr

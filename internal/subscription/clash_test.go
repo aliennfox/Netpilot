@@ -240,6 +240,86 @@ func TestParseSingBoxJSON(t *testing.T) {
 	}
 }
 
+// TestParseClashYAML_SocksHTTP 覆盖 Clash YAML 的 socks5 / http / https 映射
+func TestParseClashYAML_SocksHTTP(t *testing.T) {
+	yaml := `
+proxies:
+  - name: "SOCKS5-Home"
+    type: socks5
+    server: 10.0.0.1
+    port: 1080
+    username: alice
+    password: secret
+  - name: "HTTP-Corp"
+    type: http
+    server: proxy.corp.example.com
+    port: 8080
+    username: bob
+    password: corp-pw
+  - name: "HTTPS-TLS"
+    type: http
+    server: proxy.example.com
+    port: 443
+    tls: true
+    sni: cdn.example.com
+    username: carol
+    password: tls-pw
+    skip-cert-verify: true
+`
+	nodes, err := ParseClashYAML([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(nodes) != 3 {
+		t.Fatalf("want 3 nodes, got %d: %+v", len(nodes), nodes)
+	}
+	byName := map[string]NodeConfig{}
+	for _, n := range nodes {
+		byName[n.Name] = n
+	}
+
+	s := byName["SOCKS5-Home"]
+	if s.Type != "socks" || s.Server != "10.0.0.1" || s.Port != 1080 {
+		t.Errorf("SOCKS base: %+v", s)
+	}
+	if s.Extra["username"] != "alice" || s.Password != "secret" || s.Extra["version"] != "5" {
+		t.Errorf("SOCKS auth/version: %+v", s)
+	}
+
+	h := byName["HTTP-Corp"]
+	if h.Type != "http" || h.TLS {
+		t.Errorf("HTTP-Corp should be plaintext: %+v", h)
+	}
+	if h.Extra["username"] != "bob" || h.Password != "corp-pw" {
+		t.Errorf("HTTP-Corp auth: %+v", h)
+	}
+
+	ht := byName["HTTPS-TLS"]
+	if ht.Type != "http" || !ht.TLS {
+		t.Errorf("HTTPS-TLS should be TLS: %+v", ht)
+	}
+	if ht.SNI != "cdn.example.com" || ht.Extra["insecure"] != "true" {
+		t.Errorf("HTTPS-TLS tls fields: %+v", ht)
+	}
+
+	// converter 圆闭: SOCKS 和 HTTPS 都应产生合法 outbound
+	sockOB, err := ConvertToSingboxOutbound(s)
+	if err != nil {
+		t.Fatalf("convert socks: %v", err)
+	}
+	if sockOB["type"] != "socks" || sockOB["version"] != "5" {
+		t.Errorf("socks outbound: %+v", sockOB)
+	}
+	httpsOB, err := ConvertToSingboxOutbound(ht)
+	if err != nil {
+		t.Fatalf("convert https: %v", err)
+	}
+	tlsMap, ok := httpsOB["tls"].(map[string]interface{})
+	if !ok || tlsMap["enabled"] != true || tlsMap["server_name"] != "cdn.example.com" {
+		t.Errorf("https outbound tls: %+v", httpsOB["tls"])
+	}
+}
+
 // TestParseSubscription_SingBoxDispatch 验证 ParseSubscription 路由到 sing-box JSON
 func TestParseSubscription_SingBoxDispatch(t *testing.T) {
 	json := `{"outbounds":[{"type":"trojan","tag":"T1","server":"t.example.com","server_port":443,"password":"pw","tls":{"enabled":true,"server_name":"t.example.com"}}]}`

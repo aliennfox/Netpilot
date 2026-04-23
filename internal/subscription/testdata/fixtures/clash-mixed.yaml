@@ -78,6 +78,24 @@ proxies:
     sni: anytls.example.com
     client-fingerprint: chrome
 
+  - name: "SOCKS5-Home"
+    type: socks5
+    server: socks5.example.com
+    port: 1080
+    username: user-fake
+    password: socks-fake-pw
+    udp: true
+
+  - name: "HTTPS-Corp"
+    type: http
+    server: https.example.com
+    port: 443
+    tls: true
+    sni: https.example.com
+    username: user-fake
+    password: https-fake-pw
+    skip-cert-verify: false
+
 # NOTE: WireGuard 暂从 fixture 移除,见 CLAUDE.md #M25: sing-box 1.13.8+
 # 把 WG 从 outbound 迁到 endpoint, 当前 convertWireGuard 产物会被 sing-box
 # binary check 拒绝。 收尾到独立的 M10 增量修复。
@@ -85,7 +103,7 @@ proxies:
 proxy-groups:
   - name: PROXY
     type: select
-    proxies: [SS-HK-01, VMess-WS-JP, VLESS-Reality-US]
+    proxies: [SS-HK-01, VMess-WS-JP, VLESS-Reality-US, SOCKS5-Home, HTTPS-Corp]
 
 rules:
   - MATCH,PROXY

@@ -17,9 +17,9 @@ import (
 //
 // 本文件覆盖的协议类型:
 //   ss (shadowsocks), vmess, vless, trojan, hysteria2, hysteria (v1), tuic, anytls,
-//   shadowtls, wireguard, socks5/socks, http(s)
-// 明确不覆盖(对应 gap doc W11-W15):
-//   ssr, mieru, naive, ssh, trojan-go
+//   shadowtls, wireguard, ssh, naive, socks5/socks, http(s)
+// 明确不覆盖(对应 gap doc W11-W15, sing-box 上游无原生实现):
+//   ssr, mieru, trojan-go, juicity
 
 // clashRoot 只 Unmarshal proxies 数组, 其余 Clash 全局配置(rules/dns/...)我们不关心
 type clashRoot struct {
@@ -141,9 +141,9 @@ func clashProxyToNode(p map[string]interface{}) (NodeConfig, error) {
 	case "naive":
 		return clashNaive(p)
 	case "socks5", "socks":
-		return NodeConfig{}, fmt.Errorf("socks 暂未实现 (S12)")
+		return clashSocks(p)
 	case "http", "https":
-		return NodeConfig{}, fmt.Errorf("http(s) 暂未实现 (S12)")
+		return clashHTTP(p)
 	case "ssr":
 		return NodeConfig{}, errProtocolUnsupported("ssr")
 	case "mieru", "trojan-go", "juicity":
@@ -156,6 +156,56 @@ func clashProxyToNode(p map[string]interface{}) (NodeConfig, error) {
 // errProtocolUnsupported Phase 9 A4: 上游 sing-box 不原生支持 + 咱们本阶段不魔改 → 清晰跳过。
 func errProtocolUnsupported(proto string) error {
 	return fmt.Errorf("协议 %s 本版本暂不支持 (sing-box 上游无原生实现, 跳过)", proto)
+}
+
+// clashSocks Clash YAML: type=socks5/socks → NodeConfig
+// Clash Meta socks5 schema: name/server/port/username?/password?/udp?/skip-cert-verify?
+// sing-box 只认 4/4a/5 三档, Clash 没有版本字段, 默认走 5
+func clashSocks(p map[string]interface{}) (NodeConfig, error) {
+	node := NodeConfig{
+		Type:     "socks",
+		Name:     clashStr(p, "name"),
+		Server:   clashStr(p, "server"),
+		Port:     clashInt(p, "port"),
+		Password: clashStr(p, "password"),
+		Extra:    map[string]string{"version": "5"},
+	}
+	if node.Server == "" || node.Port == 0 {
+		return node, fmt.Errorf("socks server/port 缺失")
+	}
+	if u := clashStr(p, "username"); u != "" {
+		node.Extra["username"] = u
+	}
+	return node, nil
+}
+
+// clashHTTP Clash YAML: type=http/https → NodeConfig
+// Clash Meta schema: name/server/port/username?/password?/tls?/sni?/skip-cert-verify?
+// type="https" 等价于 type="http" + tls: true
+func clashHTTP(p map[string]interface{}) (NodeConfig, error) {
+	typ := clashStr(p, "type")
+	node := NodeConfig{
+		Type:     "http",
+		Name:     clashStr(p, "name"),
+		Server:   clashStr(p, "server"),
+		Port:     clashInt(p, "port"),
+		Password: clashStr(p, "password"),
+		SNI:      clashStr(p, "sni"),
+		Extra:    map[string]string{},
+	}
+	if node.Server == "" || node.Port == 0 {
+		return node, fmt.Errorf("http server/port 缺失")
+	}
+	if typ == "https" || clashBool(p, "tls") {
+		node.TLS = true
+	}
+	if u := clashStr(p, "username"); u != "" {
+		node.Extra["username"] = u
+	}
+	if clashBool(p, "skip-cert-verify") {
+		node.Extra["insecure"] = "true"
+	}
+	return node, nil
 }
 
 // clashSSH Clash YAML: type=ssh → NodeConfig (Phase 9 A2)

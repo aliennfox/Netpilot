@@ -44,6 +44,10 @@ func ConvertToSingboxOutbound(node NodeConfig) (map[string]interface{}, error) {
 		return convertSSH(node, tag)
 	case "naive":
 		return convertNaive(node, tag)
+	case "socks":
+		return convertSocks(node, tag)
+	case "http":
+		return convertHTTP(node, tag)
 	default:
 		return nil, fmt.Errorf("不支持的节点类型: %s", node.Type)
 	}
@@ -501,6 +505,67 @@ func convertShadowTLS(node NodeConfig, tag string) (map[string]interface{}, erro
 	return ob, nil
 }
 
+// convertSocks 将 SOCKS (4 / 4a / 5) 节点转为 sing-box outbound
+// Schema 依据: sing-box v1.13.8 `option/socks.go:SOCKSOutboundOptions`
+// 字段: type / server / server_port / version ("4"|"4a"|"5", 默认 5) / username / password
+func convertSocks(node NodeConfig, tag string) (map[string]interface{}, error) {
+	if node.Server == "" || node.Port == 0 {
+		return nil, fmt.Errorf("SOCKS 节点缺 server/port: server=%s port=%d", node.Server, node.Port)
+	}
+	ob := map[string]interface{}{
+		"type":        "socks",
+		"tag":         tag,
+		"server":      node.Server,
+		"server_port": node.Port,
+	}
+	version := node.Extra["version"]
+	if version == "" {
+		version = "5"
+	}
+	ob["version"] = version
+	if u := node.Extra["username"]; u != "" {
+		ob["username"] = u
+	}
+	if node.Password != "" {
+		ob["password"] = node.Password
+	}
+	return ob, nil
+}
+
+// convertHTTP 将 HTTP(S) 代理节点转为 sing-box outbound
+// Schema 依据: sing-box v1.13.8 `option/http.go:HTTPOutboundOptions`
+// TLS 根据 node.TLS 决定, server_name 用 node.SNI 或回落 server host
+func convertHTTP(node NodeConfig, tag string) (map[string]interface{}, error) {
+	if node.Server == "" || node.Port == 0 {
+		return nil, fmt.Errorf("HTTP 节点缺 server/port: server=%s port=%d", node.Server, node.Port)
+	}
+	ob := map[string]interface{}{
+		"type":        "http",
+		"tag":         tag,
+		"server":      node.Server,
+		"server_port": node.Port,
+	}
+	if u := node.Extra["username"]; u != "" {
+		ob["username"] = u
+	}
+	if node.Password != "" {
+		ob["password"] = node.Password
+	}
+	if node.TLS {
+		tls := map[string]interface{}{"enabled": true}
+		if node.SNI != "" {
+			tls["server_name"] = node.SNI
+		} else {
+			tls["server_name"] = node.Server
+		}
+		if node.Extra["insecure"] == "true" {
+			tls["insecure"] = true
+		}
+		ob["tls"] = tls
+	}
+	return ob, nil
+}
+
 // splitCSV 把 "a,b,c" 或 "a b c" 或换行分隔拆成 []interface{}(sing-box JSON slice 语义)
 func splitCSV(s string) []interface{} {
 	var list []interface{}
@@ -558,7 +623,7 @@ func addTransport(ob map[string]interface{}, node NodeConfig) {
 }
 
 // protocolSuffixRegex 匹配节点名末尾的协议类型后缀，如 "(Hysteria2)", "(SS)", " [VMess]" 等
-var protocolSuffixRegex = regexp.MustCompile(`(?i)\s*[\(\[]\s*(hysteria2?|hy2?|ss|shadowsocks|trojan|vmess|vless|wireguard|wg|tuic|anytls|shadowtls|stls)\s*[\)\]]\s*$`)
+var protocolSuffixRegex = regexp.MustCompile(`(?i)\s*[\(\[]\s*(hysteria2?|hy2?|ss|shadowsocks|trojan|vmess|vless|wireguard|wg|tuic|anytls|shadowtls|stls|ssh|naive|socks5?|http|https)\s*[\)\]]\s*$`)
 
 // tagCleanRegex 清理 tag 中不允许的字符（只保留中日韩文字、英文字母、数字、连字符）
 var tagCleanRegex = regexp.MustCompile(`[^a-zA-Z0-9\-\p{Han}\p{Katakana}\p{Hiragana}\p{Hangul}]`)
@@ -592,7 +657,7 @@ func SummarizeNodes(nodes []NodeConfig) string {
 		}
 	}
 	var parts []string
-	order := []string{"shadowsocks", "trojan", "vmess", "vless", "hysteria2", "hysteria", "tuic", "anytls", "shadowtls", "wireguard"}
+	order := []string{"shadowsocks", "trojan", "vmess", "vless", "hysteria2", "hysteria", "tuic", "anytls", "shadowtls", "wireguard", "ssh", "naive", "socks", "http"}
 	labels := map[string]string{
 		"shadowsocks": "SS",
 		"trojan":      "Trojan",
@@ -604,6 +669,10 @@ func SummarizeNodes(nodes []NodeConfig) string {
 		"anytls":      "AnyTLS",
 		"shadowtls":   "ShadowTLS",
 		"wireguard":   "WG",
+		"ssh":         "SSH",
+		"naive":       "Naive",
+		"socks":       "SOCKS",
+		"http":        "HTTP",
 	}
 	for _, t := range order {
 		if c, ok := counts[t]; ok && c > 0 {

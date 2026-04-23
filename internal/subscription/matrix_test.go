@@ -24,10 +24,11 @@ type fixtureExpectation struct {
 
 var fixtureExpectations = map[string]fixtureExpectation{
 	"clash-mixed.yaml": {
-		// WG 暂从 clash-mixed 移除(#M25 sing-box 1.13.8+ WG→endpoint);剩 7
-		MinNodes:      7,
-		RequiredTypes: []string{"shadowsocks", "vmess", "vless", "trojan", "hysteria2", "tuic", "anytls"},
-		RequiredTags:  []string{"VLESS-Reality-US", "TUIC-KR", "AnyTLS-AU"},
+		// WG 暂从 clash-mixed 移除(#M25 sing-box 1.13.8+ WG→endpoint);
+		// Phase 10-A1 加 socks5 + https → 9 条
+		MinNodes:      9,
+		RequiredTypes: []string{"shadowsocks", "vmess", "vless", "trojan", "hysteria2", "tuic", "anytls", "socks", "http"},
+		RequiredTags:  []string{"VLESS-Reality-US", "TUIC-KR", "AnyTLS-AU", "SOCKS5-Home", "HTTPS-Corp"},
 	},
 	"singbox-mixed.json": {
 		MinNodes:      3, // direct/block/selector 会被 skip
