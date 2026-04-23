@@ -75,6 +75,29 @@ class SubsViewModel : ViewModel() {
         }
     }
 
+    /**
+     * P1 · SAF 本地文件导入: 用户从文件系统选 .yaml/.json/.txt, Kotlin 读字节 → Go 侧 ParseSubscription
+     * 三格式自动探测 (Clash / sing-box JSON / base64-URI list), 落成一条 URL="local://<name>" 的订阅。
+     */
+    fun importFromData(name: String, data: ByteArray) = viewModelScope.launch {
+        if (data.isEmpty()) {
+            _state.value = _state.value.copy(error = "文件为空")
+            return@launch
+        }
+        _state.value = _state.value.copy(loading = true, error = null)
+        try {
+            val r = PilottyRepository.importSubscriptionFromData(name, data)
+            _state.value = _state.value.copy(
+                loading = false,
+                toast = r.message.ifEmpty { "订阅已导入" },
+            )
+            refresh()
+            requestVpnReloadIfRunning()
+        } catch (e: Throwable) {
+            _state.value = _state.value.copy(loading = false, error = e.message)
+        }
+    }
+
     /** M16 Deep Link: 用户点 vmess://... 链接后, Go 侧 ImportNodeURI 把节点写到 overlay。 */
     fun importNodeURI(uri: String) = viewModelScope.launch {
         val cleanUri = uri.trim()

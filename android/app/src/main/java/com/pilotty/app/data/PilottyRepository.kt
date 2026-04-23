@@ -54,6 +54,10 @@ object PilottyRepository {
     suspend fun removeSubscription(id: String): MessageDto = call { PilottyCore.removeSubscription(id) }
     suspend fun updateAllSubscriptions(): MessageDto = call { PilottyCore.updateAllSubscriptions() }
     suspend fun importNodeURI(uri: String): MessageDto = call { PilottyCore.importNodeURI(uri) }
+    suspend fun importSubscriptionFromData(name: String, data: ByteArray): MessageDto = call {
+        val b64 = android.util.Base64.encodeToString(data, android.util.Base64.NO_WRAP)
+        PilottyCore.importSubscriptionFromData(name, b64)
+    }
     suspend fun applyTemplate(id: String): MessageDto = call { PilottyCore.applyTemplate(id) }
     suspend fun rules(): List<RouteRuleDto> = call { PilottyCore.rules() }
     suspend fun addRule(ruleJSON: String): MessageDto = call { PilottyCore.addRule(ruleJSON) }

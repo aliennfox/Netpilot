@@ -13,6 +13,7 @@ package mobile
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -925,6 +926,25 @@ func (c *Client) RemoveSubscription(id string) string {
 // UpdateAllSubscriptions 更新全部订阅。
 func (c *Client) UpdateAllSubscriptions() string {
 	return okJSON(map[string]string{"message": stripANSI(c.subMgr.UpdateAll())})
+}
+
+// ImportSubscriptionFromData 从本地文件字节流导入订阅 (SAF 本地文件导入路径)。
+// gomobile 不能直接传 []byte (能传但 Kotlin 侧 ByteArray 映射不直观),
+// 约定走 base64.StdEncoding 编码后的字符串。 Kotlin 侧 android.util.Base64.encodeToString(bytes, NO_WRAP) 对接。
+// 支持三种格式: Clash YAML / sing-box JSON / base64-URI list, 由 subscription.ParseSubscription 自动探测。
+func (c *Client) ImportSubscriptionFromData(name, dataBase64 string) string {
+	data, err := base64.StdEncoding.DecodeString(dataBase64)
+	if err != nil {
+		return errJSON(fmt.Errorf("base64 解码失败: %v", err))
+	}
+	count, summary, err := c.subMgr.ImportFromData(name, data)
+	if err != nil {
+		return errJSON(err)
+	}
+	return okJSON(map[string]interface{}{
+		"node_count": count,
+		"message":    stripANSI(summary),
+	})
 }
 
 // ImportNodeURI 从单个 proxy URI (vmess://, ss://, vless://, trojan://, tuic://, hysteria2://, ...)

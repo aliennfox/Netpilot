@@ -111,6 +111,7 @@ object PilottyCore {
     fun removeSubscription(id: String): String    = require().removeSubscription(id)
     fun updateAllSubscriptions(): String          = require().updateAllSubscriptions()
     fun importNodeURI(uri: String): String        = require().importNodeURI(uri)
+    fun importSubscriptionFromData(name: String, dataBase64: String): String = require().importSubscriptionFromData(name, dataBase64)
     fun rules(): String                           = require().rules()
     fun addRule(ruleJSON: String): String         = require().addRule(ruleJSON)
     fun removeRule(tag: String): String           = require().removeRule(tag)

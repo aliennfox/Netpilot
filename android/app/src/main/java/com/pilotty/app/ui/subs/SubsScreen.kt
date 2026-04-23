@@ -143,6 +143,10 @@ fun SubsScreen(vm: SubsViewModel = viewModel(), onNavigateQrScan: () -> Unit = {
                 vm.addSubscription(name, url)
                 addDialogOpen = false
             },
+            onFileImport = { name, bytes ->
+                vm.importFromData(name, bytes)
+                addDialogOpen = false
+            },
         )
     }
 
@@ -311,6 +315,21 @@ private fun formatTimestamp(epochSec: Long): String {
     return f.format(java.util.Date(ms))
 }
 
+/** SAF URI → 展示文件名 (通常不含路径)。 OpenableColumns.DISPLAY_NAME 在 content:// 主流 provider 都填, 取不到返回空字符串。 */
+private fun queryDisplayName(ctx: android.content.Context, uri: android.net.Uri): String {
+    return try {
+        ctx.contentResolver.query(
+            uri,
+            arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+            null,
+            null,
+            null,
+        )?.use { c ->
+            if (c.moveToFirst()) c.getString(0).orEmpty() else ""
+        } ?: ""
+    } catch (_: Throwable) { "" }
+}
+
 /** 剪贴板若含协议 URI 或 http(s) 订阅 URL, 返回清洗后的文本。 */
 private fun pickImportableFromClipboard(ctx: android.content.Context): String? {
     val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
@@ -332,12 +351,34 @@ private fun AddSubscriptionDialog(
     onDismiss: () -> Unit,
     onConfirm: (name: String, url: String) -> Unit,
     onScanQr: () -> Unit = {},
+    onFileImport: (name: String, data: ByteArray) -> Unit = { _, _ -> },
 ) {
     val pc = LocalPilottyColors.current
     val ctx = LocalContext.current
     var name by remember { mutableStateOf("") }
     var url by remember { mutableStateOf("") }
+    var pickError by remember { mutableStateOf<String?>(null) }
     val clipboardHit = remember { pickImportableFromClipboard(ctx) }
+
+    // P1 · SAF 本地文件导入: MIME "*/*" 因为机场 .yaml 常被 ContentProvider 标成 application/octet-stream
+    val fileLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: run {
+                    pickError = "无法读取文件"
+                    return@rememberLauncherForActivityResult
+                }
+            val fileName = queryDisplayName(ctx, uri)
+            val inferred = fileName.substringBeforeLast('.').ifEmpty { fileName.ifEmpty { "本地导入" } }
+            onFileImport(name.ifBlank { inferred }, bytes)
+        } catch (t: Throwable) {
+            pickError = t.message ?: "读取失败"
+        }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = pc.surface,
@@ -355,6 +396,12 @@ private fun AddSubscriptionDialog(
                         variant = PilottyButtonVariant.Outline,
                         small = true,
                     )
+                    PilottyButton(
+                        text = "从文件导入",
+                        onClick = { fileLauncher.launch(arrayOf("*/*")) },
+                        variant = PilottyButtonVariant.Outline,
+                        small = true,
+                    )
                     if (clipboardHit != null && url.isBlank()) {
                         PilottyButton(
                             text = "使用剪贴板",
@@ -363,6 +410,9 @@ private fun AddSubscriptionDialog(
                             small = true,
                         )
                     }
+                }
+                pickError?.let {
+                    Text("文件读取失败: $it", color = pc.error, fontSize = 11.sp)
                 }
                 OutlinedTextField(
                     value = name,

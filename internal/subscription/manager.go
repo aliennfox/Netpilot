@@ -88,6 +88,67 @@ func (m *SubscriptionManager) AddSubscription(name, url string) (int, string, er
 	return len(outbounds), summary, nil
 }
 
+// maxImportDataSize 本地文件导入上限, 防止用户误选视频 / 大 blob
+const maxImportDataSize = 8 * 1024 * 1024 // 8 MB
+
+// ImportFromData 从本地字节流导入订阅。 与 AddSubscription 的区别: 不走 HTTP fetch, 不接 subscription-userinfo header。
+// 用于 SAF 本地文件导入 (.yaml / .json / .txt 等)。 支持 Clash YAML / sing-box JSON / base64-URI list 三种, 由 ParseSubscription 自动探测。
+// URL 字段填 "local://<name>" 作为来源标记, 同名订阅会覆盖 (走 store 原有逻辑)。
+func (m *SubscriptionManager) ImportFromData(name string, data []byte) (int, string, error) {
+	if len(data) == 0 {
+		return 0, "", fmt.Errorf("文件为空")
+	}
+	if len(data) > maxImportDataSize {
+		return 0, "", fmt.Errorf("文件过大 (%.1fMB, 上限 %dMB)", float64(len(data))/1024/1024, maxImportDataSize/1024/1024)
+	}
+
+	nodes, err := ParseSubscription(string(data))
+	if err != nil {
+		return 0, "", fmt.Errorf("订阅解析失败: %v", err)
+	}
+
+	if name == "" {
+		name = inferName("", nodes)
+	}
+	pseudoURL := "local://" + name
+
+	// 若同 URL 已存在 (同名二次导入), 走 UpdateSubscription 覆盖路径不可行 (UpdateSubscription 会重新 HTTP fetch)。
+	// 直接删旧 + 添新。
+	if existing := m.store.FindByURL(pseudoURL); existing != nil {
+		if _, err := m.RemoveSubscription(existing.ID); err != nil {
+			return 0, "", fmt.Errorf("覆盖旧订阅失败: %v", err)
+		}
+	}
+
+	sub, err := m.store.Add(name, pseudoURL)
+	if err != nil {
+		return 0, "", err
+	}
+
+	outbounds, tags, skipped := m.convertNodes(nodes)
+	if len(outbounds) == 0 {
+		_ = m.store.Remove(sub.ID)
+		return 0, "", fmt.Errorf("没有有效的节点可导入")
+	}
+
+	if err := m.overlay.AddOutboundsBatch(outbounds); err != nil {
+		_ = m.store.Remove(sub.ID)
+		return 0, "", fmt.Errorf("写入 overlay 失败: %v", err)
+	}
+
+	if err := m.overlay.Apply(m.adapter); err != nil {
+		return 0, "", fmt.Errorf("应用配置失败: %v", err)
+	}
+
+	sub.Tags = tags
+	sub.NodeCount = len(outbounds)
+	sub.LastUpdate = time.Now()
+	_ = m.store.Update(sub)
+
+	summary := buildImportSummary(nodes, len(outbounds), skipped, sub)
+	return len(outbounds), summary, nil
+}
+
 // ImportNodeURI 从单个 proxy URI (vmess://, ss://, vless://, trojan://, ...) 解析并导入节点
 // 不创建 Subscription 条目, 节点直接写到 overlay outbounds
 // 这是 M16 Deep Link 的后端: 用户点 TG/微信里的节点链接 → Pilotty → 此函数
