@@ -90,4 +90,19 @@ object PilottyRepository {
     fun clearHistory() = PilottyCore.clearHistory()
     fun agentReady(): Boolean = PilottyCore.agentReady()
     fun version(): String = PilottyCore.version()
+
+    // Phase 10-E-D: 配置备份 / 恢复
+    // exportBackup 返回 JSON 原文(非 Envelope data 里面),直接落文件即可
+    suspend fun exportBackupRaw(): String = withContext(Dispatchers.IO) {
+        val raw = PilottyCore.exportBackup()
+        val env = json.decodeFromString(Envelope.serializer(), raw)
+        if (!env.success) throw PilottyException(env.error ?: "export 失败")
+        // data 是嵌套的 JsonElement, 这里序列化成可读 JSON 字符串
+        json.encodeToString(
+            kotlinx.serialization.json.JsonElement.serializer(),
+            env.data ?: throw PilottyException("empty backup"),
+        )
+    }
+
+    suspend fun importBackup(data: String): MessageDto = call { PilottyCore.importBackup(data) }
 }
