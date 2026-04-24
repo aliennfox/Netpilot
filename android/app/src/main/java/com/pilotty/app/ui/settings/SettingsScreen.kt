@@ -138,6 +138,8 @@ fun SettingsScreen(
 
         // 关于 — Phase 10-F-4: 版本号从 Go 层读, 不硬编; Go 侧含 sing-box / go 版本信息
         val coreVersion = remember { com.pilotty.app.data.PilottyRepository.version() }
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        val privacyUrl = stringResource(com.pilotty.app.R.string.settings_privacy_policy_url)
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionHead(stringResource(com.pilotty.app.R.string.settings_about))
             PilottyCard(modifier = Modifier.fillMaxWidth(), soft = true) {
@@ -148,6 +150,24 @@ fun SettingsScreen(
                         color = pc.ink3,
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
+                    )
+                    // M6: 隐私政策链接 (Google Play Data Safety 要求)
+                    Text(
+                        stringResource(com.pilotty.app.R.string.settings_privacy_policy),
+                        color = pc.accentInk,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clickable {
+                                val intent = android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(privacyUrl),
+                                ).apply {
+                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                runCatching { ctx.startActivity(intent) }
+                            }
+                            .padding(top = 4.dp),
                     )
                 }
             }

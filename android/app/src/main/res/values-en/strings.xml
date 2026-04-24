@@ -148,4 +148,7 @@
     <string name="settings_observe_conns_subtitle">Sorted by download traffic — see which app uses which node</string>
     <string name="settings_about">About</string>
     <string name="settings_about_version_unknown">Version unknown · sing-box + gomobile</string>
+    <string name="settings_privacy_policy">Privacy Policy</string>
+    <string name="settings_privacy_policy_url">https://aliennfox.github.io/Netpilot/privacy-policy-en.html</string>
+    <string name="settings_privacy_policy_url_en">https://aliennfox.github.io/Netpilot/privacy-policy-en.html</string>
 </resources>
