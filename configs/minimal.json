@@ -22,7 +22,7 @@
       "type": "selector",
       "tag": "proxy-group",
       "outbounds": ["direct-out"],
-      "default": "direct-out"
+      "default": "日本-1"
     },
     {
       "type": "direct",

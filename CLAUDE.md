@@ -569,6 +569,12 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - **本地路由 substring match**: 写 chip / 快捷 query 前先 grep `internal/router/keywords.go`,substring 必须命中才会走 local action,否则回落到 LLM(apiKey 空时报"Agent 未启用")
 - **UI 重写必须保留 data binding**: 改 Android Composable 前先 `grep "PilottyRepository\." ui/**/*.kt` 列接入清单,重写后逐条校验每个 Repository 方法都被消费。**禁止 `private val XXX_SERIES = listOf(...)` 这种 hardcoded series 进 commit**(除非加 `// @VisualOnly` 注释+TODO)。后端缺对应 API 的 tile(如 NodeDetail 的 P50/P95/Jitter/Loss)必须加 "数据基于延迟估算, 非真实 telemetry" 小字 disclaimer,不能造假。根因:2026-04-24 Mission Control 重写撞过这个坑,Home Telemetry 4 tile 全 mock,用户反馈"以后别改 UI 就丢接入"
 
+## 运维约定
+
+- `scripts/start-singbox.sh {start|restart}` 会先编译并跑 `cmd/refresh-sub`(产物 `build/refresh-sub`)拉最新订阅、重写 `data/merged.json`, 再由 `SingBoxAdapter.Reload()` 起 sing-box;refresh 失败回退到现有 `data/merged.json` 的 plain `sing-box run`。
+- selector 启动默认值写死在 `configs/minimal.json` 的 `proxy-group.default`(当前 = `日本-1`);每次 sing-box pkill+exec 后 selector 都会回到这个 tag,换默认节点需同步改 minimal.json(`merged.json` 下次 refresh 自动 regen)。
+- 机场 A 返回的订阅首行是 `STATUS=...` 元数据伪节点,`subscription/parser.go` 会警告"不支持的协议"但不影响功能——不要把这条当 bug 修。
+
 ## Reference 资源清单
 
 本机 `~/References/` 目录下的参考项目,**Phase 3B 期间必读**:
