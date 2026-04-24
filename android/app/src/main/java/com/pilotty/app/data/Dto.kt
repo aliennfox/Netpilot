@@ -83,6 +83,12 @@ data class UserInfoDto(
 @Serializable
 data class MessageDto(val message: String = "")
 
+@Serializable
+data class NodeUriDto(
+    val uri: String = "",
+    val type: String = "",
+)
+
 /**
  * Phase 7.3 流式 Chat 事件。 前 5 种 (TextDelta/PhaseStart/PhaseEnd/ToolStart/ToolEnd) 从
  * Go mobile.ChatStreamCallback.OnEvent(jsonStr) 解析, 按 "type" 字段走多态反序列化。

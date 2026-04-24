@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App -->
+    <string name="app_name">Pilotty</string>
+
+    <!-- Bottom nav -->
+    <string name="nav_home">Home</string>
+    <string name="nav_chat">Chat</string>
+    <string name="nav_nodes">Nodes</string>
+    <string name="nav_subs">Subs</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- VPN actions -->
+    <string name="vpn_start">启动 VPN</string>
+    <string name="vpn_stop">停止 VPN</string>
+    <string name="vpn_running">运行中</string>
+    <string name="vpn_stopped">未启动</string>
+
+    <!-- Mode chips -->
+    <string name="mode_rule">规则</string>
+    <string name="mode_global">全局</string>
+    <string name="mode_direct">直连</string>
+
+    <!-- Nodes -->
+    <string name="nodes_title">节点</string>
+    <string name="nodes_test_all">测速全部</string>
+    <string name="nodes_search_hint">搜索节点…</string>
+    <string name="nodes_empty_title">还没有节点</string>
+    <string name="nodes_empty_cta">去 Subs 导入订阅</string>
+    <string name="nodes_testing">测试中</string>
+    <string name="nodes_connected">已连接</string>
+    <string name="nodes_connect_this">连接此节点</string>
+    <string name="nodes_share_qr">分享 QR</string>
+
+    <!-- Chat -->
+    <string name="chat_reply_hint">回复 Agent…</string>
+    <string name="chat_new_session">新会话</string>
+
+    <!-- Subs -->
+    <string name="subs_update_all">全部更新</string>
+    <string name="subs_add">添加订阅</string>
+
+    <!-- Settings sections -->
+    <string name="settings_language">语言</string>
+    <string name="language_system">跟随系统</string>
+    <string name="language_zh_cn">中文(简体)</string>
+    <string name="language_en">English</string>
+
+    <!-- Common actions -->
+    <string name="action_close">关闭</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_confirm">确认</string>
+    <string name="action_apply">应用</string>
+</resources>

@@ -16,11 +16,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -214,6 +221,9 @@ class ConnectionsViewModel : ViewModel() {
     val conns: StateFlow<List<ConnectionDto>> = _conns.asStateFlow()
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
+    /** A3 刚被 kill 的 id, UI 短暂显示 "已掐断" 态 (1.5s) 然后随下一轮 poll 自然消失。 */
+    private val _killingIds = MutableStateFlow<Set<String>>(emptySet())
+    val killingIds: StateFlow<Set<String>> = _killingIds.asStateFlow()
 
     init { startPolling() }
 
@@ -229,6 +239,19 @@ class ConnectionsViewModel : ViewModel() {
             delay(2000L)
         }
     }
+
+    fun killConnection(id: String) = viewModelScope.launch {
+        _killingIds.value = _killingIds.value + id
+        try {
+            PilottyRepository.closeConnection(id)
+            // 掐完立即从本地列表移除, 不等下一轮 poll, UI 看起来更即时
+            _conns.value = _conns.value.filterNot { it.id == id }
+        } catch (e: Throwable) {
+            _error.value = "掐断失败: ${e.message}"
+        } finally {
+            _killingIds.value = _killingIds.value - id
+        }
+    }
 }
 
 @Composable
@@ -236,6 +259,7 @@ fun ConnectionsScreen(onBack: () -> Unit, vm: ConnectionsViewModel = viewModel()
     val pc = LocalPilottyColors.current
     val conns by vm.conns.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
+    val killing by vm.killingIds.collectAsStateWithLifecycle()
 
     Column(
         modifier = Modifier
@@ -294,7 +318,11 @@ fun ConnectionsScreen(onBack: () -> Unit, vm: ConnectionsViewModel = viewModel()
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 items(conns, key = { it.id }) { c ->
-                    ConnectionRow(c)
+                    ConnectionRow(
+                        c = c,
+                        isKilling = c.id in killing,
+                        onKill = { vm.killConnection(c.id) },
+                    )
                 }
             }
         }
@@ -302,8 +330,36 @@ fun ConnectionsScreen(onBack: () -> Unit, vm: ConnectionsViewModel = viewModel()
 }
 
 @Composable
-private fun ConnectionRow(c: ConnectionDto) {
+private fun ConnectionRow(
+    c: ConnectionDto,
+    isKilling: Boolean = false,
+    onKill: () -> Unit = {},
+) {
     val pc = LocalPilottyColors.current
+    var confirm by remember { mutableStateOf(false) }
+    if (confirm) {
+        AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text("掐断此连接?") },
+            text = {
+                Text(
+                    "${c.destination}\n目标进程: ${c.processName.ifEmpty { "?" }}",
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                    lineHeight = 18.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirm = false
+                        onKill()
+                    },
+                ) { Text("掐断", color = pc.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirm = false }) { Text("取消") } },
+        )
+    }
     PilottyCard(modifier = Modifier.fillMaxWidth(), soft = true) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             Row(
@@ -324,6 +380,21 @@ private fun ConnectionRow(c: ConnectionDto) {
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
                 )
+                Spacer(Modifier.width(8.dp))
+                // Kill 按钮: 小 × 图标, 带确认 dialog 防误操作
+                Surface(
+                    color = if (isKilling) pc.surface3 else pc.surface2,
+                    shape = RoundedCornerShape(6.dp),
+                    onClick = { if (!isKilling) confirm = true },
+                ) {
+                    Text(
+                        if (isKilling) "···" else "×",
+                        color = if (isKilling) pc.ink3 else pc.error,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    )
+                }
             }
             Spacer(Modifier.height(3.dp))
             val proto = c.protocol.takeIf { it.isNotEmpty() } ?: "-"

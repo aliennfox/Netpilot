@@ -470,6 +470,16 @@ func (c *Client) ClearTrafficHistory() {
 	c.traffic.Clear()
 }
 
+// CloseConnection A3 手动掐断单条活动连接。
+// id 来自 Connections() 返回的 connection id。 VPN 未启动时返回错误。
+// 返回 MessageDto-style envelope。
+func (c *Client) CloseConnection(id string) string {
+	if err := c.adapter.CloseConnection(id); err != nil {
+		return errJSON(err)
+	}
+	return okJSON(map[string]interface{}{"message": fmt.Sprintf("连接 %s 已关闭", id)})
+}
+
 // RecentLogs Phase 9 B4: 返回最近 N 条 Go 侧运行时日志 (JSON 数组)。 n<=0 → 全量 (500 上限)。
 // 格式: [{"ts":1745312100000,"level":"I","msg":"..."}, ...]
 func (c *Client) RecentLogs(n int) string {
@@ -1029,6 +1039,29 @@ func (c *Client) ImportNodeURI(uri string) string {
 		"node_count": count,
 		"message":    summary,
 	})
+}
+
+// NodeURI 把 overlay 里指定 tag 的节点反向转成 URI, 用于 QR 导出 / 跨设备分享。
+// 仅支持 消费级主流协议 (ss/trojan/vmess/vless/hysteria2/tuic); 其他类型返回 errJSON。
+// 返回 { success, data: { uri, type } }。
+func (c *Client) NodeURI(tag string) string {
+	if tag == "" {
+		return errStr("tag 为空")
+	}
+	for _, ob := range c.overlay.ListOutbounds() {
+		if t, _ := ob["tag"].(string); t == tag {
+			uri, err := subscription.OutboundToURI(ob)
+			if err != nil {
+				return errJSON(err)
+			}
+			typ, _ := ob["type"].(string)
+			return okJSON(map[string]interface{}{
+				"uri":  uri,
+				"type": typ,
+			})
+		}
+	}
+	return errStr(fmt.Sprintf("节点 %q 不存在", tag))
 }
 
 // --- Rules / Templates ---

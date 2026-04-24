@@ -104,6 +104,9 @@ fun SettingsScreen(
         // Kill Switch 引导 (M15 方式 A)
         KillSwitchSection()
 
+        // A4 LAN 代理入站 (手机当出口代理, 供其他设备借用)
+        LocalProxySection()
+
         // Phase 9B-UI1: 观测 (实时日志 / 活跃连接) — 两个入口卡
         ObserveEntriesSection(
             onNavigateLogs = onNavigateLogs,

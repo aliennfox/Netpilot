@@ -54,6 +54,8 @@ object PilottyRepository {
     suspend fun removeSubscription(id: String): MessageDto = call { PilottyCore.removeSubscription(id) }
     suspend fun updateAllSubscriptions(): MessageDto = call { PilottyCore.updateAllSubscriptions() }
     suspend fun importNodeURI(uri: String): MessageDto = call { PilottyCore.importNodeURI(uri) }
+    // A2 QR 导出: 把节点反向转成 URI, 仅支持 ss/trojan/vmess/vless/hysteria2/tuic
+    suspend fun nodeURI(tag: String): NodeUriDto = call { PilottyCore.nodeURI(tag) }
     suspend fun importSubscriptionFromData(name: String, data: ByteArray): MessageDto = call {
         val b64 = android.util.Base64.encodeToString(data, android.util.Base64.NO_WRAP)
         PilottyCore.importSubscriptionFromData(name, b64)
@@ -76,6 +78,8 @@ object PilottyRepository {
     suspend fun trafficHistory(n: Int = 0): List<TrafficSampleDto> = withContext(Dispatchers.IO) {
         json.decodeFromString(serializer(), PilottyCore.trafficHistory(n))
     }
+    // A3 掐断单条连接
+    suspend fun closeConnection(id: String): MessageDto = call { PilottyCore.closeConnection(id) }
     suspend fun connections(): List<ConnectionDto> = withContext(Dispatchers.IO) {
         // Connections() 走的是 okJSON(envelope), 要剥壳
         val env = json.decodeFromString(Envelope.serializer(), PilottyCore.connections())

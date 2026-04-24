@@ -6,7 +6,6 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Forum
@@ -16,17 +15,8 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalView
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -112,14 +102,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private val navItems = listOf(
-    NavItem("home", "Home", Icons.Filled.Home),
-    NavItem("chat", "Chat", Icons.Filled.Forum),
-    NavItem("nodes", "Nodes", Icons.Filled.Hub),
-    NavItem("subs", "Subs", Icons.Filled.Layers),
-    NavItem("settings", "Settings", Icons.Filled.Settings),
-)
-
 @Composable
 fun PilottyApp(
     onStartVpn: () -> Unit,
@@ -127,6 +109,13 @@ fun PilottyApp(
     themeMode: ThemeMode,
     onThemeChange: (ThemeMode) -> Unit,
 ) {
+    val navItems = listOf(
+        NavItem("home", androidx.compose.ui.res.stringResource(R.string.nav_home), Icons.Filled.Home),
+        NavItem("chat", androidx.compose.ui.res.stringResource(R.string.nav_chat), Icons.Filled.Forum),
+        NavItem("nodes", androidx.compose.ui.res.stringResource(R.string.nav_nodes), Icons.Filled.Hub),
+        NavItem("subs", androidx.compose.ui.res.stringResource(R.string.nav_subs), Icons.Filled.Layers),
+        NavItem("settings", androidx.compose.ui.res.stringResource(R.string.nav_settings), Icons.Filled.Settings),
+    )
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val current = backStack?.destination?.route ?: "home"
@@ -149,17 +138,9 @@ fun PilottyApp(
     }
 
     // Mission Control 设计: 底部 nav flush, 和内容共享 Column 布局 (非 floating)
-    // IME 弹起时仍隐藏 nav, 避免遮住输入保存按钮
-    val view = LocalView.current
-    var imeVisible by remember { mutableStateOf(false) }
-    DisposableEffect(view) {
-        val listener = android.view.ViewTreeObserver.OnGlobalLayoutListener {
-            val insets = ViewCompat.getRootWindowInsets(view)
-            imeVisible = insets?.isVisible(WindowInsetsCompat.Type.ime()) ?: false
-        }
-        view.viewTreeObserver.addOnGlobalLayoutListener(listener)
-        onDispose { view.viewTreeObserver.removeOnGlobalLayoutListener(listener) }
-    }
+    // 注: 此前曾用 imeVisible 隐藏 nav, 但 Chat 场景 TextField 一聚焦就让用户回不到 Home
+    //    (按 Home 键也没用, IME 是前台, 关 IME 前用户一直被困在 Chat)。
+    //    windowInset 会自动把整个 Column 抬到 IME 上方, nav 不会压到输入, 放心常驻。
 
     // 子页面 (node_detail / agent_tools / logs / connections / qr) 不显示底部 nav
     val isSubPage = current.startsWith("node_detail") || current == "agent_tools" ||
@@ -215,7 +196,7 @@ fun PilottyApp(
             }
         }
 
-        if (!imeVisible && !isSubPage) {
+        if (!isSubPage) {
             FloatingBottomNav(
                 items = navItems,
                 current = current,

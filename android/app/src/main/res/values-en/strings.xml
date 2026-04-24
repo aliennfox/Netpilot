@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App -->
+    <string name="app_name">Pilotty</string>
+
+    <!-- Bottom nav -->
+    <string name="nav_home">Home</string>
+    <string name="nav_chat">Chat</string>
+    <string name="nav_nodes">Nodes</string>
+    <string name="nav_subs">Subs</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- VPN actions -->
+    <string name="vpn_start">Start VPN</string>
+    <string name="vpn_stop">Stop VPN</string>
+    <string name="vpn_running">Running</string>
+    <string name="vpn_stopped">Off</string>
+
+    <!-- Mode chips -->
+    <string name="mode_rule">Rule</string>
+    <string name="mode_global">Global</string>
+    <string name="mode_direct">Direct</string>
+
+    <!-- Nodes -->
+    <string name="nodes_title">Nodes</string>
+    <string name="nodes_test_all">Test All</string>
+    <string name="nodes_search_hint">Search nodes…</string>
+    <string name="nodes_empty_title">No nodes yet</string>
+    <string name="nodes_empty_cta">Go to Subs</string>
+    <string name="nodes_testing">testing</string>
+    <string name="nodes_connected">Connected</string>
+    <string name="nodes_connect_this">Connect</string>
+    <string name="nodes_share_qr">Share QR</string>
+
+    <!-- Chat -->
+    <string name="chat_reply_hint">Reply to Agent…</string>
+    <string name="chat_new_session">New</string>
+
+    <!-- Subs -->
+    <string name="subs_update_all">Update All</string>
+    <string name="subs_add">Add Subscription</string>
+
+    <!-- Settings sections -->
+    <string name="settings_language">Language</string>
+    <string name="language_system">System</string>
+    <string name="language_zh_cn">中文(简体)</string>
+    <string name="language_en">English</string>
+
+    <!-- Common actions -->
+    <string name="action_close">Close</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_confirm">Confirm</string>
+    <string name="action_apply">Apply</string>
+</resources>

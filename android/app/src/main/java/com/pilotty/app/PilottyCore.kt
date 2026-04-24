@@ -111,6 +111,8 @@ object PilottyCore {
     fun removeSubscription(id: String): String    = require().removeSubscription(id)
     fun updateAllSubscriptions(): String          = require().updateAllSubscriptions()
     fun importNodeURI(uri: String): String        = require().importNodeURI(uri)
+    /** A2 QR 导出: 把 overlay 里指定 tag 的节点反向转回 URI (仅支持 ss/trojan/vmess/vless/hysteria2/tuic)。 */
+    fun nodeURI(tag: String): String              = require().nodeURI(tag)
     fun importSubscriptionFromData(name: String, dataBase64: String): String = require().importSubscriptionFromData(name, dataBase64)
     fun netCheck(): String                         = require().netCheck()
 
@@ -132,6 +134,8 @@ object PilottyCore {
     // Phase 9B 观测: ring buffer 已在 Go 侧就绪, Kotlin 侧按需轮询
     fun trafficHistory(n: Int): String            = require().trafficHistory(n.toLong())
     fun connections(): String                     = require().connections()
+    /** A3 掐断单条活动连接, id 来自 connections() 返回的 connection id。 */
+    fun closeConnection(id: String): String       = require().closeConnection(id)
     fun recentLogs(n: Int): String                = require().recentLogs(n.toLong())
     fun clearTrafficHistory()                     = require().clearTrafficHistory()
 

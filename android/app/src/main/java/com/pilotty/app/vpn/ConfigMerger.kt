@@ -96,6 +96,51 @@ object ConfigMerger {
     }
 
     /**
+     * A4 注入一个 mixed (SOCKS5 + HTTP) inbound 绑 0.0.0.0:port, 供 LAN 设备当代理出口。
+     *
+     * 前置条件: VPN 要已开 + ListenAll 就不管自家流量回环 (自己的 TUN 已在 inbound tun-in 处理)。
+     *
+     * 容错:
+     *  - snapshot.enabled=false → 不改
+     *  - port 不在 1025-65535 范围 → 跳过 (UI 层已限制, 这里兜底)
+     *  - 已存在同 tag "lan-mixed" inbound → 覆盖
+     *  - JSON 异常 → 返回原字符串, 不阻塞 VPN 启动
+     */
+    fun injectLocalProxy(configJson: String, snapshot: LocalProxyPrefs.Snapshot): String {
+        if (!snapshot.enabled) return configJson
+        if (snapshot.port !in 1025..65535) {
+            Log.w(TAG, "injectLocalProxy: port ${snapshot.port} out of range, skip")
+            return configJson
+        }
+        return try {
+            val root = JSONObject(configJson)
+            val inbounds = root.optJSONArray("inbounds") ?: JSONArray().also { root.put("inbounds", it) }
+
+            // 覆盖 / 追加: 先剥掉同 tag 的旧条目
+            val filtered = JSONArray()
+            for (i in 0 until inbounds.length()) {
+                val inb = inbounds.optJSONObject(i) ?: continue
+                if (inb.optString("tag") == "lan-mixed") continue
+                filtered.put(inb)
+            }
+            val mixed = JSONObject().apply {
+                put("type", "mixed")
+                put("tag", "lan-mixed")
+                put("listen", "0.0.0.0")
+                put("listen_port", snapshot.port)
+                // sing-box 1.11+ 移除了 inbound 级 sniff, 流量嗅探交给 route rules 的 action=sniff
+            }
+            filtered.put(mixed)
+            root.put("inbounds", filtered)
+            Log.i(TAG, "injectLocalProxy: mixed 0.0.0.0:${snapshot.port}")
+            root.toString()
+        } catch (t: Throwable) {
+            Log.w(TAG, "injectLocalProxy failed, config unchanged", t)
+            configJson
+        }
+    }
+
+    /**
      * 注入 Sniffing 档位 + IPv6 模式偏好 (Phase P1-A)。
      *
      * 动作:

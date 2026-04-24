@@ -18,6 +18,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pilotty.app.data.NodeDto
 import com.pilotty.app.ui.components.*
+import com.pilotty.app.ui.qr.NodeQrDialog
 import com.pilotty.app.ui.theme.LocalPilottyColors
 
 /**
@@ -45,6 +46,11 @@ fun NodeDetailScreen(
         )
     }
     val lat = if (node.latency > 0) node.latency else 0
+    var showQr by remember { mutableStateOf(false) }
+
+    if (showQr) {
+        NodeQrDialog(nodeTag = node.tag, onDismiss = { showQr = false })
+    }
 
     Column(modifier = Modifier.fillMaxSize().background(pc.bg)) {
         // Top bar
@@ -119,18 +125,25 @@ fun NodeDetailScreen(
                         }
                     }
                     Spacer(Modifier.height(16.dp))
-                    PilottyButton(
-                        text = if (node.active) "已连接" else "连接此节点",
-                        onClick = {
-                            if (!node.active) {
-                                vm.switchTo(node.tag)
-                                onBack()
-                            }
-                        },
-                        variant = PilottyButtonVariant.Power,
-                        enabled = !node.active,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PilottyButton(
+                            text = if (node.active) androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.nodes_connected) else androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.nodes_connect_this),
+                            onClick = {
+                                if (!node.active) {
+                                    vm.switchTo(node.tag)
+                                    onBack()
+                                }
+                            },
+                            variant = PilottyButtonVariant.Power,
+                            enabled = !node.active,
+                            modifier = Modifier.weight(1f),
+                        )
+                        PilottyButton(
+                            text = androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.nodes_share_qr),
+                            onClick = { showQr = true },
+                            variant = PilottyButtonVariant.Mono,
+                        )
+                    }
                 }
             }
 

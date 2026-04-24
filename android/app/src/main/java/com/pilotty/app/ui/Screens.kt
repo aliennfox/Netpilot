@@ -38,10 +38,14 @@ import com.pilotty.app.data.*
 import com.pilotty.app.ui.agent.AgentQueryBus
 import com.pilotty.app.ui.components.*
 import com.pilotty.app.ui.theme.LocalPilottyColors
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /* ============================= Chat ============================= */
@@ -84,6 +88,25 @@ class ChatViewModel : ViewModel() {
      */
     fun send(text: String) {
         if (text.isBlank()) return
+        val trimmed = text.trim()
+        // D Agent 彻查: 拦截 "/" 前缀命令, 避免被 Agent 或 LocalEngine 当成普通消息发给 LLM
+        // (原先输入 "/clear abc" 会被 LLM 当用户消息处理, 返回莫名其妙的回答)。
+        when {
+            trimmed == "/clear" || trimmed == "/new" -> {
+                clear()
+                return
+            }
+            trimmed == "/help" -> {
+                _state.value = _state.value.copy(
+                    messages = _state.value.messages + ChatMessage(
+                        role = "assistant",
+                        text = "支持的命令:\n/clear 或 /new  —  清空当前对话\n/help  —  本帮助\n其他直接用自然语言跟 Agent 对话即可",
+                        source = "local",
+                    ),
+                )
+                return
+            }
+        }
         val u = ChatMessage("user", text)
         _state.value = _state.value.copy(
             sending = true,
@@ -381,7 +404,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Text("+", color = pc.ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("新会话", color = pc.ink, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    Text(androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.chat_new_session), color = pc.ink, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 }
             }
         }
@@ -539,7 +562,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                         )
                         if (input.isEmpty()) {
                             Text(
-                                "回复 Agent…",
+                                androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.chat_reply_hint),
                                 color = pc.ink3,
                                 fontSize = 14.5.sp,
                                 lineHeight = 21.sp,
@@ -578,6 +601,10 @@ data class NodesUi(
     val query: String = "",
     val error: String? = null,
     val toast: String? = null,
+    /** A1 测速矩阵: 正在测的 tag 集合, UI 以此切换 NodeCard 到 "测试中…" 态 */
+    val testing: Set<String> = emptySet(),
+    /** A1 测速矩阵: 本轮测完后延迟最低的 tag, UI 打 "最快" 标 + accent 描边 */
+    val fastestTag: String? = null,
 )
 
 class NodesViewModel : ViewModel() {
@@ -627,7 +654,6 @@ class NodesViewModel : ViewModel() {
      *   -1: 此字段目前不再使用, 保留语义向前兼容
      */
     fun testAll() = viewModelScope.launch {
-        _state.value = _state.value.copy(loading = true)
         try {
             if (!com.pilotty.app.PilottyCore.tunRunning.value) {
                 _state.value = _state.value.copy(toast = "正在启动 VPN 以测速...")
@@ -639,7 +665,6 @@ class NodesViewModel : ViewModel() {
                 }
                 if (started != true) {
                     _state.value = _state.value.copy(
-                        loading = false,
                         toast = "VPN 启动超时, 测速取消。 请手动启动后重试。",
                     )
                     return@launch
@@ -648,11 +673,33 @@ class NodesViewModel : ViewModel() {
                 // 状态缓存, 等 1.5s 再发测速请求以免拿到部分 NaN 结果。
                 kotlinx.coroutines.delay(1_500)
             }
-            PilottyRepository.testLatencyAll()
+
+            // A1 测速矩阵: 不再用 test_latency_all 一次性阻塞, 改为客户端 fan-out
+            // 并发调单节点 test_latency, 每个节点独立汇报 "完成", UI 能看到进度。
+            val tags = _state.value.nodes.map { it.tag }
+            if (tags.isEmpty()) return@launch
+            _state.value = _state.value.copy(testing = tags.toSet(), fastestTag = null)
+
+            coroutineScope {
+                tags.map { tag ->
+                    async {
+                        try { PilottyRepository.testLatency(tag) }
+                        catch (_: Throwable) { /* 单点失败不阻塞整体, 下一轮 nodes() 刷新 latency=-1 */ }
+                        _state.update { it.copy(testing = it.testing - tag) }
+                    }
+                }.awaitAll()
+            }
+
+            // 全部测完统一拉一次最新 latency, 并标出 fastest
             val n2 = PilottyRepository.nodes()
-            _state.value = _state.value.copy(loading = false, nodes = n2)
+            val fastest = n2.filter { it.latency > 0 }.minByOrNull { it.latency }?.tag
+            _state.value = _state.value.copy(
+                nodes = n2,
+                testing = emptySet(),
+                fastestTag = fastest,
+            )
         } catch (e: Throwable) {
-            _state.value = _state.value.copy(loading = false, error = e.message)
+            _state.value = _state.value.copy(testing = emptySet(), error = e.message)
         }
     }
 
@@ -733,7 +780,7 @@ fun NodesScreen(
                 )
             }
             PilottyButton(
-                text = "测速全部",
+                text = androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.nodes_test_all),
                 onClick = { vm.testAll() },
                 variant = PilottyButtonVariant.Mono,
             )
@@ -769,7 +816,7 @@ fun NodesScreen(
                         singleLine = true,
                     )
                     if (ui.query.isEmpty()) {
-                        Text("搜索节点…", color = pc.ink3, fontSize = 13.5.sp)
+                        Text(androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.nodes_search_hint), color = pc.ink3, fontSize = 13.5.sp)
                     }
                 }
             }
@@ -829,7 +876,7 @@ fun NodesScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
-                        "还没有节点",
+                        androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.nodes_empty_title),
                         color = pc.ink,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -842,7 +889,7 @@ fun NodesScreen(
                     )
                     Spacer(Modifier.height(2.dp))
                     PilottyButton(
-                        text = "去 Subs 导入订阅",
+                        text = androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.nodes_empty_cta),
                         onClick = onNavigateSubs,
                         variant = PilottyButtonVariant.Primary,
                         small = true,
@@ -868,8 +915,11 @@ fun NodesScreen(
                                 if (i > 0) HorizontalDivider(color = pc.hairline, thickness = 1.dp)
                                 NodeCard(
                                     node = node,
+                                    isTesting = node.tag in ui.testing,
+                                    isFastest = node.tag == ui.fastestTag,
                                     onClick = { vm.switchTo(node.tag) },
                                     onLongClick = { vm.testOne(node.tag) },
+                                    onDetail = { onOpenDetail(node.tag) },
                                 )
                             }
                         }
@@ -883,7 +933,14 @@ fun NodesScreen(
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun NodeCard(node: NodeDto, onClick: () -> Unit, onLongClick: () -> Unit = {}) {
+private fun NodeCard(
+    node: NodeDto,
+    isTesting: Boolean = false,
+    isFastest: Boolean = false,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
+    onDetail: () -> Unit = {},
+) {
     val pc = LocalPilottyColors.current
     val cc = node.tag.take(2).uppercase()
     // Mission Control 三档: <100 nominal / <300 warn / >=300 alert
@@ -899,10 +956,26 @@ private fun NodeCard(node: NodeDto, onClick: () -> Unit, onLongClick: () -> Unit
         "alert" -> pc.error
         else -> pc.ink3
     }
+    // A1 测速中 "…" 脉冲 (alpha 0.35 ↔ 1.0, 900ms 循环)
+    val pulse = rememberInfiniteTransition(label = "node-pulse")
+    val pulseAlpha by pulse.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "pulse-alpha",
+    )
+    val rowBg = when {
+        node.active -> pc.surface2
+        isFastest -> pc.accent.copy(alpha = 0.10f)
+        else -> androidx.compose.ui.graphics.Color.Transparent
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(if (node.active) pc.surface2 else androidx.compose.ui.graphics.Color.Transparent)
+            .background(rowBg)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -923,6 +996,22 @@ private fun NodeCard(node: NodeDto, onClick: () -> Unit, onLongClick: () -> Unit
                     maxLines = 1,
                 )
                 if (node.active) LiveDot()
+                if (isFastest) {
+                    Surface(
+                        color = pc.accent,
+                        shape = RoundedCornerShape(4.dp),
+                    ) {
+                        Text(
+                            "FASTEST",
+                            color = pc.accentOnBg,
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            letterSpacing = 0.4.sp,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                        )
+                    }
+                }
             }
             Spacer(Modifier.height(3.dp))
             Row(
@@ -942,22 +1031,44 @@ private fun NodeCard(node: NodeDto, onClick: () -> Unit, onLongClick: () -> Unit
             }
         }
         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(
-                text = when {
-                    node.latency > 0 -> "${node.latency}ms"
-                    node.latency < 0 -> "失败"
-                    else -> "—"
-                },
-                color = latColor,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-            )
-            // load bar 占位 (当前无真实 load 数据; 设计稿用 0-100 pct)
-            if (node.latency > 0) {
-                LoadBar(pct = (node.latency / 4).coerceIn(10, 100), tone = if (latTier == "alert") "alert" else "nominal")
+            if (isTesting) {
+                Text(
+                    text = androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.nodes_testing),
+                    color = pc.accent.copy(alpha = pulseAlpha),
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 0.3.sp,
+                )
+            } else {
+                Text(
+                    text = when {
+                        node.latency > 0 -> "${node.latency}ms"
+                        node.latency < 0 -> "失败"
+                        else -> "—"
+                    },
+                    color = if (isFastest) pc.accent else latColor,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                )
+                // load bar 占位 (当前无真实 load 数据; 设计稿用 0-100 pct)
+                if (node.latency > 0) {
+                    LoadBar(pct = (node.latency / 4).coerceIn(10, 100), tone = if (latTier == "alert") "alert" else "nominal")
+                }
             }
         }
+        // 打开 NodeDetail 的入口 (分享 QR 按钮 / 详细 metrics 在里面)
+        Text(
+            "›",
+            color = pc.ink3,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .clickable { onDetail() }
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+        )
     }
 }
 

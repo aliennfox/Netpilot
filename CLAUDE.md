@@ -346,10 +346,10 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - 验证数据: `/proxies/香港-1/delay` 2919ms、日本-1 4786ms;`/connections` 观测到 Chrome / GCM / Safe Browsing 全部经 proxy-group
 - 遗留: [DEFERRED] iOS 重启后需复刻同等 PlatformInterface 真实现 (NE 侧用 `nw_path_monitor`)
 
-**#H2 — Orchestrator 自动回滚路径名存实亡**
-- 位置: `internal/agent/orchestrator.go:86` 调用 `pipeline.Execute(ctx, "rollback", nil)`,但 `internal/tool/tools.go:282-291` 中 rollback tool 是占位实现
-- 影响: Verify 阶段失败时,以为系统会自动回滚,实际不会
-- 修复方向: 改为 `o.pipeline.ManualRollback("")`,并加集成测试覆盖
+**#H2 — Orchestrator 自动回滚路径** ✅ **已修 (2026-04-24 Agent 彻查发现)**
+- 原问题: `pipeline.Execute(ctx, "rollback", nil)` 进占位 tool, 不真回滚
+- 已在 `internal/agent/orchestrator.go:110-117` 和 `:220` 改为 `o.pipeline.ManualRollback("")`, code 中有 `// #H2 修复` 注释
+- 遗留: 集成测试尚未加, 后续 go test 扩展时补 Verify→Rollback 路径测试
 
 **#H3 — 零 go test**(已部分缓解,仍成立)
 - 状态: `scripts/smoke.sh` 已接通端到端关键路径(status/sub/switch/latency/proxy-ping/failover/backup),真机前回归有兜底
@@ -509,6 +509,18 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - 影响: 订阅里含 WG 节点 → 生成的 merged.json 在 sing-box 1.13.8+ 启动时拒绝加载 → 整份配置挂掉,不光 WG 节点,所有节点都不工作。 严重度中等因为用户订阅里 WG 节点本就稀少
 - 修复方向: `convertWireGuard` 改为产出 endpoint 对象而非 outbound;overlay/merger 需要区分 outbounds 和 endpoints 两段,新增 endpoint 写入路径。 范围影响到 `internal/overlay/` 的 merger 层,不只是 subscription。 预估 4-6h。 暂定 Phase 3B-4 M10 增量修复,本轮 fixture 先把 WG 从 clash-mixed 移除绕过
 - 遗留预防: `scripts/subscription-matrix-test.sh --deep` 已跑绿,未来 sing-box 继续变 schema 时会第一时间被 binary check 逮住
+
+**#M26 — Agent 流式 Chat 取消无法传到 Go 侧**(2026-04-24 Agent 彻查)
+- 现象: 用户在 Chat 流式输出中途 "新会话" / 切 tab / 按 back, Kotlin `viewModelScope` 取消, 但 Go `chatStream` goroutine (`mobile/netpilot.go:~L819`) 无 context 感知, 继续跑到 LLM SSE 断开才释放。 最坏 10-15s LLM token 白烧 + 手机唤醒 radio
+- 影响: 省流量/电池差, 不会崩
+- 修复方向: Go 侧给 `Chat` / `ChatStream` 新增 `cancelHandle` (或直接暴露 context.CancelFunc via gomobile callback), Kotlin 在 Job cancel 时调一下。 预估 2-3h
+- 暂缓原因: 单次泄漏也就 3-5k tokens ≤ 0.01 RMB, 低优先
+
+**#M27 — Agent tool_use 失败无恢复策略, 仅靠 maxIter 上限兜底**(2026-04-24 Agent 彻查)
+- 位置: `internal/agent/single_agent.go:L61-167`
+- 现象: tool 返回 Success=false 时只把 error 文本塞回 LLM messages, LLM 决定下一步。 若 LLM 固执地反复试同一个坏 tool, 只靠 maxIter=5 兜底, 用户体验是"Agent 在折腾但毫无进展"
+- 修复方向: 同一 tool 连续失败 2 次直接熔断返回 "工具调用困难, 已停止"。 ~1h
+- 暂缓原因: 实际 5 轮上限已经避免无限循环, 用户感知到的卡顿时间有限
 
 ### 🟢 轻微
 
