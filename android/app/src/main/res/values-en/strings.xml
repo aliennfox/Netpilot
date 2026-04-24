@@ -65,6 +65,15 @@
     <string name="notif_text_connected">VPN connected</string>
     <string name="notif_action_stop">Stop</string>
 
+    <!-- Logs screen -->
+    <string name="logs_title">Live logs</string>
+    <string name="logs_subtitle_format">%1$d entries · refresh every 2s</string>
+    <string name="logs_empty">No logs yet — start VPN to see output</string>
+    <string name="logs_load_error_format">Load error: %1$s</string>
+    <string name="logs_export">Export</string>
+    <string name="logs_export_chooser_title">Share Pilotty logs</string>
+    <string name="logs_export_empty_toast">No logs to export</string>
+
     <!-- Common actions -->
     <string name="action_close">Close</string>
     <string name="action_cancel">Cancel</string>

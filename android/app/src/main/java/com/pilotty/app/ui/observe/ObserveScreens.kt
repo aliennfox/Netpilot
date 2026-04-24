@@ -30,6 +30,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -75,6 +77,39 @@ private fun formatDuration(ms: Long): String {
 
 /* ============================= Logs ============================= */
 
+/**
+ * M7 · 导出日志到系统 Share chooser。
+ * 拼纯文本 (timestamp + level + msg), 经 ACTION_SEND 让用户自选去向
+ * (Save to Files / Gmail / Telegram / Drive 等)。 Android 10+ scoped storage
+ * 下不用任何权限, 也不碰 MediaStore。
+ */
+private fun shareLogs(
+    ctx: android.content.Context,
+    logs: List<LogEntryDto>,
+    chooserTitle: String,
+) {
+    val body = buildString {
+        append("# Pilotty logs · exported ").append(java.util.Date()).append('\n')
+        append("# ").append(logs.size).append(" entries\n\n")
+        logs.forEach { e ->
+            val ts = if (e.ts > 0) hhmmss.format(Date(e.ts)) else "--:--:--"
+            append(ts).append(' ')
+                .append(e.level.ifEmpty { "?" }).append(' ')
+                .append(e.msg).append('\n')
+        }
+    }
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_SUBJECT, "Pilotty logs")
+        putExtra(android.content.Intent.EXTRA_TEXT, body)
+    }
+    val chooser = android.content.Intent.createChooser(send, chooserTitle).apply {
+        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    ctx.startActivity(chooser)
+}
+
+
 class LogsViewModel : ViewModel() {
     private val _logs = MutableStateFlow<List<LogEntryDto>>(emptyList())
     val logs: StateFlow<List<LogEntryDto>> = _logs.asStateFlow()
@@ -99,9 +134,12 @@ class LogsViewModel : ViewModel() {
 @Composable
 fun LogsScreen(onBack: () -> Unit, vm: LogsViewModel = viewModel()) {
     val pc = LocalPilottyColors.current
+    val ctx = LocalContext.current
     val logs by vm.logs.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
+    val chooserTitle = stringResource(com.pilotty.app.R.string.logs_export_chooser_title)
+    val emptyToast = stringResource(com.pilotty.app.R.string.logs_export_empty_toast)
 
     // 当日志新增时自动滚到底 (用户不在手动回看历史时)
     LaunchedEffect(logs.size) {
@@ -136,18 +174,35 @@ fun LogsScreen(onBack: () -> Unit, vm: LogsViewModel = viewModel()) {
                     .padding(end = 12.dp),
             )
             Column(Modifier.weight(1f)) {
-                Text("实时日志", color = pc.ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(com.pilotty.app.R.string.logs_title), color = pc.ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "${logs.size} 条 · 每 2 秒刷新",
+                    stringResource(com.pilotty.app.R.string.logs_subtitle_format, logs.size),
                     color = pc.ink3,
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                 )
             }
+            // M7: 导出按钮 — 把所有日志 share 出去 (用户自选 Save to Files / Gmail / Telegram / 云盘 等),
+            // 不需要 scoped storage 权限, 兼容 Android 10+ 最干净路径
+            Text(
+                stringResource(com.pilotty.app.R.string.logs_export),
+                color = pc.accentInk,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .clickable {
+                        if (logs.isEmpty()) {
+                            android.widget.Toast.makeText(ctx, emptyToast, android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            shareLogs(ctx, logs, chooserTitle)
+                        }
+                    }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
         }
         error?.let {
             Text(
-                "加载错误: $it",
+                stringResource(com.pilotty.app.R.string.logs_load_error_format, it),
                 color = pc.error,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 20.dp),
@@ -155,7 +210,7 @@ fun LogsScreen(onBack: () -> Unit, vm: LogsViewModel = viewModel()) {
         }
         if (logs.isEmpty() && error == null) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("日志为空 — 启动 VPN 后才有内容", color = pc.ink4, fontSize = 12.sp)
+                Text(stringResource(com.pilotty.app.R.string.logs_empty), color = pc.ink4, fontSize = 12.sp)
             }
         } else {
             LazyColumn(
