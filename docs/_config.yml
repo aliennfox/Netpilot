@@ -1,0 +1,24 @@
+title: Pilotty
+description: LLM Agent 驱动的智能网络代理客户端
+theme: jekyll-theme-minimal
+
+# 只发布必要文件到 GitHub Pages, 其他 Phase 文档 / Plan 文档不公开
+include:
+  - index.md
+  - privacy-policy.md
+  - privacy-policy-en.md
+
+exclude:
+  - agent-runtime.md
+  - android-mvp-gap.md
+  - phase-3b-plan.md
+  - phase-3b-4-plan.md
+  - play-submission-checklist.md
+  - roadmap.md
+  - ui-design-spec.md
+  - engine-evolution.md
+  - intent-pipeline.md
+  - business-model.md
+  - traffic-engine.md
+  - architecture.md
+  - ios-platform.md
