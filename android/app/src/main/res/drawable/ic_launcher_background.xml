@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon 背景层 (108dp, 安全区内 66dp)。
+     纯色 Stage dark (#0A0A0A), 对应 theme pc.bg Dark variant。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FF0A0A0A"
+        android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
+</vector>

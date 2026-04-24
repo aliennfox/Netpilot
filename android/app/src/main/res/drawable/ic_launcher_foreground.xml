@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon 前景层 (108dp, 安全区内 66dp)。
+     Pilotty "P" monogram: 柠檬绿 (#C7F860, theme pc.accent) 几何 P 字母,
+     位于 canvas 安全区中心 (54,54)。
+     路径数据: 竖撇 + 上半圆 Bowl, 视觉重心对齐。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFC7F860"
+        android:pathData="M38,30 L38,82 L47,82 L47,62 L62,62 C73.0457,62 82,53.0457 82,42 C82,30.9543 73.0457,22 62,22 L38,22 L38,30 Z M47,32 L62,32 C67.5228,32 72,36.4772 72,42 C72,47.5228 67.5228,52 62,52 L47,52 L47,32 Z" />
+</vector>
