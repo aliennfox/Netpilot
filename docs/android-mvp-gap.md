@@ -152,12 +152,10 @@
 - **工时**: 3h (含权限适配 Android 10+ scoped storage)
 - **用户影响**: 不做 → 收到"我连不上"的反馈,我们只能说"重装试试"
 
-### M8. LLM API Key 配置入口
-- **现状**: `mobile.NewClient(filesDir, "127.0.0.1:9090", "")` 第三个参数 apiKey 硬编码空字符串 (`PilottyApp.kt:34`)。Chat tab 能发消息但 Agent 没 key 时会报错,用户不知道怎么配
-- **需要**: (a) 设置页加"LLM 配置"卡:输入硅基流动/DeepSeek Key + 保存到 EncryptedSharedPreferences;(b) 启动时读出传给 `PilottyCore.init`
-- **来源**: Phase 1 任务 4 的 API 硬写在 env,移动端没有 env
-- **工时**: 3-4h (含 EncryptedSharedPreferences 集成 + 首次使用引导)
-- **用户影响**: 不做 → Chat tab 在用户眼里就是个报错功能, 反而砸招牌
+### M8. LLM API Key 配置入口 ✅ 已完成(2026-04-22 ~ 2026-04-25 验证)
+- **✅ 实际交付**: Settings UI `AgentApiKeySection.kt` + `ApiKeyPrefs` 持久化 + `PilottyApp.kt:35-37` 启动注入 + `PilottyCore.setApiKey → Client.SetAPIKey` 热重载。无需重启即可切换 Key。2026-04-25 Explore 核实链路贯通
+- **⚠️ 剩余安全债(v1.x,非阻塞 v1 发布)**: `ApiKeyPrefs` 用明文 `SharedPreferences`,未升级到 `androidx.security-crypto` 的 `EncryptedSharedPreferences`;`AgentApiKeySection.kt:28` KDoc 还写"需重启",与实际热重载行为有文档漂移
+- **原需求**(供历史参考): 设置页加"LLM 配置"卡输入硅基流动/DeepSeek Key + 加密存储 + 启动时读出传给 `PilottyCore.init`。原估 3-4h,实际已做但跳过加密存储那一步
 
 ### M9. VPN 异常退出 / 系统回收的用户反馈
 - **现状**: VpnService 被系统杀掉后 `onRevoke()` 或 `onDestroy()` 调 stopService, 但 UI 没有"VPN 意外中断" 的提示。#M13 修了 UI 跟随 tunRunning,但"突然从 true 掉到 false"的语义和"用户主动停"混在一起

@@ -527,6 +527,23 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - 修复方向: 同一 tool 连续失败 2 次直接熔断返回 "工具调用困难, 已停止"。 ~1h
 - 暂缓原因: 实际 5 轮上限已经避免无限循环, 用户感知到的卡顿时间有限
 
+**#M28 — SiliconFlow / DeepSeek-V3 不兼容 `tool_choice="required"`**(2026-04-25 AI 质量改造时撞)
+- 位置: `internal/agent/llm_client.go` `CompletionRequest.ToolChoice`
+- 现象: 设 `tool_choice="required"` 期望强制 LLM 调 tool, SF 返回 HTTP 200 但 `choices=[]` (14 completion_tokens 被消费, 无 choice 输出)
+- 根因: SiliconFlow / DeepSeek-V3 后端不正确处理 OpenAI 标准的 `required` 模式; `auto` / `none` 正常
+- 影响: 无法用 `required` 修 fabricate bug (LLM 有时候不调 tool 直接编答案)
+- 兜底: `Temperature=0.2` 降低随机性 + 高频意图扩 local router 关键词绕开 LLM (见 `internal/router/keywords.go:vpn_status` 从 9 条扩到 33 条)
+- 换 provider 提醒: 若切 OpenAI 原生 / Anthropic / OpenRouter 需重测 `required` 是否工作 —— 可能重获强制调 tool 路径
+
+**#M29 — Agent 的"应用级规则"实际是域名猜测, 不是进程 / UID 分流**(2026-04-25 能力测试时发现)
+- 现象: 用户 Chat 说 "让 Chrome 走 日本-1" / "让微信走 香港-1", Agent 调 `patch_route_rule` 只写 `domain="google.com,chrome.com"` / `domain_suffix=".wechat.com"`, 没用 `process_name` 字段
+- 根因: LLM 理解 "应用级" = 猜测该应用典型域名, 不知道 sing-box 桌面支持 `process_name` 字段, 也不知道 Android 的真·应用分流走 Per-App VPN UI (#M20) 而非 route rule
+- 影响: Chrome 访问 github / twitter / youtube 等非 google 域名**不走**日本-1, 配置不完整 Agent 不自知 —— 用户以为搞定了,实际大部分流量还走默认节点
+- 修复方向:
+  - (a) 短期: `patch_route_rule` Description 加提示 "domain 匹配是域名级, 不是进程级; Android 要真按 App 分流请引导用户去 Settings 的 Per-App VPN"
+  - (b) 中期: 新增 `set_per_app_vpn` tool, 需 `mobile/netpilot.go` 暴露 → Kotlin `PerAppVpnPrefs` 写入接口, 1-2 天
+- 暂缓: "把 xxx.com 走 yyy 节点" 是大多数消费级需求, 够用到 v1 发布;Per-App VPN 作为独立 tool 留 v1.1
+
 ### 🟢 轻微
 
 - **#L1** ✅ 已修(2026-04-22 commit 8dc4576): `gofmt -w .` 清零了最后 5 个违规文件
@@ -568,6 +585,7 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - **自规划协议**: 完成里程碑任务后,按 Self-Planning Protocol 自主输出 Step 1-4,不等用户下指令
 - **本地路由 substring match**: 写 chip / 快捷 query 前先 grep `internal/router/keywords.go`,substring 必须命中才会走 local action,否则回落到 LLM(apiKey 空时报"Agent 未启用")
 - **UI 重写必须保留 data binding**: 改 Android Composable 前先 `grep "PilottyRepository\." ui/**/*.kt` 列接入清单,重写后逐条校验每个 Repository 方法都被消费。**禁止 `private val XXX_SERIES = listOf(...)` 这种 hardcoded series 进 commit**(除非加 `// @VisualOnly` 注释+TODO)。后端缺对应 API 的 tile(如 NodeDetail 的 P50/P95/Jitter/Loss)必须加 "数据基于延迟估算, 非真实 telemetry" 小字 disclaimer,不能造假。根因:2026-04-24 Mission Control 重写撞过这个坑,Home Telemetry 4 tile 全 mock,用户反馈"以后别改 UI 就丢接入"
+- **补 function_call schema 前先 Read Execute 源码**: `internal/agent/tool_schema.go` 里每个 tool 的 properties 键名必须等于 Execute 里 `params["xxx"]` 实际读的字段,不要信 plan / Description / 自然语言描述的叫法。根因:2026-04-25 补 `update_subscription` / `remove_subscription` schema 时 plan 按 `name` 写,实际 Execute 读的是 `id`,Edit 前 Read 一次才发现
 
 ## 运维约定
 
