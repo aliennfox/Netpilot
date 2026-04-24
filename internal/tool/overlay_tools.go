@@ -26,6 +26,31 @@ func validateDomains(domains []string) error {
 	return nil
 }
 
+// normalizeDomainSuffixes 规范化 domain_suffix 列表:
+// 用户 / LLM 常写成带前导点的 NekoBox/Clash 风格(".netflix.com"),sing-box 原生期望不带前导点
+// 的后缀("netflix.com" 会同时匹配 netflix.com 和 *.netflix.com)。这里统一剥掉前导点并做合法性校验,
+// 同时也容忍空白和重复。
+func normalizeDomainSuffixes(suffixes []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(suffixes))
+	out := make([]string, 0, len(suffixes))
+	for _, s := range suffixes {
+		s = strings.TrimSpace(s)
+		s = strings.TrimPrefix(s, ".")
+		if s == "" {
+			continue
+		}
+		if len(s) > 253 || !domainRegex.MatchString(s) {
+			return nil, fmt.Errorf("无效的域名后缀: %s", s)
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
 func validateCIDRs(cidrs []string) error {
 	for _, c := range cidrs {
 		if _, _, err := net.ParseCIDR(c); err != nil {
@@ -168,13 +193,15 @@ func toolPatchRouteRule(ov *overlay.ConfigOverlay) *ToolDef {
 				return nil, fmt.Errorf("至少需要一种匹配条件: domain_suffix, domain, ip_cidr, 或 process_name")
 			}
 
-			// 校验域名格式
+			// 校验域名格式:Domain 精确匹配需严格 FQDN; DomainSuffix 允许用户写带前导点的 NekoBox 风格
 			if err := validateDomains(rule.Domain); err != nil {
 				return nil, err
 			}
-			if err := validateDomains(rule.DomainSuffix); err != nil {
+			normalizedSuffix, err := normalizeDomainSuffixes(rule.DomainSuffix)
+			if err != nil {
 				return nil, err
 			}
+			rule.DomainSuffix = normalizedSuffix
 			// 校验 CIDR 格式
 			if err := validateCIDRs(rule.IPCidr); err != nil {
 				return nil, err
