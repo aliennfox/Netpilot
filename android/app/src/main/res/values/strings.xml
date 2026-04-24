@@ -35,6 +35,20 @@
     <!-- Chat -->
     <string name="chat_reply_hint">回复 Agent…</string>
     <string name="chat_new_session">新会话</string>
+    <string name="chat_help_message">支持的命令:\n/clear 或 /new  —  清空当前对话\n/help  —  本帮助\n其他直接用自然语言跟 Agent 对话即可</string>
+    <string name="chat_stage_diagnose">诊断中</string>
+    <string name="chat_stage_configure">配置中</string>
+    <string name="chat_stage_verify">验证中</string>
+    <string name="chat_stage_thinking">正在思考</string>
+    <string name="chat_tool_calls_summary_format">调用 %1$d 个工具 · %2$s</string>
+    <string name="chat_tool_calls_failed_format"> · ⚠ %1$d 失败</string>
+    <string name="chat_via_source_local_suffix"> · 未调 Agent</string>
+
+    <!-- Nodes runtime -->
+    <string name="nodes_subtitle_format">%1$d / %2$d · 按延迟排序</string>
+    <string name="nodes_test_failed_format">测速失败: %1$s</string>
+    <string name="nodes_test_complete_format">%1$s 测速完成</string>
+    <string name="nodes_need_vpn_to_switch">请先启动 VPN 再切换节点</string>
 
     <!-- Subs -->
     <string name="subs_update_all">全部更新</string>

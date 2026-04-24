@@ -35,6 +35,20 @@
     <!-- Chat -->
     <string name="chat_reply_hint">Reply to Agent…</string>
     <string name="chat_new_session">New</string>
+    <string name="chat_help_message">Supported commands:\n/clear or /new  —  clear current conversation\n/help  —  this help\nOtherwise just chat with the Agent in natural language</string>
+    <string name="chat_stage_diagnose">Diagnosing</string>
+    <string name="chat_stage_configure">Configuring</string>
+    <string name="chat_stage_verify">Verifying</string>
+    <string name="chat_stage_thinking">Thinking</string>
+    <string name="chat_tool_calls_summary_format">%1$d tool call(s) · %2$s</string>
+    <string name="chat_tool_calls_failed_format"> · ⚠ %1$d failed</string>
+    <string name="chat_via_source_local_suffix"> · Agent not called</string>
+
+    <!-- Nodes runtime -->
+    <string name="nodes_subtitle_format">%1$d / %2$d · sorted by latency</string>
+    <string name="nodes_test_failed_format">Test failed: %1$s</string>
+    <string name="nodes_test_complete_format">%1$s tested</string>
+    <string name="nodes_need_vpn_to_switch">Start VPN before switching node</string>
 
     <!-- Subs -->
     <string name="subs_update_all">Update All</string>

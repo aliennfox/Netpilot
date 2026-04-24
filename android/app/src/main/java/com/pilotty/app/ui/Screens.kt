@@ -86,7 +86,8 @@ class ChatViewModel : ViewModel() {
      * TextDelta 涌出时逐字追加到末尾 assistant 气泡, Tool 事件实时 append 到 events 列表,
      * Done 终结并持久化。 本地 IntentRouter 命中 (source=local) 没 stream, 直接跳 Done 事件。
      */
-    fun send(text: String) {
+    // helpText 从 Composable 层 stringResource 注入, VM 无 Context 拿不到 R.string
+    fun send(text: String, helpText: String = "") {
         if (text.isBlank()) return
         val trimmed = text.trim()
         // D Agent 彻查: 拦截 "/" 前缀命令, 避免被 Agent 或 LocalEngine 当成普通消息发给 LLM
@@ -100,7 +101,7 @@ class ChatViewModel : ViewModel() {
                 _state.value = _state.value.copy(
                     messages = _state.value.messages + ChatMessage(
                         role = "assistant",
-                        text = "支持的命令:\n/clear 或 /new  —  清空当前对话\n/help  —  本帮助\n其他直接用自然语言跟 Agent 对话即可",
+                        text = helpText,
                         source = "local",
                     ),
                 )
@@ -223,10 +224,10 @@ private fun PendingBubble(phase: String = "") {
     )
     // 阶段标签: Phase 7.3 期间 RunStream 的 OnPhaseStart 提供, 空串时显示 "正在思考" 兜底
     val label = when (phase) {
-        "Diagnose" -> "诊断中"
-        "Configure" -> "配置中"
-        "Verify" -> "验证中"
-        else -> "正在思考"
+        "Diagnose" -> androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.chat_stage_diagnose)
+        "Configure" -> androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.chat_stage_configure)
+        "Verify" -> androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.chat_stage_verify)
+        else -> androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.chat_stage_thinking)
     }
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -288,11 +289,16 @@ private fun ToolCallTimeline(events: List<ToolEventDto>) {
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
             )
+            val summary = androidx.compose.ui.res.stringResource(
+                com.pilotty.app.R.string.chat_tool_calls_summary_format,
+                events.size,
+                formatDurationMs(totalMs),
+            )
+            val failedSuffix = if (failedCount > 0)
+                androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.chat_tool_calls_failed_format, failedCount)
+            else ""
             Text(
-                buildString {
-                    append("调用 ${events.size} 个工具 · ${formatDurationMs(totalMs)}")
-                    if (failedCount > 0) append(" · ⚠ ${failedCount} 失败")
-                },
+                summary + failedSuffix,
                 color = if (failedCount > 0) pc.error else pc.ink3,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
@@ -351,6 +357,8 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
     val ui by vm.state.collectAsStateWithLifecycle()
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    // /help 本地响应的文案, 透传给 VM
+    val helpText = androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.chat_help_message)
 
     LaunchedEffect(ui.messages.size) {
         if (ui.messages.isNotEmpty()) listState.animateScrollToItem(ui.messages.size - 1)
@@ -360,7 +368,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
     val pendingQuery by AgentQueryBus.pending.collectAsStateWithLifecycle()
     LaunchedEffect(pendingQuery) {
         pendingQuery?.let {
-            vm.send(it)
+            vm.send(it, helpText)
             AgentQueryBus.consume()
         }
     }
@@ -467,8 +475,11 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                             )
                             if (msg.source.isNotEmpty()) {
                                 Spacer(Modifier.height(6.dp))
+                                val localSuffix = if (msg.source == "local")
+                                    androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.chat_via_source_local_suffix)
+                                else ""
                                 Text(
-                                    "via ${msg.source}${if (msg.source == "local") " · 未调 Agent" else ""}",
+                                    "via ${msg.source}$localSuffix",
                                     color = pc.ink4,
                                     fontSize = 10.sp,
                                     fontFamily = FontFamily.Monospace,
@@ -575,7 +586,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                             .clip(RoundedCornerShape(12.dp))
                             .background(if (input.isNotBlank()) pc.accent else pc.surface2)
                             .clickable(enabled = !ui.sending && input.isNotBlank()) {
-                                vm.send(input)
+                                vm.send(input, helpText)
                                 input = ""
                             },
                         contentAlignment = Alignment.Center,
@@ -633,10 +644,13 @@ class NodesViewModel : ViewModel() {
 
     fun setQuery(q: String) { _state.value = _state.value.copy(query = q) }
 
+    // i18n: Composable 层用 stringResource 覆盖, VM 无 Context 拿不到 R.string
+    var needVpnSwitchMsg: String = "请先启动 VPN 再切换节点"
+
     fun switchTo(tag: String) = viewModelScope.launch {
         // Clash API 要求 VPN 运行, 否则 switchNode 会撞 connection refused。
         if (!com.pilotty.app.PilottyCore.tunRunning.value) {
-            _state.value = _state.value.copy(toast = "请先启动 VPN 再切换节点")
+            _state.value = _state.value.copy(toast = needVpnSwitchMsg)
             return@launch
         }
         try { PilottyRepository.switchNode("proxy-group", tag); refresh() }
@@ -735,6 +749,8 @@ fun NodesScreen(
 ) {
     val pc = LocalPilottyColors.current
     val ui by vm.state.collectAsStateWithLifecycle()
+    // i18n: VM 无 Context, 在 Compose 层用 stringResource 回填
+    vm.needVpnSwitchMsg = androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.nodes_need_vpn_to_switch)
     val filtered = remember(ui.nodes, ui.query) {
         // 排序: 成功 (>0 ms 升序) → 未测 (0) → 失败 (-1)。 失败排最后方便用户忽略。
         val sorted = ui.nodes.sortedWith(compareBy {
@@ -770,9 +786,19 @@ fun NodesScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column {
-                Text("节点", color = pc.ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.44).sp)
                 Text(
-                    "${filtered.size} / ${ui.nodes.size} · 按延迟排序",
+                    androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.nodes_title),
+                    color = pc.ink,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.44).sp,
+                )
+                Text(
+                    androidx.compose.ui.res.stringResource(
+                        com.pilotty.app.R.string.nodes_subtitle_format,
+                        filtered.size,
+                        ui.nodes.size,
+                    ),
                     color = pc.ink3,
                     fontSize = 10.5.sp,
                     fontFamily = FontFamily.Monospace,
