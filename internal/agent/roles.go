@@ -33,6 +33,7 @@ var (
 			"list_route_rules",
 			"list_subscriptions",
 			"get_dns_config",
+			"get_per_app_vpn",
 			"vpn_status",
 		},
 	}
@@ -69,6 +70,8 @@ var (
 			"update_subscription",
 			"remove_subscription",
 			"get_dns_config",
+			"set_per_app_vpn",
+			"get_per_app_vpn",
 		},
 	}
 
@@ -90,6 +93,7 @@ var (
 			"get_logs",
 			"list_route_rules",
 			"get_dns_config",
+			"get_per_app_vpn",
 			"vpn_status",
 		},
 	}

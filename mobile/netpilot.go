@@ -162,6 +162,7 @@ func NewClient(dataDir, clashAPIAddr, apiKey string) *Client {
 	pipeline.RegisterExtraTools(tool.RegisterOverlayTools(ov))
 	pipeline.RegisterExtraTools(tool.RegisterSubscriptionTools(subMgr))
 	pipeline.RegisterExtraTools(tool.RegisterDNSTools(ov))
+	pipeline.RegisterExtraTools(tool.RegisterPerAppTools(ov))
 	// vpn_tools 注册引用 Client, 但 Client 此处还没构造。 下面 history block 之后的 return
 	// 拿到 c := &Client{...} 再补注册, 不在这里做。
 

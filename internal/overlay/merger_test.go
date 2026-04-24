@@ -382,3 +382,88 @@ func TestMergeConfigs_WireguardGoesToEndpoints(t *testing.T) {
 		}
 	}
 }
+
+// TestMergeTunInbound 验证 Per-App VPN 的 include_package / exclude_package 正确 patch 到 tun inbound。
+// 覆盖: allow 白名单 / deny 黑名单 / off 空操作 / 没有 tun inbound 静默跳过 / 切换 mode 时清理旧字段。
+func TestMergeTunInbound(t *testing.T) {
+	buildConfig := func(withTun bool, extraTun map[string]interface{}) map[string]interface{} {
+		cfg := map[string]interface{}{
+			"inbounds": []interface{}{},
+		}
+		if withTun {
+			tun := map[string]interface{}{
+				"type": "tun",
+				"tag":  "tun-in",
+			}
+			for k, v := range extraTun {
+				tun[k] = v
+			}
+			cfg["inbounds"] = []interface{}{tun}
+		}
+		return cfg
+	}
+
+	t.Run("allow writes include_package clears exclude", func(t *testing.T) {
+		cfg := buildConfig(true, map[string]interface{}{
+			"exclude_package": []interface{}{"stale"},
+		})
+		mergeTunInbound(cfg, &TunInboundOverride{Mode: "allow", Packages: []string{"com.android.chrome"}})
+		tun := cfg["inbounds"].([]interface{})[0].(map[string]interface{})
+		if _, has := tun["exclude_package"]; has {
+			t.Errorf("exclude_package should be cleared, got: %v", tun["exclude_package"])
+		}
+		inc, ok := tun["include_package"].([]interface{})
+		if !ok || len(inc) != 1 || inc[0] != "com.android.chrome" {
+			t.Errorf("include_package = %v, want [com.android.chrome]", tun["include_package"])
+		}
+	})
+
+	t.Run("deny writes exclude_package clears include", func(t *testing.T) {
+		cfg := buildConfig(true, map[string]interface{}{
+			"include_package": []interface{}{"stale"},
+		})
+		mergeTunInbound(cfg, &TunInboundOverride{Mode: "deny", Packages: []string{"com.tencent.mm"}})
+		tun := cfg["inbounds"].([]interface{})[0].(map[string]interface{})
+		if _, has := tun["include_package"]; has {
+			t.Errorf("include_package should be cleared")
+		}
+		exc, ok := tun["exclude_package"].([]interface{})
+		if !ok || len(exc) != 1 || exc[0] != "com.tencent.mm" {
+			t.Errorf("exclude_package = %v, want [com.tencent.mm]", tun["exclude_package"])
+		}
+	})
+
+	t.Run("off is no-op", func(t *testing.T) {
+		cfg := buildConfig(true, map[string]interface{}{
+			"include_package": []interface{}{"untouched"},
+		})
+		mergeTunInbound(cfg, &TunInboundOverride{Mode: "off"})
+		tun := cfg["inbounds"].([]interface{})[0].(map[string]interface{})
+		if inc, _ := tun["include_package"].([]interface{}); len(inc) != 1 || inc[0] != "untouched" {
+			t.Errorf("off should not touch tun, got include_package=%v", tun["include_package"])
+		}
+	})
+
+	t.Run("no tun inbound silently skipped", func(t *testing.T) {
+		cfg := buildConfig(false, nil)
+		// mixed inbound 场景 (desktop), 不该 panic 也不该写任何东西
+		mergeTunInbound(cfg, &TunInboundOverride{Mode: "allow", Packages: []string{"x"}})
+		if len(cfg["inbounds"].([]interface{})) != 0 {
+			t.Errorf("inbounds should stay empty")
+		}
+	})
+
+	t.Run("allow then deny cleans up include", func(t *testing.T) {
+		cfg := buildConfig(true, nil)
+		mergeTunInbound(cfg, &TunInboundOverride{Mode: "allow", Packages: []string{"a"}})
+		mergeTunInbound(cfg, &TunInboundOverride{Mode: "deny", Packages: []string{"b"}})
+		tun := cfg["inbounds"].([]interface{})[0].(map[string]interface{})
+		if _, has := tun["include_package"]; has {
+			t.Errorf("switching allow→deny should clear include_package")
+		}
+		exc, _ := tun["exclude_package"].([]interface{})
+		if len(exc) != 1 || exc[0] != "b" {
+			t.Errorf("exclude_package = %v, want [b]", tun["exclude_package"])
+		}
+	})
+}

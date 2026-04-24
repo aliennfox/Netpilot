@@ -17,7 +17,9 @@ var KeywordMap = map[string][]string{
 		"global mode", "proxy all",
 	},
 	"set_mode_direct": {
-		"直连模式", "直连", "关闭代理", "不用代理",
+		// 注意: 裸 "直连" 单字冲突 Per-App VPN 语义 ("让 Chrome 直连"),
+		// 必须用更明确的 mode 切换短语, 不放 "直连" 单字
+		"直连模式", "切到直连", "切换直连", "全部直连", "关闭代理", "不用代理",
 		"direct mode", "no proxy",
 	},
 	"set_mode_rule": {

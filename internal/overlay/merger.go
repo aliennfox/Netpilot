@@ -20,7 +20,7 @@ func MergeConfigs(basePath string, overlay *OverlayData) ([]byte, error) {
 		return nil, fmt.Errorf("解析 base config 失败: %w", err)
 	}
 
-	if overlay == nil || (len(overlay.RouteRules) == 0 && len(overlay.Outbounds) == 0 && overlay.DNS == nil) {
+	if overlay == nil || (len(overlay.RouteRules) == 0 && len(overlay.Outbounds) == 0 && overlay.DNS == nil && overlay.TunOverride == nil) {
 		// 即使没有 overlay 数据，也注入默认 DNS
 		if _, hasDNS := config["dns"]; !hasDNS {
 			injectDefaultDNS(config)
@@ -51,7 +51,49 @@ func MergeConfigs(basePath string, overlay *OverlayData) ([]byte, error) {
 	// 合并 DNS 配置
 	mergeDNS(config, overlay.DNS)
 
+	// 合并 Per-App VPN (TUN inbound include/exclude_package, Android 侧生效, 桌面忽略)
+	if overlay.TunOverride != nil {
+		mergeTunInbound(config, overlay.TunOverride)
+	}
+
 	return json.MarshalIndent(config, "", "  ")
+}
+
+// mergeTunInbound 把 Per-App VPN 偏好写到 inbounds[type=tun] 的 include_package / exclude_package。
+// 找不到 tun inbound 时静默跳过 (桌面 / mixed inbound 场景, 无副作用)。
+// mode="allow" 写 include_package 并清 exclude_package; "deny" 反之; "off" 不应到达这里 (调用方保证)。
+func mergeTunInbound(config map[string]interface{}, ov *TunInboundOverride) {
+	if ov == nil || ov.Mode == "off" {
+		return
+	}
+	inbounds, ok := config["inbounds"].([]interface{})
+	if !ok {
+		return
+	}
+	for _, raw := range inbounds {
+		in, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if t, _ := in["type"].(string); t != "tun" {
+			continue
+		}
+		// 正规化: 每次都先清两个字段, 再按 mode 写入, 保证 overlay 切换 allow↔deny 时不留脏数据
+		delete(in, "include_package")
+		delete(in, "exclude_package")
+		pkgs := make([]interface{}, 0, len(ov.Packages))
+		for _, p := range ov.Packages {
+			pkgs = append(pkgs, p)
+		}
+		switch ov.Mode {
+		case "allow":
+			in["include_package"] = pkgs
+		case "deny":
+			in["exclude_package"] = pkgs
+		}
+		// 只 patch 第一个 tun inbound (生产配置不应该有多个)
+		return
+	}
 }
 
 // collectValidRuleSetTags 从合并后的 config.route.rule_set 顶层收集所有合法 tag,

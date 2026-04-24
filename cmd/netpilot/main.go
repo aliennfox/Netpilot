@@ -53,6 +53,7 @@ func main() {
 	pipeline.RegisterExtraTools(tool.RegisterOverlayTools(ov))
 	pipeline.RegisterExtraTools(tool.RegisterSubscriptionTools(subMgr))
 	pipeline.RegisterExtraTools(tool.RegisterDNSTools(ov))
+	pipeline.RegisterExtraTools(tool.RegisterPerAppTools(ov))
 
 	// 设置 adapter 的配置路径（如果有 merged 配置就用它）
 	mergedPath := ov.MergedConfigPath()

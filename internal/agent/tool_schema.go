@@ -197,6 +197,27 @@ var toolParameterSchemas = map[string]json.RawMessage{
 		"properties": {},
 		"required": []
 	}`),
+	"set_per_app_vpn": json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"mode": {
+				"type": "string",
+				"enum": ["allow", "deny", "off"],
+				"description": "allow=白名单(只有列表内 App 走代理); deny=黑名单(列表内 App 直连其他走代理); off=关闭过滤所有 App 走代理"
+			},
+			"packages": {
+				"type": "array",
+				"items": {"type": "string"},
+				"description": "Android 包名列表. 常见: Chrome=com.android.chrome, 微信=com.tencent.mm, Telegram=org.telegram.messenger, YouTube=com.google.android.youtube, Twitter/X=com.twitter.android, TikTok=com.zhiliaoapp.musically. mode=off 时可省略"
+			}
+		},
+		"required": ["mode"]
+	}`),
+	"get_per_app_vpn": json.RawMessage(`{
+		"type": "object",
+		"properties": {},
+		"required": []
+	}`),
 }
 
 // ConvertToolsToSchema 将内部 ToolDef 转为 OpenAI API 的 tools 参数格式（全量，向后兼容）

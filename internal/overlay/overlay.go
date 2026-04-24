@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/foxnetpilot/netpilot/internal/engine"
@@ -89,10 +90,25 @@ type DNSConfig struct {
 
 // OverlayData 是持久化到文件的 overlay 数据
 type OverlayData struct {
-	RouteRules []RouteRule              `json:"route_rules"`
-	RuleSets   []RuleSetConfig          `json:"rule_sets,omitempty"`
-	Outbounds  []map[string]interface{} `json:"outbounds,omitempty"`
-	DNS        *DNSConfig               `json:"dns,omitempty"`
+	RouteRules  []RouteRule              `json:"route_rules"`
+	RuleSets    []RuleSetConfig          `json:"rule_sets,omitempty"`
+	Outbounds   []map[string]interface{} `json:"outbounds,omitempty"`
+	DNS         *DNSConfig               `json:"dns,omitempty"`
+	TunOverride *TunInboundOverride      `json:"tun_override,omitempty"` // Agent 写 Per-App VPN, Android ConfigMerger.injectPerAppRules 会覆盖 (UI 优先)
+}
+
+// TunInboundOverride 控制 tun inbound 的 include_package / exclude_package 字段 (Android Per-App VPN)。
+// Mode:
+//   - "off"   → 不写, TUN inbound 不过滤包名 (所有 App 走代理, 默认行为)
+//   - "allow" → include_package = Packages, 只有列表内 App 走代理
+//   - "deny"  → exclude_package = Packages, 列表内 App 直连, 其他走代理
+//
+// 设计: Agent "让 Chrome 走 VPN" 型需求通过此结构写入; Android UI 的 PerAppVpnPrefs 是独立数据源
+// (SharedPreferences), ConfigMerger.injectPerAppRules 在 Kotlin 层合并时会覆盖 overlay.json 的此字段
+// (UI win)。 桌面 sing-box (mixed inbound) 场景 include_package 字段被忽略, 无副作用。
+type TunInboundOverride struct {
+	Mode     string   `json:"mode"`               // "off" / "allow" / "deny"
+	Packages []string `json:"packages,omitempty"` // Android 包名, 如 "com.android.chrome"
 }
 
 // ConfigOverlay 管理增量配置叠加层
@@ -144,6 +160,54 @@ func (o *ConfigOverlay) Save() error {
 		return err
 	}
 	return os.WriteFile(o.overlayPath, data, 0644)
+}
+
+// SetPerAppVpn 设置 TUN inbound 的应用级过滤 (Android Per-App VPN).
+// mode="off" 时清除字段, 恢复默认 (所有 App 走代理).
+func (o *ConfigOverlay) SetPerAppVpn(mode string, packages []string) error {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	switch mode {
+	case "off", "allow", "deny":
+	default:
+		return fmt.Errorf("无效 mode: %q (允许 off/allow/deny)", mode)
+	}
+	if (mode == "allow" || mode == "deny") && len(packages) == 0 {
+		return fmt.Errorf("mode=%s 需要至少一个 package", mode)
+	}
+
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if mode == "off" {
+		o.data.TunOverride = nil
+	} else {
+		cleaned := make([]string, 0, len(packages))
+		seen := make(map[string]struct{}, len(packages))
+		for _, p := range packages {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			if _, ok := seen[p]; ok {
+				continue
+			}
+			seen[p] = struct{}{}
+			cleaned = append(cleaned, p)
+		}
+		o.data.TunOverride = &TunInboundOverride{Mode: mode, Packages: cleaned}
+	}
+	return o.saveLocked()
+}
+
+// GetPerAppVpn 返回当前 Per-App VPN 设置的只读副本, 未设置返回 nil.
+func (o *ConfigOverlay) GetPerAppVpn() *TunInboundOverride {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.data.TunOverride == nil {
+		return nil
+	}
+	cp := *o.data.TunOverride
+	cp.Packages = append([]string(nil), o.data.TunOverride.Packages...)
+	return &cp
 }
 
 // AddRule 添加一条路由规则
