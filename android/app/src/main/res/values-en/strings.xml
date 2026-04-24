@@ -65,6 +65,15 @@
     <string name="notif_text_connected">VPN connected</string>
     <string name="notif_action_stop">Stop</string>
 
+    <!-- M9 · VPN unexpected-stop banner (Home) -->
+    <string name="vpn_stop_banner_title">VPN unexpectedly stopped</string>
+    <string name="vpn_stop_reason_revoke">Permission revoked by system or another VPN</string>
+    <string name="vpn_stop_reason_crash">Killed by system or process crashed</string>
+    <string name="vpn_stop_reason_config">Config load failed, see Live logs</string>
+    <string name="vpn_stop_banner_time_format">%1$s · %2$s</string>
+    <string name="vpn_stop_banner_ack">Got it</string>
+    <string name="vpn_stop_banner_view_logs">View logs</string>
+
     <!-- Logs screen -->
     <string name="logs_title">Live logs</string>
     <string name="logs_subtitle_format">%1$d entries · refresh every 2s</string>

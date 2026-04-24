@@ -259,6 +259,7 @@ fun HomeScreen(
     onStartVpn: () -> Unit,
     onStopVpn: () -> Unit,
     onNavigateChat: () -> Unit = {},
+    onNavigateLogs: () -> Unit = {},
     vm: HomeViewModel = viewModel(),
 ) {
     val pc = LocalPilottyColors.current
@@ -270,6 +271,10 @@ fun HomeScreen(
     // i18n: 在 Composable scope 提前捕获, 下方 lambda / 嵌套 Composable 共用
     val notConnectedText = stringResource(com.pilotty.app.R.string.home_not_connected)
     val chatPlaceholder = stringResource(com.pilotty.app.R.string.home_chat_placeholder)
+    // M9: VPN 异常退出 banner (仅非 USER 停 + 未 ack 时显示)
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val stopReasonPrefs = remember { com.pilotty.app.vpn.VpnStopReasonPrefs.get(ctx) }
+    val stopSnap by stopReasonPrefs.state.collectAsStateWithLifecycle()
     val missionState = when {
         !ui.tunRunning -> "warn"
         else -> "nominal"
@@ -288,6 +293,19 @@ fun HomeScreen(
                 vpn = ui.tunRunning,
                 uptime = formatUptime(ui.uptimeSec),
             )
+
+            // M9: VPN 异常退出 banner (只在非 USER 停 + 未 ack 时显示)
+            if (!stopSnap.acked && stopSnap.reason != com.pilotty.app.vpn.VpnStopReasonPrefs.Reason.NONE
+                && stopSnap.reason != com.pilotty.app.vpn.VpnStopReasonPrefs.Reason.USER) {
+                VpnStopBanner(
+                    snap = stopSnap,
+                    onAck = { stopReasonPrefs.ack() },
+                    onViewLogs = {
+                        stopReasonPrefs.ack()
+                        onNavigateLogs()
+                    },
+                )
+            }
 
             // Hero — Active Node card
             Box(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp)) {
@@ -669,6 +687,72 @@ fun HomeScreen(
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/* ---------- M9 VPN 异常退出 banner ---------- */
+
+@Composable
+private fun VpnStopBanner(
+    snap: com.pilotty.app.vpn.VpnStopReasonPrefs.Snapshot,
+    onAck: () -> Unit,
+    onViewLogs: () -> Unit,
+) {
+    val pc = LocalPilottyColors.current
+    val reasonText = when (snap.reason) {
+        com.pilotty.app.vpn.VpnStopReasonPrefs.Reason.REVOKE ->
+            stringResource(com.pilotty.app.R.string.vpn_stop_reason_revoke)
+        com.pilotty.app.vpn.VpnStopReasonPrefs.Reason.CRASH ->
+            stringResource(com.pilotty.app.R.string.vpn_stop_reason_crash)
+        com.pilotty.app.vpn.VpnStopReasonPrefs.Reason.CONFIG_FAIL ->
+            stringResource(com.pilotty.app.R.string.vpn_stop_reason_config)
+        else -> ""
+    }
+    val timeText = if (snap.ts > 0) {
+        java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(snap.ts))
+    } else "—"
+    Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Surface(
+            color = pc.surface,
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, pc.warn),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("⚠", color = pc.warn, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        stringResource(com.pilotty.app.R.string.vpn_stop_banner_title),
+                        color = pc.ink,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Text(
+                    stringResource(com.pilotty.app.R.string.vpn_stop_banner_time_format, timeText, reasonText),
+                    color = pc.ink2,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    lineHeight = 16.sp,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        stringResource(com.pilotty.app.R.string.vpn_stop_banner_view_logs),
+                        color = pc.accentInk,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clickable { onViewLogs() }.padding(vertical = 4.dp),
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        stringResource(com.pilotty.app.R.string.vpn_stop_banner_ack),
+                        color = pc.ink3,
+                        fontSize = 13.sp,
+                        modifier = Modifier.clickable { onAck() }.padding(vertical = 4.dp),
+                    )
                 }
             }
         }

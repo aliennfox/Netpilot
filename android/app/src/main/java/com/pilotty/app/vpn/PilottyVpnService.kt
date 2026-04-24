@@ -151,6 +151,8 @@ class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerH
         Log.i(TAG, "onStartCommand action=${intent?.action} flags=$flags startId=$startId")
         when (intent?.action) {
             ACTION_STOP -> {
+                // M9: 用户主动停 — 不视为异常, 不弹 "意外中断" 提示
+                VpnStopReasonPrefs.get(this).record(VpnStopReasonPrefs.Reason.USER)
                 stopService()
                 stopSelf()
                 return START_NOT_STICKY
@@ -211,6 +213,8 @@ class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerH
             PilottyCore.markTunRunning(true)
         } catch (t: Throwable) {
             Log.e(TAG, "startService failed", t)
+            // M9: 启动过程中的异常 (config_invalid / libbox 起不来) 记 CONFIG_FAIL
+            VpnStopReasonPrefs.get(this).record(VpnStopReasonPrefs.Reason.CONFIG_FAIL)
             stopService()
             stopSelf()
         }
@@ -235,11 +239,18 @@ class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerH
     }
 
     override fun onDestroy() {
+        // M9: onDestroy 被调时若 commandServer 仍持有 → 系统 OOM 回收, 视为 CRASH;
+        // 若 commandServer 已经 null → 正常退出路径 (ACTION_STOP / onRevoke 已 record 过)
+        if (commandServer != null) {
+            VpnStopReasonPrefs.get(this).record(VpnStopReasonPrefs.Reason.CRASH)
+        }
         stopService()
         super.onDestroy()
     }
 
     override fun onRevoke() {
+        // M9: 用户在系统设置里撤销了 VPN 授权, 或另一个 VPN 抢了 (Android 限制只能一个 active)
+        VpnStopReasonPrefs.get(this).record(VpnStopReasonPrefs.Reason.REVOKE)
         stopService()
         super.onRevoke()
     }

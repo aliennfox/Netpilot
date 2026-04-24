@@ -157,6 +157,7 @@ fun PilottyApp(
                     onStartVpn = onStartVpn,
                     onStopVpn = onStopVpn,
                     onNavigateChat = { nav.navigate("chat") },
+                    onNavigateLogs = { nav.navigate("logs") },
                 )
             }
             composable("chat") { ChatScreen() }

@@ -65,6 +65,15 @@
     <string name="notif_text_connected">VPN 已连接</string>
     <string name="notif_action_stop">停止</string>
 
+    <!-- M9 · VPN 异常退出提示 (Home banner) -->
+    <string name="vpn_stop_banner_title">VPN 意外中断</string>
+    <string name="vpn_stop_reason_revoke">被系统或其它 VPN 撤销了授权</string>
+    <string name="vpn_stop_reason_crash">被系统回收或进程崩溃</string>
+    <string name="vpn_stop_reason_config">配置加载失败, 见实时日志</string>
+    <string name="vpn_stop_banner_time_format">%1$s · %2$s</string>
+    <string name="vpn_stop_banner_ack">知道了</string>
+    <string name="vpn_stop_banner_view_logs">查看日志</string>
+
     <!-- Logs screen -->
     <string name="logs_title">实时日志</string>
     <string name="logs_subtitle_format">%1$d 条 · 每 2 秒刷新</string>
