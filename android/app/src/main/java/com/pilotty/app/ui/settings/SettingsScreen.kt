@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -47,14 +48,14 @@ fun SettingsScreen(
     ) {
         Spacer(Modifier.height(8.dp))
         Text(
-            "系统",
+            stringResource(com.pilotty.app.R.string.settings_title),
             color = pc.ink,
             fontSize = 22.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = (-0.44).sp,
         )
         Text(
-            "v1.4.2 · 主题 · 分流规则 · 账户",
+            stringResource(com.pilotty.app.R.string.settings_subtitle_format, "1.4.2"),
             color = pc.ink3,
             fontSize = 10.5.sp,
             fontFamily = FontFamily.Monospace,
@@ -63,7 +64,7 @@ fun SettingsScreen(
 
         // 主题切换
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SectionHead("主题")
+            SectionHead(stringResource(com.pilotty.app.R.string.settings_theme))
             PilottyCard(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier.padding(14.dp),
@@ -71,17 +72,17 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     PilottyChip(
-                        text = "跟随系统",
+                        text = stringResource(com.pilotty.app.R.string.settings_theme_system),
                         selected = themeMode == ThemeMode.System,
                         onClick = { onThemeChange(ThemeMode.System) },
                     )
                     PilottyChip(
-                        text = "浅色",
+                        text = stringResource(com.pilotty.app.R.string.settings_theme_light),
                         selected = themeMode == ThemeMode.Light,
                         onClick = { onThemeChange(ThemeMode.Light) },
                     )
                     PilottyChip(
-                        text = "深色",
+                        text = stringResource(com.pilotty.app.R.string.settings_theme_dark),
                         selected = themeMode == ThemeMode.Dark,
                         onClick = { onThemeChange(ThemeMode.Dark) },
                     )
@@ -138,12 +139,12 @@ fun SettingsScreen(
         // 关于 — Phase 10-F-4: 版本号从 Go 层读, 不硬编; Go 侧含 sing-box / go 版本信息
         val coreVersion = remember { com.pilotty.app.data.PilottyRepository.version() }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SectionHead("About")
+            SectionHead(stringResource(com.pilotty.app.R.string.settings_about))
             PilottyCard(modifier = Modifier.fillMaxWidth(), soft = true) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Pilotty", color = pc.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(com.pilotty.app.R.string.app_name), color = pc.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     Text(
-                        coreVersion.ifEmpty { "版本未知 · sing-box + gomobile" },
+                        coreVersion.ifEmpty { stringResource(com.pilotty.app.R.string.settings_about_version_unknown) },
                         color = pc.ink3,
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
@@ -165,7 +166,7 @@ enum class ThemeMode { System, Light, Dark }
 private fun AgentToolsEntry(onNavigateAgentTools: () -> Unit) {
     val pc = LocalPilottyColors.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SectionHead("Agent 工具")
+        SectionHead(stringResource(com.pilotty.app.R.string.settings_agent_tools))
         PilottyCard(
             modifier = Modifier
                 .fillMaxWidth()
@@ -173,9 +174,14 @@ private fun AgentToolsEntry(onNavigateAgentTools: () -> Unit) {
             soft = true,
         ) {
             Column(Modifier.padding(14.dp)) {
-                Text("工具权限 · Auto 开关", color = pc.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "控制 Agent 可调用的工具, 每个工具独立 Enable / Auto 开关",
+                    stringResource(com.pilotty.app.R.string.settings_agent_tools_title),
+                    color = pc.ink,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    stringResource(com.pilotty.app.R.string.settings_agent_tools_subtitle),
                     color = pc.ink3,
                     fontSize = 11.sp,
                 )
@@ -191,7 +197,7 @@ private fun ObserveEntriesSection(
 ) {
     val pc = LocalPilottyColors.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SectionHead("观测")
+        SectionHead(stringResource(com.pilotty.app.R.string.settings_observe))
         PilottyCard(
             modifier = Modifier
                 .fillMaxWidth()
@@ -199,9 +205,14 @@ private fun ObserveEntriesSection(
             soft = true,
         ) {
             Column(Modifier.padding(14.dp)) {
-                Text("实时日志", color = pc.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "看 sing-box 内核运行时输出,调试 DNS/规则匹配",
+                    stringResource(com.pilotty.app.R.string.settings_observe_logs_title),
+                    color = pc.ink,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    stringResource(com.pilotty.app.R.string.settings_observe_logs_subtitle),
                     color = pc.ink3,
                     fontSize = 11.sp,
                 )
@@ -214,9 +225,14 @@ private fun ObserveEntriesSection(
             soft = true,
         ) {
             Column(Modifier.padding(14.dp)) {
-                Text("活跃连接", color = pc.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "按下载流量倒排 — 看哪个 App 正在走哪个节点",
+                    stringResource(com.pilotty.app.R.string.settings_observe_conns_title),
+                    color = pc.ink,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    stringResource(com.pilotty.app.R.string.settings_observe_conns_subtitle),
                     color = pc.ink3,
                     fontSize = 11.sp,
                 )

@@ -87,9 +87,12 @@ fun NodeDetailScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Kicker("Node Detail")
+                        Kicker(androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.node_detail_kicker))
                         Text(
-                            if (node.alive) "ONLINE" else "OFFLINE",
+                            if (node.alive)
+                                androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.node_detail_online)
+                            else
+                                androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.node_detail_offline),
                             color = pc.ink2,
                             fontSize = 10.5.sp,
                             fontWeight = FontWeight.Bold,
@@ -148,7 +151,7 @@ fun NodeDetailScreen(
             }
 
             SectionHead(
-                text = "Metrics · 即时(实验)",
+                text = androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.node_detail_metrics_title),
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
             )
             // 2x2 metrics grid — @VisualOnly: 后端目前不采样 histogram/jitter/loss,
@@ -162,7 +165,7 @@ fun NodeDetailScreen(
                 MetricTile("Loss", "0.0", "%", modifier = Modifier.weight(1f))
             }
             Text(
-                "数据基于当前延迟估算, 非真实采样 telemetry (后端未做 histogram/jitter/loss 采样)",
+                androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.node_detail_metrics_disclaimer),
                 color = pc.ink4,
                 fontSize = 10.5.sp,
                 fontFamily = FontFamily.Monospace,
@@ -203,17 +206,37 @@ fun NodeDetailScreen(
             }
 
             SectionHead(
-                text = "Config",
+                text = androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.node_detail_config),
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
             )
             CardGroup(modifier = Modifier.fillMaxWidth()) {
-                CardRow(label = "Protocol", value = node.type.uppercase())
+                CardRow(
+                    label = androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.node_detail_protocol),
+                    value = node.type.uppercase(),
+                )
                 RowDivider()
-                CardRow(label = "Endpoint", value = "${node.server}:${node.port}")
+                CardRow(
+                    label = androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.node_detail_endpoint),
+                    value = "${node.server}:${node.port}",
+                )
                 RowDivider()
-                CardRow(label = "Status", value = if (node.alive) "Online" else "Offline", valueMono = false)
+                CardRow(
+                    label = androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.node_detail_status),
+                    value = if (node.alive)
+                        androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.node_detail_online_label)
+                    else
+                        androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.node_detail_offline_label),
+                    valueMono = false,
+                )
                 RowDivider()
-                CardRow(label = "Active", value = if (node.active) "Yes" else "No", valueMono = false)
+                CardRow(
+                    label = androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.node_detail_active),
+                    value = if (node.active)
+                        androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.node_detail_yes)
+                    else
+                        androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.node_detail_no),
+                    valueMono = false,
+                )
             }
 
             Spacer(Modifier.height(16.dp))

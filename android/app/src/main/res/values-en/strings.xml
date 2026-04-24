@@ -51,4 +51,64 @@
     <string name="action_cancel">Cancel</string>
     <string name="action_confirm">Confirm</string>
     <string name="action_apply">Apply</string>
+    <string name="action_rollback">Roll back</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_save">Save</string>
+
+    <!-- Home screen -->
+    <string name="home_not_connected">Not connected</string>
+    <string name="home_active_measuring">Testing…</string>
+    <string name="home_active_waiting">Waiting</string>
+    <string name="home_chat_placeholder">Tell the Agent what to do…</string>
+    <string name="home_btn_connecting">Connecting…</string>
+    <string name="home_btn_disconnect">Disconnect</string>
+    <string name="home_btn_start_short">Start</string>
+    <string name="home_btn_switch_node">Switch node</string>
+    <string name="home_agent_local_route">Local router</string>
+    <string name="home_agent_no_apikey">No API key</string>
+    <string name="home_safety_title">Safety · Recent changes</string>
+    <string name="home_safety_empty">No changes yet — switching node / editing rules / applying templates will save automatically</string>
+    <string name="home_safety_summary_format">%1$d snapshots · latest %2$s</string>
+    <string name="home_safety_hint">Tap an entry to roll back just that one, or use the button for the latest</string>
+    <string name="home_rollback_latest">Roll back latest</string>
+    <string name="home_rollback_confirm_title">Roll back to this snapshot?</string>
+    <string name="home_rollback_time_format">Time: %1$s · snapshot %2$s</string>
+    <string name="home_rollback_active_format">Active at that time: %1$s</string>
+    <string name="home_rollback_warning">After rollback, proxy-group reverts to this node. All changes since this snapshot will be lost.</string>
+    <string name="home_need_vpn_to_rollback">Start VPN before rolling back</string>
+    <string name="home_rollback_success_format">Rolled back to %1$s</string>
+
+    <!-- NodeDetail screen -->
+    <string name="node_detail_kicker">Node Detail</string>
+    <string name="node_detail_online">ONLINE</string>
+    <string name="node_detail_offline">OFFLINE</string>
+    <string name="node_detail_metrics_title">Metrics · Instant (experimental)</string>
+    <string name="node_detail_metrics_disclaimer">Estimated from current latency; not real-sampled telemetry (backend lacks histogram/jitter/loss sampling)</string>
+    <string name="node_detail_config">Config</string>
+    <string name="node_detail_protocol">Protocol</string>
+    <string name="node_detail_endpoint">Endpoint</string>
+    <string name="node_detail_status">Status</string>
+    <string name="node_detail_active">Active</string>
+    <string name="node_detail_online_label">Online</string>
+    <string name="node_detail_offline_label">Offline</string>
+    <string name="node_detail_yes">Yes</string>
+    <string name="node_detail_no">No</string>
+
+    <!-- Settings top-level -->
+    <string name="settings_title">System</string>
+    <string name="settings_subtitle_format">v%1$s · Theme · Rules · Account</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_theme_system">System</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_agent_tools">Agent Tools</string>
+    <string name="settings_agent_tools_title">Tool permissions · Auto toggle</string>
+    <string name="settings_agent_tools_subtitle">Control which tools the Agent can call; each has independent Enable / Auto</string>
+    <string name="settings_observe">Observe</string>
+    <string name="settings_observe_logs_title">Live logs</string>
+    <string name="settings_observe_logs_subtitle">Watch sing-box core runtime output — debug DNS / rule matching</string>
+    <string name="settings_observe_conns_title">Active connections</string>
+    <string name="settings_observe_conns_subtitle">Sorted by download traffic — see which app uses which node</string>
+    <string name="settings_about">About</string>
+    <string name="settings_about_version_unknown">Version unknown · sing-box + gomobile</string>
 </resources>

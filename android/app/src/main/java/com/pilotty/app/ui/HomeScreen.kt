@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -219,16 +220,17 @@ class HomeViewModel : ViewModel() {
 
     fun cancelRollback() { _state.value = _state.value.copy(pendingRollback = null) }
 
-    fun confirmRollback() = viewModelScope.launch {
+    // needVpnMsg / successFmt 由 Compose 层从 stringResource 透传, 因为 VM 里没有 Context
+    fun confirmRollback(needVpnMsg: String, successFmt: (String) -> String) = viewModelScope.launch {
         val snap = _state.value.pendingRollback ?: return@launch
         _state.value = _state.value.copy(pendingRollback = null)
         if (!com.pilotty.app.PilottyCore.tunRunning.value) {
-            _state.value = _state.value.copy(toast = "请先启动 VPN 再回滚")
+            _state.value = _state.value.copy(toast = needVpnMsg)
             return@launch
         }
         try {
             val r = PilottyRepository.rollback(snap.id)
-            _state.value = _state.value.copy(toast = r.message.ifEmpty { "已回滚到 ${snap.id}" })
+            _state.value = _state.value.copy(toast = r.message.ifEmpty { successFmt(snap.id) })
             refresh()
         } catch (e: Throwable) {
             _state.value = _state.value.copy(error = e.message)
@@ -265,6 +267,9 @@ fun HomeScreen(
     // 点发送 ↑ 跳 Chat 时需要主动收 IME — 否则 MainActivity 里 imeVisible=true 会隐藏
     // 底部 nav, 用户在 Chat 页看不到 Home tab, 回不来 (2026-04-24 用户反馈的 bug)
     val focusManager = LocalFocusManager.current
+    // i18n: 在 Composable scope 提前捕获, 下方 lambda / 嵌套 Composable 共用
+    val notConnectedText = stringResource(com.pilotty.app.R.string.home_not_connected)
+    val chatPlaceholder = stringResource(com.pilotty.app.R.string.home_chat_placeholder)
     val missionState = when {
         !ui.tunRunning -> "warn"
         else -> "nominal"
@@ -287,7 +292,7 @@ fun HomeScreen(
             // Hero — Active Node card
             Box(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp)) {
                 ActiveNodeCard(
-                    nodeName = ui.status?.currentNode?.ifEmpty { "未连接" } ?: "未连接",
+                    nodeName = ui.status?.currentNode?.ifEmpty { notConnectedText } ?: notConnectedText,
                     latency = ui.latencyHistory.lastOrNull() ?: 0,
                     running = ui.tunRunning,
                     isConnecting = ui.isConnecting,
@@ -437,7 +442,7 @@ fun HomeScreen(
                         )
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            if (agentReady) "LLM ready" else "本地路由",
+                            if (agentReady) "LLM ready" else stringResource(com.pilotty.app.R.string.home_agent_local_route),
                             color = pc.ink3,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
@@ -450,7 +455,7 @@ fun HomeScreen(
                     ) {
                         StatusDot(state = if (agentReady) "nominal" else "warn")
                         Text(
-                            text = if (agentReady) "deepseek-chat" else "未配置 apiKey",
+                            text = if (agentReady) "deepseek-chat" else stringResource(com.pilotty.app.R.string.home_agent_no_apikey),
                             color = pc.ink3,
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
@@ -461,7 +466,7 @@ fun HomeScreen(
 
             // Safety · 最近变更 (D2)
             SectionHead(
-                text = "Safety · 最近变更",
+                text = stringResource(com.pilotty.app.R.string.home_safety_title),
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 12.dp),
             )
             Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
@@ -504,7 +509,12 @@ fun HomeScreen(
                     .padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                listOf("rule" to "规则", "global" to "全局", "direct" to "直连").forEach { (id, label) ->
+                val modeItems = listOf(
+                    "rule" to stringResource(com.pilotty.app.R.string.mode_rule),
+                    "global" to stringResource(com.pilotty.app.R.string.mode_global),
+                    "direct" to stringResource(com.pilotty.app.R.string.mode_direct),
+                )
+                modeItems.forEach { (id, label) ->
                     PilottyChip(
                         text = label,
                         selected = (ui.status?.mode ?: "").equals(id, ignoreCase = true),
@@ -545,38 +555,46 @@ fun HomeScreen(
             androidx.compose.material3.AlertDialog(
                 onDismissRequest = { vm.cancelRollback() },
                 containerColor = pc.surface,
-                title = { Text("回滚到此快照?", color = pc.ink) },
+                title = { Text(stringResource(com.pilotty.app.R.string.home_rollback_confirm_title), color = pc.ink) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            "时间: ${formatClockTime(snap.timestamp)} · 快照 ${snap.id.takeLast(8)}",
+                            stringResource(
+                                com.pilotty.app.R.string.home_rollback_time_format,
+                                formatClockTime(snap.timestamp),
+                                snap.id.takeLast(8),
+                            ),
                             color = pc.ink2,
                             fontSize = 12.sp,
                             fontFamily = FontFamily.Monospace,
                         )
                         if (primary.isNotEmpty()) {
                             Text(
-                                "当时 active: $primary",
+                                stringResource(com.pilotty.app.R.string.home_rollback_active_format, primary),
                                 color = pc.ink2,
                                 fontSize = 12.sp,
                                 fontFamily = FontFamily.Monospace,
                             )
                         }
                         Text(
-                            "回滚后 proxy-group 会切回这个节点, 该快照之后的所有变更会丢失。",
+                            stringResource(com.pilotty.app.R.string.home_rollback_warning),
                             color = pc.ink3,
                             fontSize = 11.5.sp,
                         )
                     }
                 },
                 confirmButton = {
-                    androidx.compose.material3.TextButton(onClick = { vm.confirmRollback() }) {
-                        Text("回滚", color = pc.accentInk, fontWeight = FontWeight.SemiBold)
+                    val needVpnMsg = stringResource(com.pilotty.app.R.string.home_need_vpn_to_rollback)
+                    val successFmtBase = stringResource(com.pilotty.app.R.string.home_rollback_success_format)
+                    androidx.compose.material3.TextButton(onClick = {
+                        vm.confirmRollback(needVpnMsg) { id -> successFmtBase.format(id) }
+                    }) {
+                        Text(stringResource(com.pilotty.app.R.string.action_rollback), color = pc.accentInk, fontWeight = FontWeight.SemiBold)
                     }
                 },
                 dismissButton = {
                     androidx.compose.material3.TextButton(onClick = { vm.cancelRollback() }) {
-                        Text("取消", color = pc.ink2)
+                        Text(stringResource(com.pilotty.app.R.string.action_cancel), color = pc.ink2)
                     }
                 },
             )
@@ -622,7 +640,7 @@ fun HomeScreen(
                                 )
                                 if (input.isEmpty()) {
                                     Text(
-                                        "告诉 Agent 你想做什么…",
+                                        chatPlaceholder,
                                         color = pc.ink3,
                                         fontSize = 14.5.sp,
                                     )
@@ -730,8 +748,13 @@ private fun ActiveNodeCard(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         ProtoBadge(name = proto.uppercase().ifEmpty { "—" })
+                        val stateText = when {
+                            running && latency > 0 -> "$latency ms"
+                            running -> stringResource(com.pilotty.app.R.string.home_active_measuring)
+                            else -> stringResource(com.pilotty.app.R.string.home_active_waiting)
+                        }
                         Text(
-                            if (running && latency > 0) "$latency ms" else if (running) "测速中…" else "待连接",
+                            stateText,
                             color = pc.ink3,
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
@@ -772,15 +795,20 @@ private fun ActiveNodeCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                val powerText = when {
+                    isConnecting -> stringResource(com.pilotty.app.R.string.home_btn_connecting)
+                    running -> stringResource(com.pilotty.app.R.string.home_btn_disconnect)
+                    else -> stringResource(com.pilotty.app.R.string.home_btn_start_short)
+                }
                 PilottyButton(
-                    text = if (isConnecting) "连接中…" else if (running) "断开" else "启动",
+                    text = powerText,
                     onClick = onPower,
                     variant = PilottyButtonVariant.Power,
                     enabled = !isConnecting,
                     modifier = Modifier.weight(1f),
                 )
                 PilottyButton(
-                    text = "切换节点",
+                    text = stringResource(com.pilotty.app.R.string.home_btn_switch_node),
                     onClick = onSwitch,
                     variant = PilottyButtonVariant.Ghost,
                     modifier = Modifier.weight(1f),
@@ -813,7 +841,7 @@ private fun AgentLogCard(
                 horizontalArrangement = Arrangement.Center,
             ) {
                 Text(
-                    "尚无变更记录 —— 切节点 / 改规则 / 应用模板后会自动保存",
+                    stringResource(com.pilotty.app.R.string.home_safety_empty),
                     color = pc.ink3,
                     fontSize = 11.5.sp,
                 )
@@ -872,15 +900,18 @@ private fun AgentLogCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val latestTime = formatRelativeTime(snapshots.firstOrNull()?.timestamp)
+            val summary = if (snapshots.isNotEmpty())
+                stringResource(com.pilotty.app.R.string.home_safety_summary_format, snapshots.size, latestTime)
+            else
+                stringResource(com.pilotty.app.R.string.home_safety_hint)
             Text(
-                if (snapshots.isNotEmpty()) "共 ${snapshots.size} 次快照 · 最新 $latestTime"
-                else "点条目可单独回滚, 或按右侧按钮回滚最新",
+                summary,
                 color = pc.ink3,
                 fontSize = 11.5.sp,
                 maxLines = 1,
             )
             PilottyButton(
-                text = "回滚最新",
+                text = stringResource(com.pilotty.app.R.string.home_rollback_latest),
                 onClick = onRollbackLatest,
                 variant = PilottyButtonVariant.Mono,
                 enabled = snapshots.isNotEmpty(),

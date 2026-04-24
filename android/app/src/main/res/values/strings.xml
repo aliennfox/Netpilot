@@ -51,4 +51,64 @@
     <string name="action_cancel">取消</string>
     <string name="action_confirm">确认</string>
     <string name="action_apply">应用</string>
+    <string name="action_rollback">回滚</string>
+    <string name="action_delete">删除</string>
+    <string name="action_save">保存</string>
+
+    <!-- Home screen -->
+    <string name="home_not_connected">未连接</string>
+    <string name="home_active_measuring">测速中…</string>
+    <string name="home_active_waiting">待连接</string>
+    <string name="home_chat_placeholder">告诉 Agent 你想做什么…</string>
+    <string name="home_btn_connecting">连接中…</string>
+    <string name="home_btn_disconnect">断开</string>
+    <string name="home_btn_start_short">启动</string>
+    <string name="home_btn_switch_node">切换节点</string>
+    <string name="home_agent_local_route">本地路由</string>
+    <string name="home_agent_no_apikey">未配置 apiKey</string>
+    <string name="home_safety_title">Safety · 最近变更</string>
+    <string name="home_safety_empty">尚无变更记录 —— 切节点 / 改规则 / 应用模板后会自动保存</string>
+    <string name="home_safety_summary_format">共 %1$d 次快照 · 最新 %2$s</string>
+    <string name="home_safety_hint">点条目可单独回滚, 或按右侧按钮回滚最新</string>
+    <string name="home_rollback_latest">回滚最新</string>
+    <string name="home_rollback_confirm_title">回滚到此快照?</string>
+    <string name="home_rollback_time_format">时间: %1$s · 快照 %2$s</string>
+    <string name="home_rollback_active_format">当时 active: %1$s</string>
+    <string name="home_rollback_warning">回滚后 proxy-group 会切回这个节点, 该快照之后的所有变更会丢失。</string>
+    <string name="home_need_vpn_to_rollback">请先启动 VPN 再回滚</string>
+    <string name="home_rollback_success_format">已回滚到 %1$s</string>
+
+    <!-- NodeDetail screen -->
+    <string name="node_detail_kicker">Node Detail</string>
+    <string name="node_detail_online">ONLINE</string>
+    <string name="node_detail_offline">OFFLINE</string>
+    <string name="node_detail_metrics_title">Metrics · 即时(实验)</string>
+    <string name="node_detail_metrics_disclaimer">数据基于当前延迟估算, 非真实采样 telemetry (后端未做 histogram/jitter/loss 采样)</string>
+    <string name="node_detail_config">Config</string>
+    <string name="node_detail_protocol">Protocol</string>
+    <string name="node_detail_endpoint">Endpoint</string>
+    <string name="node_detail_status">Status</string>
+    <string name="node_detail_active">Active</string>
+    <string name="node_detail_online_label">Online</string>
+    <string name="node_detail_offline_label">Offline</string>
+    <string name="node_detail_yes">Yes</string>
+    <string name="node_detail_no">No</string>
+
+    <!-- Settings top-level -->
+    <string name="settings_title">系统</string>
+    <string name="settings_subtitle_format">v%1$s · 主题 · 分流规则 · 账户</string>
+    <string name="settings_theme">主题</string>
+    <string name="settings_theme_system">跟随系统</string>
+    <string name="settings_theme_light">浅色</string>
+    <string name="settings_theme_dark">深色</string>
+    <string name="settings_agent_tools">Agent 工具</string>
+    <string name="settings_agent_tools_title">工具权限 · Auto 开关</string>
+    <string name="settings_agent_tools_subtitle">控制 Agent 可调用的工具, 每个工具独立 Enable / Auto 开关</string>
+    <string name="settings_observe">观测</string>
+    <string name="settings_observe_logs_title">实时日志</string>
+    <string name="settings_observe_logs_subtitle">看 sing-box 内核运行时输出,调试 DNS/规则匹配</string>
+    <string name="settings_observe_conns_title">活跃连接</string>
+    <string name="settings_observe_conns_subtitle">按下载流量倒排 — 看哪个 App 正在走哪个节点</string>
+    <string name="settings_about">About</string>
+    <string name="settings_about_version_unknown">版本未知 · sing-box + gomobile</string>
 </resources>
