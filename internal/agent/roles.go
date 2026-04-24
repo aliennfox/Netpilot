@@ -31,6 +31,8 @@ var (
 			"get_connections",
 			"get_logs",
 			"list_route_rules",
+			"list_subscriptions",
+			"get_dns_config",
 			"vpn_status",
 		},
 	}
@@ -47,7 +49,9 @@ var (
 - markdown 标题、表情符号
 - 步骤清单 (除非用户要求)
 - 未被要求的建议或旁路信息
-- 改写 tool 返回的列表/表格排版 —— 已经对齐好了, 原样透传`,
+- 改写 tool 返回的列表/表格排版 —— 已经对齐好了, 原样透传
+- 把 set_mode 当万金油 —— 它只管 global/direct/rule 三选, "测速 / 隐蔽 / 防泄露 / 不想被看到" 都不是它能解决的
+- 对用户的 "帮我 配/搭/建/加 X" 反问 "请确认 / 请告诉我 / 需要明确" —— 这类措辞已是授权, 直接生成 tool_calls`,
 		AllowedTools: []string{
 			"start_vpn",
 			"stop_vpn",
@@ -56,10 +60,15 @@ var (
 			"set_mode",
 			"patch_route_rule",
 			"remove_route_rule",
+			"create_chain",
 			"get_node_pool",
 			"test_latency",
 			"test_latency_all",
 			"import_subscription",
+			"list_subscriptions",
+			"update_subscription",
+			"remove_subscription",
+			"get_dns_config",
 		},
 	}
 
@@ -80,6 +89,7 @@ var (
 			"get_connections",
 			"get_logs",
 			"list_route_rules",
+			"get_dns_config",
 			"vpn_status",
 		},
 	}

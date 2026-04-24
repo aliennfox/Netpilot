@@ -118,7 +118,14 @@ var KeywordMap = map[string][]string{
 		"turn off vpn", "stop vpn", "disable vpn", "disconnect vpn",
 	},
 	"vpn_status": {
+		// 带 vpn/翻墙/代理 + 询问词缀的各种口语表述。 substring 匹配, 短语要够独特不撞 start_vpn
 		"vpn状态", "vpn 状态", "vpn在吗", "vpn 在吗", "vpn运行", "vpn 运行",
-		"vpn running", "vpn status", "is vpn on",
+		"vpn开着", "vpn 开着", "vpn开没开", "vpn 开没开", "vpn开了吗", "vpn 开了吗",
+		"vpn现在开", "vpn 现在开", "vpn是不是", "vpn 是不是", "vpn好了吗", "vpn 好了吗",
+		"翻墙开着", "翻墙 开着", "翻墙开没", "翻墙 开没", "翻墙在吗", "翻墙 在吗",
+		"翻墙好了吗", "翻墙好没", "翻墙开了", "翻墙现在", "翻墙是不是",
+		"代理开着", "代理 开着", "代理开没", "代理 开没", "代理启用", "代理 启用",
+		"代理在跑", "代理在吗", "代理现在", "代理是不是",
+		"vpn running", "vpn status", "is vpn on", "is vpn running",
 	},
 }

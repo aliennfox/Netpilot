@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/foxnetpilot/netpilot/internal/config"
 	"github.com/foxnetpilot/netpilot/internal/tool"
 )
 
@@ -59,11 +60,15 @@ func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMess
 
 	// 4. Tool-use 循环
 	for i := 0; i < a.maxIter; i++ {
+		// 2026-04-25 实验:diagnose 首轮 tool_choice=required 强制调 tool (防 fabricate)。
+		// 结论:SiliconFlow/DeepSeek-V3 收到 required 后返回 choices=[] 空响应 (14 token 被消费), 不兼容。
+		// 回退 auto, fabricate 风险靠 temperature 降低缓解 + local router keyword 兜底。
 		req := CompletionRequest{
-			Model:      a.llm.Model,
-			Messages:   messages,
-			Tools:      tools,
-			ToolChoice: "auto",
+			Model:       a.llm.Model,
+			Messages:    messages,
+			Tools:       tools,
+			ToolChoice:  "auto",
+			Temperature: Float64Ptr(config.DefaultLLMTemperature),
 		}
 		if debugAgent {
 			dump, _ := json.MarshalIndent(req, "", "  ")
@@ -206,10 +211,11 @@ func (a *SingleAgent) RunWithRoleStream(ctx context.Context, role *AgentRole, us
 
 	for i := 0; i < a.maxIter; i++ {
 		req := CompletionRequest{
-			Model:      a.llm.Model,
-			Messages:   messages,
-			Tools:      tools,
-			ToolChoice: "auto",
+			Model:       a.llm.Model,
+			Messages:    messages,
+			Tools:       tools,
+			ToolChoice:  "auto",
+			Temperature: Float64Ptr(config.DefaultLLMTemperature),
 		}
 
 		var contentBuf strings.Builder

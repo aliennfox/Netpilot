@@ -128,9 +128,74 @@ var toolParameterSchemas = map[string]json.RawMessage{
 			"url": {
 				"type": "string",
 				"description": "订阅链接 URL"
+			},
+			"name": {
+				"type": "string",
+				"description": "订阅名称（可选，留空用 URL host 自动生成）"
 			}
 		},
 		"required": ["url"]
+	}`),
+	"list_subscriptions": json.RawMessage(`{
+		"type": "object",
+		"properties": {},
+		"required": []
+	}`),
+	"update_subscription": json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"id": {
+				"type": "string",
+				"description": "订阅 ID（list_subscriptions 返回的第一列）。留空则更新全部订阅"
+			}
+		},
+		"required": []
+	}`),
+	"remove_subscription": json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"id": {
+				"type": "string",
+				"description": "要删除的订阅 ID。若未提供，tool 会先列出候选让用户选择"
+			}
+		},
+		"required": []
+	}`),
+	"create_chain": json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"tag": {
+				"type": "string",
+				"description": "链路出口的新 outbound tag，会自动加 _agent: 前缀。例如 jp-hk"
+			},
+			"nodes": {
+				"type": "array",
+				"items": {"type": "string"},
+				"description": "节点 tag 顺序列表 entry→exit，至少 2 个。例 [\"JP-1\",\"HK-1\"] 表示流量经 JP-1 → HK-1 → target。节点 tag 须与 get_node_pool 返回的 tag 一致",
+				"minItems": 2
+			}
+		},
+		"required": ["tag", "nodes"]
+	}`),
+	"get_dns_config": json.RawMessage(`{
+		"type": "object",
+		"properties": {},
+		"required": []
+	}`),
+	"start_vpn": json.RawMessage(`{
+		"type": "object",
+		"properties": {},
+		"required": []
+	}`),
+	"stop_vpn": json.RawMessage(`{
+		"type": "object",
+		"properties": {},
+		"required": []
+	}`),
+	"vpn_status": json.RawMessage(`{
+		"type": "object",
+		"properties": {},
+		"required": []
 	}`),
 }
 

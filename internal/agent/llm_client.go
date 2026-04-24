@@ -58,12 +58,16 @@ type FunctionCall struct {
 }
 
 type CompletionRequest struct {
-	Model      string    `json:"model"`
-	Messages   []Message `json:"messages"`
-	Tools      []Tool    `json:"tools,omitempty"`
-	ToolChoice string    `json:"tool_choice,omitempty"` // "auto", "none", or "required"
-	Stream     bool      `json:"stream,omitempty"`
+	Model       string    `json:"model"`
+	Messages    []Message `json:"messages"`
+	Tools       []Tool    `json:"tools,omitempty"`
+	ToolChoice  string    `json:"tool_choice,omitempty"` // "auto", "none", or "required"
+	Temperature *float64  `json:"temperature,omitempty"` // nil = provider 默认; 指针用于区分 "未设置" 和 "设 0"
+	Stream      bool      `json:"stream,omitempty"`
 }
+
+// Float64Ptr 返回 float64 指针,用于构造 CompletionRequest.Temperature
+func Float64Ptr(v float64) *float64 { return &v }
 
 type CompletionResponse struct {
 	Choices []Choice `json:"choices"`
