@@ -288,7 +288,11 @@ class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerH
     private fun buildNotification(): Notification {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL_ID, "Pilotty VPN", NotificationManager.IMPORTANCE_LOW)
+            val ch = NotificationChannel(
+                CHANNEL_ID,
+                getString(com.pilotty.app.R.string.notif_channel_name),
+                NotificationManager.IMPORTANCE_LOW,
+            )
             nm.createNotificationChannel(ch)
         }
         // Phase 10-E-B: 加停止按钮, 锁屏下拉可直接关 VPN 不用先 unlock 进 App
@@ -302,11 +306,17 @@ class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerH
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Pilotty")
-            .setContentText("VPN 已连接")
-            .setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setContentTitle(getString(com.pilotty.app.R.string.app_name))
+            .setContentText(getString(com.pilotty.app.R.string.notif_text_connected))
+            // M3: 小图标用品牌 tile (盾 + 对勾, 单色, 适配通知栏 tint),
+            // 取代 Android 内置 ic_lock_lock (和 Pilotty 品牌无关)
+            .setSmallIcon(com.pilotty.app.R.drawable.ic_tile_pilotty)
             .setContentIntent(buildConfigureIntent())
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "停止", stopPi)
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                getString(com.pilotty.app.R.string.notif_action_stop),
+                stopPi,
+            )
             .setOngoing(true)
             .build()
     }

@@ -60,6 +60,11 @@
     <string name="language_zh_cn">中文(简体)</string>
     <string name="language_en">English</string>
 
+    <!-- Notification (VpnService 前台通知) -->
+    <string name="notif_channel_name">Pilotty VPN</string>
+    <string name="notif_text_connected">VPN 已连接</string>
+    <string name="notif_action_stop">停止</string>
+
     <!-- Common actions -->
     <string name="action_close">关闭</string>
     <string name="action_cancel">取消</string>
