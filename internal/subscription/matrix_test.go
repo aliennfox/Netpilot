@@ -24,11 +24,11 @@ type fixtureExpectation struct {
 
 var fixtureExpectations = map[string]fixtureExpectation{
 	"clash-mixed.yaml": {
-		// WG 暂从 clash-mixed 移除(#M25 sing-box 1.13.8+ WG→endpoint);
-		// Phase 10-A1 加 socks5 + https → 9 条
-		MinNodes:      9,
-		RequiredTypes: []string{"shadowsocks", "vmess", "vless", "trojan", "hysteria2", "tuic", "anytls", "socks", "http"},
-		RequiredTags:  []string{"VLESS-Reality-US", "TUIC-KR", "AnyTLS-AU", "SOCKS5-Home", "HTTPS-Corp"},
+		// #M25 修复后 WG 回归 fixture: converter 产 endpoint schema, merger 分流到
+		// merged.json.endpoints。 --deep 用 sing-box binary check 验证 parse 通过。
+		MinNodes:      10,
+		RequiredTypes: []string{"shadowsocks", "vmess", "vless", "trojan", "hysteria2", "tuic", "anytls", "socks", "http", "wireguard"},
+		RequiredTags:  []string{"VLESS-Reality-US", "TUIC-KR", "AnyTLS-AU", "SOCKS5-Home", "HTTPS-Corp", "WG-JP"},
 	},
 	"singbox-mixed.json": {
 		MinNodes:      3, // direct/block/selector 会被 skip

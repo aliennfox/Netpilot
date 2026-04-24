@@ -244,14 +244,25 @@ func convertWireGuard(node NodeConfig, tag string) (map[string]interface{}, erro
 		"peers":       []interface{}{peerObj},
 	}
 
-	// local_address → address (endpoint 本地 IP, wireguard 强制要求)
+	// local_address → address (endpoint 本地 IP, wireguard 强制要求)。
+	// sing-box 1.13+ endpoint.address 要 netip.Prefix 即 CIDR, 裸 IP 会被拒:
+	// `ParsePrefix("10.0.0.2"): no '/'`。 Clash YAML `ip:` 习惯给裸 IP,
+	// 这里自动补 /32 (IPv4) / /128 (IPv6), 让用户抄来的订阅开箱即可。
 	if addr := node.Extra["local_address"]; addr != "" {
 		var list []interface{}
 		for _, a := range strings.Split(addr, ",") {
 			a = strings.TrimSpace(a)
-			if a != "" {
-				list = append(list, a)
+			if a == "" {
+				continue
 			}
+			if !strings.Contains(a, "/") {
+				if strings.Contains(a, ":") {
+					a += "/128"
+				} else {
+					a += "/32"
+				}
+			}
+			list = append(list, a)
 		}
 		if len(list) > 0 {
 			ep["address"] = list

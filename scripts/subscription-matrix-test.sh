@@ -81,6 +81,7 @@ func main() {
 		os.Exit(1)
 	}
 	outs := []map[string]interface{}{{"type": "direct", "tag": "direct"}}
+	var eps []map[string]interface{}
 	for _, n := range nodes {
 		if n.IsInfoEntry {
 			continue
@@ -89,11 +90,19 @@ func main() {
 		if err != nil || ob == nil {
 			continue
 		}
+		// #M25: wireguard 是 endpoint 型, sing-box 1.13.8+ 不在 outbounds
+		if t, _ := ob["type"].(string); t == "wireguard" {
+			eps = append(eps, ob)
+			continue
+		}
 		outs = append(outs, ob)
 	}
 	cfg := map[string]interface{}{
 		"log":       map[string]interface{}{"level": "error"},
 		"outbounds": outs,
+	}
+	if len(eps) > 0 {
+		cfg["endpoints"] = eps
 	}
 	b, _ := json.MarshalIndent(cfg, "", "  ")
 	fmt.Print(string(b))

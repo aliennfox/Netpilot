@@ -504,11 +504,16 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - 延期: 编辑现有规则(当前需删除后重加);outbound 下拉动态填充当前 proxy-group 列表;IP CIDR / domain 格式前端校验
 - 实际工时: ~2h(Go 15min + AAR 10min + Kotlin UI 1h + 真机回归 20min)
 
-**#M25 — WireGuard 在 sing-box 1.13.8+ 从 outbound 迁到 endpoint, convertWireGuard 过时**(2026-04-22 M13 --deep 真机 validate 捕获)
-- 现象: `internal/subscription/converter.go:convertWireGuard` 产出 `{"type":"wireguard", "local_address":[...], "peer_public_key":"..."}` 形态的 outbound 对象。 sing-box 1.13.8+ 把 WireGuard 搬去 endpoints registry (`protocol/wireguard/endpoint.go:33` 用 `option.WireGuardEndpointOptions` 注册),schema 改成 `{"address":[...], "peers":[{"address":...,"public_key":...,"reserved":[...]}]}` 且顶层没有 server/server_port。 当前 converter 产物被 1.13.9 binary `sing-box check` 直接拒 `json: unknown field "local_address"`
-- 影响: 订阅里含 WG 节点 → 生成的 merged.json 在 sing-box 1.13.8+ 启动时拒绝加载 → 整份配置挂掉,不光 WG 节点,所有节点都不工作。 严重度中等因为用户订阅里 WG 节点本就稀少
-- 修复方向: `convertWireGuard` 改为产出 endpoint 对象而非 outbound;overlay/merger 需要区分 outbounds 和 endpoints 两段,新增 endpoint 写入路径。 范围影响到 `internal/overlay/` 的 merger 层,不只是 subscription。 预估 4-6h。 暂定 Phase 3B-4 M10 增量修复,本轮 fixture 先把 WG 从 clash-mixed 移除绕过
-- 遗留预防: `scripts/subscription-matrix-test.sh --deep` 已跑绿,未来 sing-box 继续变 schema 时会第一时间被 binary check 逮住
+**#M25 — WireGuard 在 sing-box 1.13.8+ 从 outbound 迁到 endpoint** ✅ **已修 + --deep 验证通过(2026-04-24)**
+- 根因: sing-box 1.13.8+ 把 WG 从 outbound 搬去 endpoints registry (`protocol/wireguard/endpoint.go:33` 用 `option.WireGuardEndpointOptions` 注册),schema 完全不同 (`{address:[...], peers:[{address,public_key,reserved}]}`, 顶层无 server/server_port)
+- 修复:
+  - `internal/subscription/converter.go:convertWireGuard` 产出 endpoint schema (peers[] 数组, server/port/peer_public_key 合并进 peer; 顶层 address/private_key/mtu)
+  - **追加修**: endpoint.address 要 `netip.Prefix` 即 CIDR, Clash `ip:` 字段习惯给裸 IP 会报 `ParsePrefix: no '/'`;converter 自动补 `/32` (v4) / `/128` (v6)
+  - `internal/overlay/merger.go:isEndpointType` + `mergeOutbounds` 按 type 分派到 `merged.endpoints` 而非 outbounds;selector.outbounds 仍引用 endpoint.tag (sing-box endpoint/outbound 共享 tag 命名空间)
+  - `scripts/subscription-matrix-test.sh` dev-subdump 工具同步分段
+  - 测试: `TestConvertWireGuardEndpoint` (parser_test) + `TestConvertWireGuardAddressCIDRNormalize` (6 subtest 覆盖 bare/cidr/v4/v6/mixed) + `TestMergeConfigs_WireguardGoesToEndpoints` (merger_test)
+  - fixture: `clash-mixed.yaml` 加回 `WG-JP` 节点 (10 节点), matrix_test 期望 +wireguard type +WG-JP tag
+- 验证: `scripts/subscription-matrix-test.sh --deep` 用 sing-box 1.13.9 binary `check` 三个 fixture 全绿
 
 **#M26 — Agent 流式 Chat 取消无法传到 Go 侧**(2026-04-24 Agent 彻查)
 - 现象: 用户在 Chat 流式输出中途 "新会话" / 切 tab / 按 back, Kotlin `viewModelScope` 取消, 但 Go `chatStream` goroutine (`mobile/netpilot.go:~L819`) 无 context 感知, 继续跑到 LLM SSE 断开才释放。 最坏 10-15s LLM token 白烧 + 手机唤醒 radio

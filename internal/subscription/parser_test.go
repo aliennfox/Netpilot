@@ -542,6 +542,52 @@ func TestMergeConfigs_WireguardGoesToEndpoints(t *testing.T) {
 	t.Skip("overlay package test, see internal/overlay/merger_test.go (scaffold)")
 }
 
+// TestConvertWireGuardAddressCIDRNormalize 锁 #M25 追加修: Clash `ip:` 字段习惯
+// 给裸 IP, 但 sing-box endpoint.address 要 netip.Prefix (CIDR)。 converter 必须
+// 自动补 /32 (v4) / /128 (v6), 否则 sing-box check 报 `no '/'` 直接挂整份配置。
+func TestConvertWireGuardAddressCIDRNormalize(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		want    []interface{}
+	}{
+		{"v4 bare", "10.0.0.2", []interface{}{"10.0.0.2/32"}},
+		{"v6 bare", "fd00::2", []interface{}{"fd00::2/128"}},
+		{"mixed bare", "10.0.0.2,fd00::2", []interface{}{"10.0.0.2/32", "fd00::2/128"}},
+		{"already cidr v4", "10.0.0.2/24", []interface{}{"10.0.0.2/24"}},
+		{"already cidr v6", "fd00::2/64", []interface{}{"fd00::2/64"}},
+		{"mixed cidr and bare", "10.0.0.2/32,fd00::2", []interface{}{"10.0.0.2/32", "fd00::2/128"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			node := NodeConfig{
+				Type: "wireguard", Name: "WG", Server: "1.2.3.4", Port: 51820,
+				Extra: map[string]string{
+					"private_key":     "pk==",
+					"peer_public_key": "pub==",
+					"local_address":   c.in,
+				},
+			}
+			ep, err := convertWireGuard(node, "WG")
+			if err != nil {
+				t.Fatalf("convertWireGuard: %v", err)
+			}
+			got, ok := ep["address"].([]interface{})
+			if !ok {
+				t.Fatalf("address not slice: %+v", ep["address"])
+			}
+			if len(got) != len(c.want) {
+				t.Fatalf("len=%d want %d, got=%v", len(got), len(c.want), got)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Errorf("addr[%d]=%v want %v", i, got[i], c.want[i])
+				}
+			}
+		})
+	}
+}
+
 // TestParseSSH Phase 9 A2
 func TestParseSSH(t *testing.T) {
 	uri := "ssh://alice:pass123@10.0.0.5:2222?host_key_algorithms=ssh-ed25519%3Brsa-sha2-256&client_version=SSH-2.0-go#bastion-jp"

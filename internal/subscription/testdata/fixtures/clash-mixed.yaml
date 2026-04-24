@@ -96,14 +96,20 @@ proxies:
     password: https-fake-pw
     skip-cert-verify: false
 
-# NOTE: WireGuard 暂从 fixture 移除,见 CLAUDE.md #M25: sing-box 1.13.8+
-# 把 WG 从 outbound 迁到 endpoint, 当前 convertWireGuard 产物会被 sing-box
-# binary check 拒绝。 收尾到独立的 M10 增量修复。
+  - name: "WG-JP"
+    type: wireguard
+    server: wg.example.com
+    port: 51820
+    private-key: OOU+v9ZLILc43E2ZQVgGfI6hs9o4ut7UjCNzP7gQQG8=
+    public-key: xMpLXlskDipwWGjPsxVInUSpd+fjCCYgb8mIOYbZipk=
+    ip: 10.0.0.2
+    mtu: 1420
+    reserved: [0, 0, 0]
 
 proxy-groups:
   - name: PROXY
     type: select
-    proxies: [SS-HK-01, VMess-WS-JP, VLESS-Reality-US, SOCKS5-Home, HTTPS-Corp]
+    proxies: [SS-HK-01, VMess-WS-JP, VLESS-Reality-US, SOCKS5-Home, HTTPS-Corp, WG-JP]
 
 rules:
   - MATCH,PROXY
