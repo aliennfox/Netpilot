@@ -370,6 +370,7 @@ func (a *SingBoxAdapter) ValidateConfig(config []byte) error {
 func (a *SingBoxAdapter) TestLatencyBatch(tags []string, testURL string, timeout time.Duration) ([]LatencyResult, error) {
 	return nil, fmt.Errorf("not implemented: TestLatencyBatch")
 }
+
 // CloseConnection 通过 Clash API DELETE /connections/{id} 掐断单条活动连接。
 // id 来自 /connections 列表的 connection UUID。 sing-box clash-api server 接到 DELETE 会
 // 关闭底层 net.Conn, 上游相应 TCP/UDP 连接随即被 kill。 200 / 204 都视为成功。
@@ -391,6 +392,7 @@ func (a *SingBoxAdapter) CloseConnection(id string) error {
 	}
 	return fmt.Errorf("clash-api DELETE /connections/%s 返回 %d", id, resp.StatusCode)
 }
+
 // GetTrafficStats 返回自 sing-box 启动以来的累计上/下行 bytes。
 // 用途: mobile 层 Client.trafficSamplerLoop 1Hz poll, 写进 TrafficRing, 由 ring 算每秒 delta (UpRate/DownRate)。
 //

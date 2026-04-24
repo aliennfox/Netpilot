@@ -547,9 +547,9 @@ func TestMergeConfigs_WireguardGoesToEndpoints(t *testing.T) {
 // 自动补 /32 (v4) / /128 (v6), 否则 sing-box check 报 `no '/'` 直接挂整份配置。
 func TestConvertWireGuardAddressCIDRNormalize(t *testing.T) {
 	cases := []struct {
-		name    string
-		in      string
-		want    []interface{}
+		name string
+		in   string
+		want []interface{}
 	}{
 		{"v4 bare", "10.0.0.2", []interface{}{"10.0.0.2/32"}},
 		{"v6 bare", "fd00::2", []interface{}{"fd00::2/128"}},

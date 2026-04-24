@@ -25,12 +25,12 @@ type RouteRule struct {
 	IPCidr        []string `json:"ip_cidr,omitempty"`
 	ProcessName   []string `json:"process_name,omitempty"`
 	Port          []int    `json:"port,omitempty"`
-	PortRange     []string `json:"port_range,omitempty"` // eg "8000:9000"
-	Network       []string `json:"network,omitempty"`    // "tcp" | "udp"
-	Protocol      []string `json:"protocol,omitempty"`   // "http" | "tls" | "quic" | "dns" | ...
-	RuleSet       []string `json:"rule_set,omitempty"`   // 引用 OverlayData.RuleSets[].Tag
-	Geoip         []string `json:"geoip,omitempty"`      // sing-box deprecated 字段 (建议改用 rule_set)
-	Geosite       []string `json:"geosite,omitempty"`    // sing-box deprecated 字段 (建议改用 rule_set)
+	PortRange     []string `json:"port_range,omitempty"`    // eg "8000:9000"
+	Network       []string `json:"network,omitempty"`       // "tcp" | "udp"
+	Protocol      []string `json:"protocol,omitempty"`      // "http" | "tls" | "quic" | "dns" | ...
+	RuleSet       []string `json:"rule_set,omitempty"`      // 引用 OverlayData.RuleSets[].Tag
+	Geoip         []string `json:"geoip,omitempty"`         // sing-box deprecated 字段 (建议改用 rule_set)
+	Geosite       []string `json:"geosite,omitempty"`       // sing-box deprecated 字段 (建议改用 rule_set)
 	IPIsPrivate   bool     `json:"ip_is_private,omitempty"` // sing-box 原生, 匹配 RFC1918 / loopback / 链路本地 IP; 替代 geoip-private 外部 .srs
 	Outbound      string   `json:"outbound"`
 	Description   string   `json:"description"`
