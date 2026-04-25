@@ -532,11 +532,16 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - 修复方向: Go 侧给 `Chat` / `ChatStream` 新增 `cancelHandle` (或直接暴露 context.CancelFunc via gomobile callback), Kotlin 在 Job cancel 时调一下。 预估 2-3h
 - 暂缓原因: 单次泄漏也就 3-5k tokens ≤ 0.01 RMB, 低优先
 
-**#M27 — Agent tool_use 失败无恢复策略, 仅靠 maxIter 上限兜底**(2026-04-24 Agent 彻查)
-- 位置: `internal/agent/single_agent.go:L61-167`
-- 现象: tool 返回 Success=false 时只把 error 文本塞回 LLM messages, LLM 决定下一步。 若 LLM 固执地反复试同一个坏 tool, 只靠 maxIter=5 兜底, 用户体验是"Agent 在折腾但毫无进展"
-- 修复方向: 同一 tool 连续失败 2 次直接熔断返回 "工具调用困难, 已停止"。 ~1h
-- 暂缓原因: 实际 5 轮上限已经避免无限循环, 用户感知到的卡顿时间有限
+**#M27 — Agent tool_use 失败无恢复策略, 仅靠 maxIter 上限兜底** ✅ **已修 (2026-04-25)**
+- 原现象: tool 返回 Success=false 时只把 error 文本塞回 LLM messages, LLM 决定下一步。 若 LLM 固执地反复试同一个坏 tool, 只靠 maxIter=5 兜底, 用户体验是"Agent 在折腾但毫无进展"
+- 修复: 在 `single_agent.go` 的 `RunWithRole` / `RunWithRoleStream` 加 per-tool 失败计数 + 熔断
+  - `toolFailureCircuitBreakThreshold = 2` (容忍 1 次瞬时失败)
+  - 每 iter 维护 `toolFailCount map[string]int` + `lastToolError map[string]string` 横跨 maxIter
+  - 三类失败统一计数: role 拒绝 / 参数解析失败 / pipeline.Execute 返回 Success=false
+  - 同名 tool 一次成功立即 reset 该 tool 计数 (per-tool 独立, 不是全局)
+  - 命中阈值通过 `formatCircuitBreakReply` 返回中文提示 + 最后错误片段, 直接终止 iter loop
+- 测试: `single_agent_test.go` 加 7 个 case (CircuitBreakOnRepeatedToolFailure / CircuitBreakOnRepeatedRoleDeny / NoBreakOnTransientFailure / SuccessResetsFailureCount / PerToolIndependentCount / TestShouldCircuitBreak / TestFormatCircuitBreakReply); 全 6 包 regression 绿
+- 顺手补: `agentFakeAdapter` 加 `TestLatency` stub, 修 LatencyCheckPostHook 在 switch_node 成功路径上的 nil-panic
 
 **#M28 — SiliconFlow / DeepSeek-V3 不兼容 `tool_choice="required"`**(2026-04-25 AI 质量改造时撞)
 - 位置: `internal/agent/llm_client.go` `CompletionRequest.ToolChoice`

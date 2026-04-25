@@ -15,6 +15,34 @@ import (
 
 var debugAgent = os.Getenv("NETPILOT_DEBUG") != ""
 
+// toolFailureCircuitBreakThreshold #M27: 同一 tool 在一次 RunWithRole 内累计失败达此次数
+// 即立即熔断, 不再喂回 LLM 让它继续试。 避免 "Agent 在折腾但毫无进展" 的用户感知 ——
+// maxIter 是无限循环兜底 (5 轮全部不同 tool 也会触发), 这个是 "同一坏 tool 反复试" 兜底。
+// 阈值 2 是经验值: 留 1 次容错给 LLM 自己改参数 / 换法子, 第 2 次还失败说明该 tool 当前
+// 真有问题, 跑下去只是浪费 LLM token + 拖延用户。
+const toolFailureCircuitBreakThreshold = 2
+
+// shouldCircuitBreak 检查是否有任意 tool 失败次数达到熔断阈值。 返回 (toolName, lastError, true)
+// 当任一 tool 触发, 否则 ("", "", false)。 同时触发多个时返回最早超阈的那个 (map 迭代顺序无关
+// — 行为上等价: 反正都已经超了)。
+func shouldCircuitBreak(failCount map[string]int, lastErr map[string]string) (string, string, bool) {
+	for name, n := range failCount {
+		if n >= toolFailureCircuitBreakThreshold {
+			return name, lastErr[name], true
+		}
+	}
+	return "", "", false
+}
+
+// formatCircuitBreakReply 熔断时给用户的友好回复。 含 tool 名 + 阈值 + 最后一次错误摘要。
+func formatCircuitBreakReply(toolName, lastErr string) string {
+	if lastErr == "" {
+		return fmt.Sprintf("工具 %s 连续失败 %d 次, 已停止自动重试 (避免无效循环)。", toolName, toolFailureCircuitBreakThreshold)
+	}
+	return fmt.Sprintf("工具 %s 连续失败 %d 次, 已停止自动重试 (避免无效循环)。最后错误: %s",
+		toolName, toolFailureCircuitBreakThreshold, lastErr)
+}
+
 // SingleAgent 是单角色 LLM Agent 执行器，实现 tool-use 闭环。
 // Orchestrator 用它来运行每个角色阶段。
 type SingleAgent struct {
@@ -57,6 +85,9 @@ func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMess
 	tools := ConvertToolsForRole(a.tools, role.AllowedTools)
 
 	var events []ToolEvent
+	// #M27 熔断: 跨 iter 累计每个 tool 的失败次数 + 最近一次错误消息
+	toolFailCount := map[string]int{}
+	lastToolError := map[string]string{}
 
 	// 4. Tool-use 循环
 	for i := 0; i < a.maxIter; i++ {
@@ -109,6 +140,8 @@ func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMess
 					Error:       denyMsg,
 					Role:        role.Name,
 				})
+				toolFailCount[tc.Function.Name]++
+				lastToolError[tc.Function.Name] = denyMsg
 				continue
 			}
 
@@ -126,6 +159,8 @@ func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMess
 						Error:       "参数解析失败: " + err.Error(),
 						Role:        role.Name,
 					})
+					toolFailCount[tc.Function.Name]++
+					lastToolError[tc.Function.Name] = "参数解析失败: " + err.Error()
 					continue
 				}
 			}
@@ -146,12 +181,21 @@ func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMess
 			if result.Success {
 				summaryParts = append(summaryParts,
 					fmt.Sprintf("[%s] 成功: %s", tc.Function.Name, cleanMsg))
+				delete(toolFailCount, tc.Function.Name)
+				delete(lastToolError, tc.Function.Name)
 			} else {
 				evt.Error = truncateResult(stripANSI(result.Message), 200)
 				summaryParts = append(summaryParts,
 					fmt.Sprintf("[%s] 失败: %s", tc.Function.Name, cleanMsg))
+				toolFailCount[tc.Function.Name]++
+				lastToolError[tc.Function.Name] = evt.Error
 			}
 			events = append(events, evt)
+		}
+
+		// #M27 熔断检查: 当前轮处理完所有 tool 后, 如有任一 tool 累计失败 >= 阈值, 直接返回
+		if name, lastErr, breaking := shouldCircuitBreak(toolFailCount, lastToolError); breaking {
+			return formatCircuitBreakReply(name, lastErr), events, nil
 		}
 
 		// 将 tool 调用结果作为纯文本加入消息历史（避免 tool_calls 格式）
@@ -208,6 +252,9 @@ func (a *SingleAgent) RunWithRoleStream(ctx context.Context, role *AgentRole, us
 	tools := ConvertToolsForRole(a.tools, role.AllowedTools)
 
 	var events []ToolEvent
+	// #M27 熔断: 跨 iter 累计每个 tool 的失败次数 + 最近一次错误消息
+	toolFailCount := map[string]int{}
+	lastToolError := map[string]string{}
 
 	for i := 0; i < a.maxIter; i++ {
 		req := CompletionRequest{
@@ -261,6 +308,8 @@ func (a *SingleAgent) RunWithRoleStream(ctx context.Context, role *AgentRole, us
 				events = append(events, evt)
 				summaryParts = append(summaryParts,
 					fmt.Sprintf("[%s] 被拒绝: %s", tc.Function.Name, denyMsg))
+				toolFailCount[tc.Function.Name]++
+				lastToolError[tc.Function.Name] = denyMsg
 				continue
 			}
 
@@ -284,6 +333,8 @@ func (a *SingleAgent) RunWithRoleStream(ctx context.Context, role *AgentRole, us
 					events = append(events, evt)
 					summaryParts = append(summaryParts,
 						fmt.Sprintf("[%s] 参数解析失败: %s", tc.Function.Name, err.Error()))
+					toolFailCount[tc.Function.Name]++
+					lastToolError[tc.Function.Name] = "参数解析失败: " + err.Error()
 					continue
 				}
 			}
@@ -308,10 +359,19 @@ func (a *SingleAgent) RunWithRoleStream(ctx context.Context, role *AgentRole, us
 			if result.Success {
 				summaryParts = append(summaryParts,
 					fmt.Sprintf("[%s] 成功: %s", tc.Function.Name, cleanMsg))
+				delete(toolFailCount, tc.Function.Name)
+				delete(lastToolError, tc.Function.Name)
 			} else {
 				summaryParts = append(summaryParts,
 					fmt.Sprintf("[%s] 失败: %s", tc.Function.Name, cleanMsg))
+				toolFailCount[tc.Function.Name]++
+				lastToolError[tc.Function.Name] = evt.Error
 			}
+		}
+
+		// #M27 熔断检查: 当前轮处理完所有 tool 后, 如有任一 tool 累计失败 >= 阈值, 直接返回
+		if name, lastErr, breaking := shouldCircuitBreak(toolFailCount, lastToolError); breaking {
+			return formatCircuitBreakReply(name, lastErr), events, nil
 		}
 
 		// 把 tool 结果作为纯文本塞回 messages, 进入下一轮 (与 RunWithRole 保持一致的规避 tool_calls 校验策略)

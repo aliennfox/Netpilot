@@ -37,6 +37,11 @@ func (a *agentFakeAdapter) GetProxies() ([]engine.ProxyInfo, error) {
 func (a *agentFakeAdapter) SetActiveProxy(string, string) error { return nil }
 func (a *agentFakeAdapter) Reload() error                       { return nil }
 
+// TestLatency stub 返回 1ms ok, 让 PostHook 的 LatencyCheck 通过 (switch_node 成功路径会触发)
+func (a *agentFakeAdapter) TestLatency(string, string, time.Duration) (int, error) {
+	return 1, nil
+}
+
 // mockLLMServer 注入预设的 chat/completions 响应序列, 按调用顺序消耗
 type mockLLMServer struct {
 	mu        sync.Mutex
@@ -415,6 +420,167 @@ func TestConvertToolsForRole(t *testing.T) {
 }
 
 // --- Sanity: 错误注入 ---
+
+// --- #M27 熔断 ---
+
+// TestSingleAgent_CircuitBreakOnRepeatedToolFailure 同一 tool (假参数) 连续失败 2 次 → 熔断
+func TestSingleAgent_CircuitBreakOnRepeatedToolFailure(t *testing.T) {
+	// LLM 一直试 switch_node, 但参数缺 group / node 让 pipeline tool Execute 失败
+	// (走 toolSwitchNode 的 missing-param 错误路径)。 阈值是 2, 应在第 2 次失败后熔断。
+	failResp := makeToolCallResp("switch_node", `{"group":""}`)
+	agent, srv, _ := buildSingleAgent(t, []string{
+		failResp, // iter1: 失败 1
+		failResp, // iter2: 失败 2 → 熔断
+		failResp, // 不应被调到
+	})
+	defer srv.Close()
+
+	reply, events, err := agent.RunWithRole(context.Background(), testRole, "切节点", nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	// 熔断消息应含 tool 名 + 阈值
+	if !strings.Contains(reply, "switch_node") || !strings.Contains(reply, "2 次") {
+		t.Errorf("circuit-break reply: %q", reply)
+	}
+	if !strings.Contains(reply, "停止自动重试") {
+		t.Errorf("reply should explain circuit break, got %q", reply)
+	}
+	if len(events) != 2 {
+		t.Errorf("expect 2 failure events before break, got %d", len(events))
+	}
+	// LLM 只该被调 2 次 (iter1 + iter2), 第 3 个 mock 响应不应消耗
+	if srv.Calls() != 2 {
+		t.Errorf("LLM should be called 2 times before circuit break, got %d", srv.Calls())
+	}
+}
+
+// TestSingleAgent_CircuitBreakOnRepeatedRoleDeny 同名 tool 反复被 role 拒绝 → 熔断
+// (LLM 不识趣继续试 set_mode, 应在第 2 次后熔断, 不再让它继续 hallucinate)
+func TestSingleAgent_CircuitBreakOnRepeatedRoleDeny(t *testing.T) {
+	denyResp := makeToolCallResp("set_mode", `{"mode":"global"}`) // set_mode 不在 testRole 白名单
+	agent, srv, _ := buildSingleAgent(t, []string{
+		denyResp,
+		denyResp, // 第 2 次拒绝 → 熔断
+	})
+	defer srv.Close()
+
+	reply, events, err := agent.RunWithRole(context.Background(), testRole, "切全局", nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !strings.Contains(reply, "set_mode") {
+		t.Errorf("reply should mention denied tool: %q", reply)
+	}
+	if len(events) != 2 {
+		t.Errorf("expect 2 deny events, got %d", len(events))
+	}
+}
+
+// TestSingleAgent_NoBreakOnTransientFailure 偶发失败 (1 次) 不该熔断, LLM 还有机会改正
+func TestSingleAgent_NoBreakOnTransientFailure(t *testing.T) {
+	agent, srv, _ := buildSingleAgent(t, []string{
+		makeToolCallResp("switch_node", `{"group":""}`),  // iter1: 失败
+		makeFinalResp("好的, 我换法子, 不再试 switch_node。"), // iter2: 不再试同 tool, stop
+	})
+	defer srv.Close()
+
+	reply, events, err := agent.RunWithRole(context.Background(), testRole, "x", nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if strings.Contains(reply, "停止自动重试") {
+		t.Errorf("single failure should NOT trigger circuit break, got %q", reply)
+	}
+	if !strings.Contains(reply, "换法子") {
+		t.Errorf("should be the final reply: %q", reply)
+	}
+	if len(events) != 1 {
+		t.Errorf("only 1 tool was called, got %d events", len(events))
+	}
+}
+
+// TestSingleAgent_SuccessResetsFailureCount 同 tool 失败 → 成功 → 再失败 不熔断
+// (success 清零自己的 count, 第 3 次 失败时 count 重新从 1 起步, 不到阈值)
+func TestSingleAgent_SuccessResetsFailureCount(t *testing.T) {
+	agent, srv, _ := buildSingleAgent(t, []string{
+		makeToolCallResp("switch_node", `{"group":""}`),                     // iter1: switch_node 失败 1 (count=1)
+		makeToolCallResp("switch_node", `{"group":"proxy-group","node":"HK-1"}`), // iter2: switch_node 成功 (count 清零)
+		makeToolCallResp("switch_node", `{"group":""}`),                     // iter3: switch_node 又失败 (count=1, 不熔断)
+		makeFinalResp("尝试结束。"),                                          // iter4: stop
+	})
+	defer srv.Close()
+
+	reply, _, err := agent.RunWithRole(context.Background(), testRole, "x", nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if strings.Contains(reply, "停止自动重试") {
+		t.Errorf("success should reset count, fail+success+fail should NOT break: %q", reply)
+	}
+	if !strings.Contains(reply, "尝试结束") {
+		t.Errorf("should be the final stop reply: %q", reply)
+	}
+	// LLM 应该被调到 4 次 (3 个 tool round + 1 个 final)
+	if srv.Calls() != 4 {
+		t.Errorf("LLM should be called 4 times, got %d", srv.Calls())
+	}
+}
+
+// TestSingleAgent_PerToolIndependentCount 不同 tool 各自计数, 一个失败不影响另一个
+func TestSingleAgent_PerToolIndependentCount(t *testing.T) {
+	// switch_node 失败 1 次, get_node_pool 失败 1 次 (都不到阈值), 然后 stop
+	agent, srv, _ := buildSingleAgent(t, []string{
+		makeToolCallResp("switch_node", `{"group":""}`),    // iter1: switch_node 失败 1 次
+		makeToolCallResp("get_node_pool", `not-valid-json`), // iter2: get_node_pool 参数解析失败 1 次
+		makeFinalResp("ok"),                                  // iter3: stop
+	})
+	defer srv.Close()
+
+	reply, _, err := agent.RunWithRole(context.Background(), testRole, "x", nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if strings.Contains(reply, "停止自动重试") {
+		t.Errorf("different tools each failing once should NOT break, got %q", reply)
+	}
+}
+
+func TestShouldCircuitBreak(t *testing.T) {
+	// 无 entry → 不熔断
+	if _, _, b := shouldCircuitBreak(map[string]int{}, nil); b {
+		t.Error("empty map should not break")
+	}
+	// 1 次 → 不熔断
+	if _, _, b := shouldCircuitBreak(map[string]int{"x": 1}, map[string]string{}); b {
+		t.Error("count=1 should not break (threshold=2)")
+	}
+	// 阈值达到 → 熔断, 返回 tool 名
+	name, _, b := shouldCircuitBreak(map[string]int{"x": 2}, map[string]string{"x": "boom"})
+	if !b {
+		t.Error("count=2 should break")
+	}
+	if name != "x" {
+		t.Errorf("returned name: %q", name)
+	}
+	// 多个 tool 都超阈, 返回任一 (不强制顺序, 因为 map 迭代无序)
+	name, _, b = shouldCircuitBreak(map[string]int{"a": 2, "b": 3}, map[string]string{})
+	if !b || (name != "a" && name != "b") {
+		t.Errorf("multi-break: name=%q breaking=%v", name, b)
+	}
+}
+
+func TestFormatCircuitBreakReply(t *testing.T) {
+	got := formatCircuitBreakReply("x", "boom")
+	if !strings.Contains(got, "x") || !strings.Contains(got, "2 次") || !strings.Contains(got, "boom") {
+		t.Errorf("missing fields: %q", got)
+	}
+	// 空 lastErr → 简短版本
+	got = formatCircuitBreakReply("y", "")
+	if !strings.Contains(got, "y") || strings.Contains(got, "最后错误:") {
+		t.Errorf("empty lastErr should drop 最后错误 line: %q", got)
+	}
+}
 
 // TestSingleAgent_ErrorWrapping 各种错误路径都包 role 名
 func TestSingleAgent_ErrorWrapping(t *testing.T) {
