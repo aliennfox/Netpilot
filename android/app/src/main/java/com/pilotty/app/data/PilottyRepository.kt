@@ -90,6 +90,8 @@ object PilottyRepository {
     suspend fun recentLogs(n: Int = 0): List<LogEntryDto> = withContext(Dispatchers.IO) {
         json.decodeFromString(serializer(), PilottyCore.recentLogs(n))
     }
+    /** D3 Action Trace · 读 telemetry.jsonl tail, 跨重启可见 (内存 ring 在 Go 进程内才有效). */
+    suspend fun recentTelemetry(n: Int = 50): List<TelemetryEntryDto> = call { PilottyCore.recentTelemetry(n) }
     fun clearTrafficHistory() = PilottyCore.clearTrafficHistory()
 
     suspend fun snapshots(): List<SnapshotDto> = call { PilottyCore.snapshots() }

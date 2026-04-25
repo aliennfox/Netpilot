@@ -151,4 +151,40 @@
     <string name="settings_privacy_policy">隐私政策</string>
     <string name="settings_privacy_policy_url">https://aliennfox.github.io/Netpilot/privacy-policy.html</string>
     <string name="settings_privacy_policy_url_en">https://aliennfox.github.io/Netpilot/privacy-policy-en.html</string>
+
+    <!-- D3 Action Trace · tool 友好名 (Chat 气泡 + Settings 历史). 找不到映射回退 raw name -->
+    <string name="tool_name_set_per_app_vpn">Per-App VPN 配置</string>
+    <string name="tool_name_get_per_app_vpn">读 Per-App VPN</string>
+    <string name="tool_name_start_vpn">启动 VPN</string>
+    <string name="tool_name_stop_vpn">停止 VPN</string>
+    <string name="tool_name_vpn_status">查 VPN 状态</string>
+    <string name="tool_name_switch_node">切换节点</string>
+    <string name="tool_name_set_mode">切换分流模式</string>
+    <string name="tool_name_test_latency">测延迟</string>
+    <string name="tool_name_test_latency_all">全节点测速</string>
+    <string name="tool_name_get_node_pool">读节点池</string>
+    <string name="tool_name_get_connections">读活跃连接</string>
+    <string name="tool_name_get_logs">读运行日志</string>
+    <string name="tool_name_list_route_rules">读路由规则</string>
+    <string name="tool_name_patch_route_rule">改路由规则</string>
+    <string name="tool_name_remove_route_rule">删路由规则</string>
+    <string name="tool_name_create_chain">建链式代理</string>
+    <string name="tool_name_import_subscription">导入订阅</string>
+    <string name="tool_name_list_subscriptions">读订阅列表</string>
+    <string name="tool_name_update_subscription">刷订阅</string>
+    <string name="tool_name_remove_subscription">删订阅</string>
+    <string name="tool_name_get_dns_config">读 DNS 配置</string>
+
+    <!-- D3 Action Trace · running 指示 -->
+    <string name="chat_tool_running">…运行中</string>
+
+    <!-- D3 Settings · 最近 Agent 活动 -->
+    <string name="settings_agent_activity">最近 Agent 活动</string>
+    <string name="settings_agent_activity_subtitle">最近 N 次工具调用 · 来自磁盘 telemetry, 重启可见</string>
+    <string name="settings_agent_activity_empty">暂无 Agent 操作记录</string>
+    <string name="settings_agent_activity_more_format">还有 %1$d 条…</string>
+    <string name="settings_agent_activity_view_all">查看全部</string>
+    <string name="settings_agent_activity_dialog_title">最近 50 次 Agent 操作</string>
+    <string name="settings_agent_activity_close">关闭</string>
+    <string name="settings_agent_activity_rolledback">已回滚</string>
 </resources>

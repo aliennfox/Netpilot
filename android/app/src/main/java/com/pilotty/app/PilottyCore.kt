@@ -137,6 +137,7 @@ object PilottyCore {
     /** A3 掐断单条活动连接, id 来自 connections() 返回的 connection id。 */
     fun closeConnection(id: String): String       = require().closeConnection(id)
     fun recentLogs(n: Int): String                = require().recentLogs(n.toLong())
+    fun recentTelemetry(n: Int): String           = require().recentTelemetry(n.toLong())
     fun clearTrafficHistory()                     = require().clearTrafficHistory()
 
     // Phase 10-E-E WebDAV 同步

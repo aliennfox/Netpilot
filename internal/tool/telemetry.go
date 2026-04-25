@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -83,6 +84,41 @@ func (t *TelemetryLogger) Recent(n int) []TelemetryEntry {
 	out := make([]TelemetryEntry, n)
 	copy(out, t.recent[len(t.recent)-n:])
 	return out
+}
+
+// LoadRecentFromDisk 从 telemetry.jsonl 读最后 n 条 entry, 跨进程重启可见。
+// 与 in-memory ring 不同: ring 只保 100 条 + 进程内可见; 文件持续 append。
+// D3 Action Trace UI 用本方法在 Settings 重启后展示历史 Agent 操作。
+func (t *TelemetryLogger) LoadRecentFromDisk(n int) []TelemetryEntry {
+	if n <= 0 {
+		return nil
+	}
+	f, err := os.Open(t.logFile)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	ring := make([]TelemetryEntry, 0, n)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var e TelemetryEntry
+		if err := json.Unmarshal(line, &e); err != nil {
+			continue
+		}
+		if len(ring) < n {
+			ring = append(ring, e)
+		} else {
+			copy(ring, ring[1:])
+			ring[n-1] = e
+		}
+	}
+	return ring
 }
 
 func (t *TelemetryLogger) FormatRecent(n int) string {

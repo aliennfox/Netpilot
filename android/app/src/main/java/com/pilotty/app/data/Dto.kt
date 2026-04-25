@@ -277,3 +277,18 @@ data class SnapshotDto(
     val timestamp: String = "",
     @SerialName("active_proxies") val activeProxies: Map<String, String> = emptyMap(),
 )
+
+// D3 Action Trace · Recent Agent Activity (Settings section).
+// Go telemetry.jsonl entry 形态: {timestamp, tool, params, success, duration_ms, snapshot_id, rolled_back, error}
+// Kotlin 用 String 接 timestamp (Go marshal 成 RFC3339 字符串), UI 解析后格式化展示.
+@Serializable
+data class TelemetryEntryDto(
+    val timestamp: String = "",
+    val tool: String = "",
+    @SerialName("duration_ms") val durationMs: Long = 0L,
+    @SerialName("snapshot_id") val snapshotId: String = "",
+    @SerialName("rolled_back") val rolledBack: Boolean = false,
+    val success: Boolean = true,
+    val error: String = "",
+    // params 是动态 map, 当前 UI 不用, 留 String 占位避免 polymorphic deserialization 复杂度
+)

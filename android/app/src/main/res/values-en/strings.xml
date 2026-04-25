@@ -151,4 +151,40 @@
     <string name="settings_privacy_policy">Privacy Policy</string>
     <string name="settings_privacy_policy_url">https://aliennfox.github.io/Netpilot/privacy-policy-en.html</string>
     <string name="settings_privacy_policy_url_en">https://aliennfox.github.io/Netpilot/privacy-policy-en.html</string>
+
+    <!-- D3 Action Trace · tool friendly names (Chat bubble + Settings history). Falls back to raw name if no mapping -->
+    <string name="tool_name_set_per_app_vpn">Configure Per-App VPN</string>
+    <string name="tool_name_get_per_app_vpn">Read Per-App VPN</string>
+    <string name="tool_name_start_vpn">Start VPN</string>
+    <string name="tool_name_stop_vpn">Stop VPN</string>
+    <string name="tool_name_vpn_status">Check VPN status</string>
+    <string name="tool_name_switch_node">Switch node</string>
+    <string name="tool_name_set_mode">Change route mode</string>
+    <string name="tool_name_test_latency">Test latency</string>
+    <string name="tool_name_test_latency_all">Test all latencies</string>
+    <string name="tool_name_get_node_pool">Read node pool</string>
+    <string name="tool_name_get_connections">Read active connections</string>
+    <string name="tool_name_get_logs">Read runtime logs</string>
+    <string name="tool_name_list_route_rules">List route rules</string>
+    <string name="tool_name_patch_route_rule">Patch route rule</string>
+    <string name="tool_name_remove_route_rule">Delete route rule</string>
+    <string name="tool_name_create_chain">Create proxy chain</string>
+    <string name="tool_name_import_subscription">Import subscription</string>
+    <string name="tool_name_list_subscriptions">List subscriptions</string>
+    <string name="tool_name_update_subscription">Refresh subscription</string>
+    <string name="tool_name_remove_subscription">Remove subscription</string>
+    <string name="tool_name_get_dns_config">Read DNS config</string>
+
+    <!-- D3 Action Trace · running indicator -->
+    <string name="chat_tool_running">…running</string>
+
+    <!-- D3 Settings · Recent Agent Activity -->
+    <string name="settings_agent_activity">Recent Agent activity</string>
+    <string name="settings_agent_activity_subtitle">Last N tool calls · from disk telemetry, persists across restart</string>
+    <string name="settings_agent_activity_empty">No Agent activity yet</string>
+    <string name="settings_agent_activity_more_format">+ %1$d more…</string>
+    <string name="settings_agent_activity_view_all">View all</string>
+    <string name="settings_agent_activity_dialog_title">Last 50 Agent operations</string>
+    <string name="settings_agent_activity_close">Close</string>
+    <string name="settings_agent_activity_rolledback">rolled back</string>
 </resources>

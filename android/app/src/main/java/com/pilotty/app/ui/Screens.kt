@@ -310,17 +310,35 @@ private fun ToolCallTimeline(events: List<ToolEventDto>) {
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 events.forEach { e ->
+                    // running = 还没收到 ToolEnd: 占位事件, durationMs=0 + outputPreview/error 都空
+                    val running = e.durationMs == 0L && e.outputPreview.isEmpty() && e.error.isEmpty()
                     val ok = e.error.isEmpty()
-                    val badge = if (ok) "✓" else "✗"
-                    val badgeColor = if (ok) pc.accentInk else pc.error
+                    val badge = when {
+                        running -> "▸"
+                        ok -> "✓"
+                        else -> "✗"
+                    }
+                    val badgeColor = when {
+                        running -> pc.ink3
+                        ok -> pc.accentInk
+                        else -> pc.error
+                    }
+                    val displayName = friendlyToolName(e.name)
+                    val runningSuffix = if (running)
+                        " · " + androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.chat_tool_running)
+                    else ""
                     val detail = buildString {
-                        append(e.name)
+                        append(displayName)
                         if (e.role.isNotEmpty()) append(" · ").append(e.role)
-                        append(" · ").append(formatDurationMs(e.durationMs))
-                        val extra = if (ok) e.outputPreview else e.error
-                        if (extra.isNotEmpty()) {
-                            append("\n").append(extra.take(140))
-                            if (extra.length > 140) append("…")
+                        if (running) {
+                            append(runningSuffix)
+                        } else {
+                            append(" · ").append(formatDurationMs(e.durationMs))
+                            val extra = if (ok) e.outputPreview else e.error
+                            if (extra.isNotEmpty()) {
+                                append("\n").append(extra.take(140))
+                                if (extra.length > 140) append("…")
+                            }
                         }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

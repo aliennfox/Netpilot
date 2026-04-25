@@ -114,6 +114,9 @@ fun SettingsScreen(
             onNavigateConnections = onNavigateConnections,
         )
 
+        // D3 Action Trace · 最近 Agent 活动 (跨重启 telemetry.jsonl)
+        AgentActivitySection()
+
         // Phase 10-E-D: 配置备份 / 恢复
         BackupRestoreSection()
 

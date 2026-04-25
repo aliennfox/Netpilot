@@ -487,6 +487,26 @@ func (c *Client) RecentLogs(n int) string {
 	return observe.DefaultLogRing.RecentJSON(n)
 }
 
+// RecentTelemetry D3 Action Trace UI: 返回最近 N 条 Agent tool 调用历史 (JSON 数组)。
+// 数据源: telemetry.jsonl 文件 tail, 跨进程重启可见。 内存 ring 进程内才有效, 不适合 UI。
+// n <= 0 时取 50 条默认值; 上限 500 防 OOM。
+func (c *Client) RecentTelemetry(n int) string {
+	if n <= 0 {
+		n = 50
+	}
+	if n > 500 {
+		n = 500
+	}
+	if c.pipeline == nil {
+		return okJSON([]tool.TelemetryEntry{})
+	}
+	entries := c.pipeline.Telemetry().LoadRecentFromDisk(n)
+	if entries == nil {
+		entries = []tool.TelemetryEntry{}
+	}
+	return okJSON(entries)
+}
+
 // AgentReady 返回 LLM Agent 是否可用。
 func (c *Client) AgentReady() bool {
 	c.mu.Lock()
