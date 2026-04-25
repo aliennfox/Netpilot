@@ -351,19 +351,19 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - 已在 `internal/agent/orchestrator.go:110-117` 和 `:220` 改为 `o.pipeline.ManualRollback("")`, code 中有 `// #H2 修复` 注释
 - 遗留: 集成测试尚未加, 后续 go test 扩展时补 Verify→Rollback 路径测试
 
-**#H3 — 零 go test**(已大幅缓解, 6 包全覆盖)
-- 状态: 6 个核心包加单测 (2026-04-25 一波清,18 个 commit,~370 case):
-  - `scripts/smoke.sh` 端到端关键路径
+**#H3 — 零 go test**(已大幅缓解, 7 包覆盖)
+- 状态: 7 个核心包加单测 (2026-04-25, ~395 case):
+  - `scripts/smoke.sh` 端到端关键路径 (零参数跑通 step 1-8)
   - `internal/subscription` (~54 top-level / ~120 case): 12 协议 parser/converter + Clash YAML + sing-box JSON + fixture 矩阵 + Manager 端到端 (Add/Update/Remove/Import + httptest.Server)
   - `internal/overlay` (10 test): merger TUN inbound / endpoint 分派 / DNS 三模式 + 三层 fallback / outbound dedupe + selector inject / RuleSets+matchers / WG endpoint
   - `internal/router` (7 test ~50 case): intent_router 命中 + bypass / Per-App 误命中防护 / VPN 状态优先
   - `internal/tool` (5 _test.go ~50 case): pipeline 8 步集成 + SnapshotStore / PermissionManager / TelemetryLogger / overlay_tools
-  - `internal/agent` (~32 test / ~58 case): orchestrator (isVerificationFailed / formatFinalResponse / ClassifyTask / matchesRegionAction) + ConversationHistory 全行为面 + SingleAgent tool-use 循环 (mock LLM 用 httptest.Server, 7 大场景: stop/tool+stop/role-deny/malformed-args/maxIter/LLM-err/history) + isToolAllowed/stripANSI/truncateResult/formatToolCall 纯函数
+  - `internal/agent` (~33 test / ~60 case): orchestrator (isVerificationFailed / formatFinalResponse / ClassifyTask / matchesRegionAction) + ConversationHistory 全行为面 + SingleAgent tool-use 循环 (mock LLM 用 httptest.Server, 含 stream ctx-cancel + 熔断, 8 大场景) + isToolAllowed/stripANSI/truncateResult/formatToolCall 纯函数
   - `internal/local` (18 test): Engine 路由 + VPN 三件套全分支 (nil/running/becomes-ready/stop happy/stop err) + showStatus/showSnapshots/showTelemetry + AllActionsRegistered drift catcher
+  - `internal/engine` (~22 test): Clash API 封装 GetProxies / GetProxyGroup (含 path-escape CJK) / SetActiveProxy (PUT 200/204/4xx) / TestLatency / GetConnections (host fallback) / CloseConnection / GetTrafficStats / Reload no-config + #M14 baseURL 规范化 + #L2 IsRunning stub 锁定 + Unimplemented 契约
 - 测试驱动发现 bug: `isVerificationFailed` 中文 "不通过"/"未通过" 子串撞 "通过"
   passKeyword 导致 #H2 自动回滚漏触发 (commit d8289d2 修)
-- 剩余缺口: 仅 `RunWithRoleStream` (流式 SSE 路径) 无 mock test, 但走的是同一份 SingleAgent 编排逻辑 + `CompleteStream`, 非流式已覆盖, 边际价值低
-- 修复方向: 视情况补 stream test, 或继续做 #M27 (tool 重复失败熔断) / #M26 (Chat 流式取消传到 Go 侧) 等业务 bug
+- 剩余缺口: `mobile/` 包仍 0 case (gomobile 绑定层主要是胶水代码, 关键逻辑 #M26 ctx 取消已在 single_agent 层覆盖); `internal/failover` `internal/backup` `internal/template` 等小包暂未覆盖, 视后续业务变化优先级补
 
 ### 🟡 中优先级
 
