@@ -41,9 +41,11 @@ fi
 
 step "3. 列出节点并选择第一个"
 req GET /api/nodes > /tmp/np_nodes.json
-NODE=$(python3 -c "import json,sys; d=json.load(open('/tmp/np_nodes.json')); \
-  proxies=d.get('data',d).get('proxies',{}); \
-  cands=[n for n,v in proxies.items() if v.get('type') not in ('Selector','URLTest','Direct','Reject','Compatible')]; \
+# /api/nodes 返回 {success,data:[{tag,type,...}]}, 跳过 Direct/Reject/Selector/URLTest 等控制节点
+# 同时跳过 _agent: 前缀的衍生 outbound (chain proxy 由 create_chain 创建, 不是机场原始节点)
+NODE=$(python3 -c "import json; d=json.load(open('/tmp/np_nodes.json')); \
+  arr=d.get('data',[]) if isinstance(d.get('data'),list) else []; \
+  cands=[n.get('tag') for n in arr if n.get('type') not in ('Selector','URLTest','Direct','Reject','Compatible','Block','DNS','direct','dns','block') and not (n.get('tag') or '').startswith('_agent:')]; \
   print(cands[0] if cands else '')")
 [[ -n "$NODE" ]] || fail "无可用节点"
 ok "选中节点: $NODE"
