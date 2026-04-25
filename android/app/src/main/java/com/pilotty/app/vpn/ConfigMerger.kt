@@ -74,17 +74,28 @@ object ConfigMerger {
                 return configJson
             }
 
-            tun.remove("include_package")
-            tun.remove("exclude_package")
             when (snapshot.mode) {
                 PerAppVpnPrefs.Mode.Off -> {
-                    // 两个字段都已 remove, 完事
+                    // UI 为 Off 时完全 no-op: 尊重 Go overlay 的 tun_override (Agent 的 set_per_app_vpn tool 写的).
+                    // 若 overlay 也空, Go merger 不会写 include/exclude_package, merged.json 本就干净.
+                    // 若 overlay 有值, 保留让 Agent 路径生效 (UI 没主动覆盖).
                 }
-                PerAppVpnPrefs.Mode.Allow -> if (snapshot.packages.isNotEmpty()) {
-                    tun.put("include_package", JSONArray(snapshot.packages.toList()))
+                PerAppVpnPrefs.Mode.Allow -> {
+                    // UI 主动选择白名单 —— UI 权威, 清 overlay 可能留下的 deny 字段再写 include.
+                    tun.remove("exclude_package")
+                    if (snapshot.packages.isNotEmpty()) {
+                        tun.put("include_package", JSONArray(snapshot.packages.toList()))
+                    } else {
+                        tun.remove("include_package")
+                    }
                 }
-                PerAppVpnPrefs.Mode.Deny -> if (snapshot.packages.isNotEmpty()) {
-                    tun.put("exclude_package", JSONArray(snapshot.packages.toList()))
+                PerAppVpnPrefs.Mode.Deny -> {
+                    tun.remove("include_package")
+                    if (snapshot.packages.isNotEmpty()) {
+                        tun.put("exclude_package", JSONArray(snapshot.packages.toList()))
+                    } else {
+                        tun.remove("exclude_package")
+                    }
                 }
             }
             Log.i(TAG, "injectPerAppRules mode=${snapshot.mode} pkgs=${snapshot.packages.size}")
