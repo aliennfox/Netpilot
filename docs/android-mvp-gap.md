@@ -74,7 +74,7 @@
 - **工时**: fix+单测 ~ 1h 已花;其它 parser 单测补齐另计 2-3h
 - **用户影响**: 已消除"订阅 20 个节点只显示 3 个"的问题
 
-### M10. 协议解析器扩充 (TUIC v5 / AnyTLS / ShadowTLS / Hysteria v1 / VLESS Reality full)
+### M10. 协议解析器扩充 (TUIC v5 / AnyTLS / ShadowTLS / Hysteria v1 / VLESS Reality full) ✅ 已完成 (2026-04-22, Known Issue #M18)
 - **现状**: `internal/subscription/parser.go:182-198` 的 `parseLine` switch 只识别 6 个 scheme:`ss / trojan / vmess / vless / hysteria2|hy2 / wireguard|wg`。机场常见但我们**直接丢弃**的 URI 有:
   - `tuic://` —— TUIC v5,基于 QUIC,2024 年后新机场标配(Karing / Hiddify / NekoBox 全支持,NekoBox 位置:`~/References/nekobox/app/src/main/java/io/nekohasekai/sagernet/fmt/tuic/` + `TuicSettingsActivity.kt`)
   - `anytls://` —— AnyTLS,mRIYIlTv 等小众但上升中协议(NekoBox:`~/References/nekobox/app/src/main/java/moe/matsuri/nb4a/proxy/anytls/AnyTLSFmt.kt` + `AnyTLSBean.java`;sing-box 官方 outbound 支持)
@@ -95,7 +95,7 @@
 - **用户影响**: 不做 → 用户粘贴机场订阅,**每条不支持的 URI 都被 `parseLine` 静默 skip**,跟 #M17 表现一模一样("明明 20 节点只剩 8 个")。在 TUIC 普及的机场上更严重,可能从"丢 20%"变成"丢 70%"
 - **验证方式**: (a) 每个 parser 加表驱动测试;(b) 找 3 家已知机场做真机粘贴回归,比对"机场网页公布节点数"与"Pilotty 列表节点数"
 
-### M11. 订阅格式扩充 — Clash / Clash.Meta YAML
+### M11. 订阅格式扩充 — Clash / Clash.Meta YAML ✅ 已完成 (2026-04-22, Known Issue #M19)
 - **现状**: `internal/subscription/parser.go:127-154` 的 `ParseSubscription` **只接受 base64-encoded URI 列表**。`tryBase64Decode` 失败就返回"Base64 解码失败"。 我们当前连 `proxies:` 开头的纯 YAML 订阅(Clash 家族)都不尝试解析,更别说对应的节点 map → `NodeConfig`
 - **为什么关键**:国内机场生态是"Clash 优先,v2ray/sing-box 其次"。 很多机场**只**给 Clash 订阅链接,连 base64 URI 列表都不给。NekoBox `group/RawUpdater.kt:227-243` 的做法是:HTTP 拿原文后 `if (text.contains("proxies:"))` 走 SnakeYAML → 遍历 `yaml["proxies"]` 的 List<Map<String, Any?>>,逐个映射到内部 Bean。 Karing 的公开 feature list 把"支持 Clash/Clash.Meta 订阅"列在首位就是因为这是消费级用户的**入场门票**。粘贴进来被拒 = 用户流失
 - **需要**:
@@ -111,7 +111,7 @@
 - **工时**: 8-10h(依赖接入 + 映射 + 测试 + 真机回归)≈ 1 天
 - **用户影响**: 不做 → 10 个机场里可能 5 个粘贴进来立刻报"Base64 解码失败",完全无法使用。这是 **Karing 相对我们的最大 UX 护城河**,不抹平就别谈消费化
 
-### M12. sing-box 原生订阅格式(自家 JSON)回归验证
+### M12. sing-box 原生订阅格式(自家 JSON)回归验证 ✅ 已完成 (2026-04-22, Known Issue #M19)
 - **现状**: `ParseSubscription` 走 base64 → 按行拆 → 每行当 URI 解析。实际上 sing-box 官方订阅格式是"一个 JSON 顶层含 `outbounds` 数组",不是 URI 列表。我们从没验证过粘贴一个纯 sing-box JSON 订阅会发生什么(预期:base64 解码失败就退出)
 - **需要**:
   - [ ] `ParseSubscription` 格式探测里加分支:`HasPrefix("{")` 且能 Unmarshal 出 `{"outbounds":[...]}` → 走 sing-box native 路径
@@ -121,7 +121,7 @@
 - **工时**: 4-6h
 - **用户影响**: 不做 → 少数 sing-box 原生机场粘贴失败。比 Clash 影响小,但排到 must 是因为"我们是 sing-box 客户端"这件事用户有心理期待
 
-### M13. 协议 + 订阅格式真机回归矩阵
+### M13. 协议 + 订阅格式真机回归矩阵 ✅ 已完成 (2026-04-22, scripts/subscription-matrix-test.sh)
 - **现状**: M10-M12 做完后,缺系统回归:给定(3 家真实机场)× (2 种订阅格式 Clash / base64)× (支持的 10+ 种 outbound type),实际能跑通的组合有多少?目前只靠 `scripts/smoke.sh` 跑一条路径,盲点大
 - **需要**:
   - [ ] 在 `scripts/` 下加 `subscription-matrix-test.sh`:对每个脱敏 fixture 文件跑 `parse → convert → sing-box config validate → 启动 → ping` 全链

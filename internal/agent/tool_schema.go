@@ -182,6 +182,17 @@ var toolParameterSchemas = map[string]json.RawMessage{
 		"properties": {},
 		"required": []
 	}`),
+	"set_dns_config": json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"mode": {
+				"type": "string",
+				"enum": ["secure", "split", "local"],
+				"description": "secure=DoT via proxy (anti-leak); split=direct/proxy split; local=direct UDP only"
+			}
+		},
+		"required": ["mode"]
+	}`),
 	"start_vpn": json.RawMessage(`{
 		"type": "object",
 		"properties": {},

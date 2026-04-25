@@ -70,6 +70,7 @@ var (
 			"update_subscription",
 			"remove_subscription",
 			"get_dns_config",
+			"set_dns_config",
 			"set_per_app_vpn",
 			"get_per_app_vpn",
 		},

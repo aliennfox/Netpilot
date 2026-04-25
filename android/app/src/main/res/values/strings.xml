@@ -174,6 +174,7 @@
     <string name="tool_name_update_subscription">刷订阅</string>
     <string name="tool_name_remove_subscription">删订阅</string>
     <string name="tool_name_get_dns_config">读 DNS 配置</string>
+    <string name="tool_name_set_dns_config">改 DNS 模式</string>
 
     <!-- D3 Action Trace · running 指示 -->
     <string name="chat_tool_running">…运行中</string>

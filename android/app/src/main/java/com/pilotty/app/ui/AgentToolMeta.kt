@@ -28,6 +28,7 @@ private val toolNameResMap = mapOf(
     "update_subscription" to R.string.tool_name_update_subscription,
     "remove_subscription" to R.string.tool_name_remove_subscription,
     "get_dns_config" to R.string.tool_name_get_dns_config,
+    "set_dns_config" to R.string.tool_name_set_dns_config,
 )
 
 @Composable
