@@ -57,8 +57,8 @@ object PilottyCore {
      *
      * 内部用 [callbackFlow] 包装 gomobile [ChatStreamCallback]: Go 侧在 goroutine 里跑
      * orchestrator.RunStream, OnEvent/OnDone/OnError 三路 callback 直接 trySend 到 channel。
-     * awaitClose 时没有显式 cancel 路径 (Go 侧 RunStream 已发完事件就结束), 若 Flow 被上游
-     * 取消, 仍旧让 goroutine 跑完但丢弃后续事件。 stop-mid-stream 留给 v1.x。
+     * #M26: ChatStream 返回 ChatStreamHandle, awaitClose 时主动 Cancel() 中断 LLM SSE,
+     * 避免上游 Flow 取消 (新会话 / 切 tab) 后 Go 端继续白烧 token 10-15s。
      */
     fun chatStream(message: String): Flow<ChatStreamEvent> = callbackFlow {
         val client = require()
@@ -85,8 +85,8 @@ object PilottyCore {
                 close()
             }
         }
-        client.chatStream(message, cb)
-        awaitClose { /* Go goroutine 自行结束;不主动 cancel */ }
+        val handle = client.chatStream(message, cb)
+        awaitClose { handle?.cancel() }
     }
 
     private val streamJson = Json {

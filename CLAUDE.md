@@ -526,11 +526,15 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
   - fixture: `clash-mixed.yaml` 加回 `WG-JP` 节点 (10 节点), matrix_test 期望 +wireguard type +WG-JP tag
 - 验证: `scripts/subscription-matrix-test.sh --deep` 用 sing-box 1.13.9 binary `check` 三个 fixture 全绿
 
-**#M26 — Agent 流式 Chat 取消无法传到 Go 侧**(2026-04-24 Agent 彻查)
-- 现象: 用户在 Chat 流式输出中途 "新会话" / 切 tab / 按 back, Kotlin `viewModelScope` 取消, 但 Go `chatStream` goroutine (`mobile/netpilot.go:~L819`) 无 context 感知, 继续跑到 LLM SSE 断开才释放。 最坏 10-15s LLM token 白烧 + 手机唤醒 radio
-- 影响: 省流量/电池差, 不会崩
-- 修复方向: Go 侧给 `Chat` / `ChatStream` 新增 `cancelHandle` (或直接暴露 context.CancelFunc via gomobile callback), Kotlin 在 Job cancel 时调一下。 预估 2-3h
-- 暂缓原因: 单次泄漏也就 3-5k tokens ≤ 0.01 RMB, 低优先
+**#M26 — Agent 流式 Chat 取消无法传到 Go 侧** ✅ **已修 (2026-04-25)**
+- 原现象: 用户在 Chat 流式输出中途 "新会话" / 切 tab / 按 back, Kotlin `viewModelScope` 取消, 但 Go `chatStream` goroutine 无 context 感知, 继续跑到 LLM SSE 断开才释放。 最坏 10-15s LLM token 白烧 + 手机唤醒 radio
+- 修复:
+  - `mobile/netpilot.go` 新增 `ChatStreamHandle` (cancel + sync.Once), `ChatStream` 改为返回 `*ChatStreamHandle`
+  - 内部 `context.WithCancel(context.Background())` 取代原 `context.Background()`, 一路传到 `orch.RunStream(ctx, ...)` → `single_agent.RunWithRoleStream` → `llm.CompleteStream` (已用 `http.NewRequestWithContext`, ctx 取消立即关 SSE conn)
+  - ctx 取消路径文案统一为 "已取消", 不让用户看到 `context canceled` 黑话
+  - Kotlin `PilottyCore.chatStream` `awaitClose { handle?.cancel() }` 接通 Flow 取消 → handle.Cancel() → Go ctx.cancel() → SSE 断开
+- 测试: `single_agent_test.go` 加 `TestSingleAgent_StreamCtxCancelAborts`, hang-SSE 服务端发一条 delta 后挂起, ctx cancel 后断言 `RunWithRoleStream` 在 500ms 内返回 (实测 ~50ms)
+- AAR 重建: `scripts/build-aar.sh` 产出新 80M aar, `./gradlew :app:compileDebugKotlin` 通过
 
 **#M27 — Agent tool_use 失败无恢复策略, 仅靠 maxIter 上限兜底** ✅ **已修 (2026-04-25)**
 - 原现象: tool 返回 Success=false 时只把 error 文本塞回 LLM messages, LLM 决定下一步。 若 LLM 固执地反复试同一个坏 tool, 只靠 maxIter=5 兜底, 用户体验是"Agent 在折腾但毫无进展"

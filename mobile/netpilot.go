@@ -829,6 +829,25 @@ type ChatStreamCallback interface {
 	OnError(message string)
 }
 
+// ChatStreamHandle 是 ChatStream 的取消句柄, Kotlin 侧 Job cancel 时调 Cancel()
+// 中断 LLM SSE / tool 链路, 避免 #M26 的 token 白烧。 多次调用 Cancel() 安全 (sync.Once)。
+type ChatStreamHandle struct {
+	cancel context.CancelFunc
+	once   sync.Once
+}
+
+// Cancel 中断 ChatStream 后台 goroutine。 已结束的 stream 调用是 no-op。
+func (h *ChatStreamHandle) Cancel() {
+	if h == nil {
+		return
+	}
+	h.once.Do(func() {
+		if h.cancel != nil {
+			h.cancel()
+		}
+	})
+}
+
 // chatStreamBridge 把 Orchestrator 的 OrchestratorSink 事件 marshal 成 JSON, 转发给 Kotlin callback。
 type chatStreamBridge struct {
 	cb ChatStreamCallback
@@ -878,16 +897,24 @@ func (b chatStreamBridge) OnPhaseEnd(role, summary string) {
 // ChatStream 流式版 Chat。 内部起 goroutine 避免阻塞调用线程 (gomobile JNI 回调是
 // 阻塞调用, 调用方期望 ChatStream 本身立即返回)。 IntentRouter 命中场景没有 stream
 // 可用 → 直接 OnDone 给完整结果, Kotlin 侧 PendingBubble 短闪即换。
-func (c *Client) ChatStream(message string, cb ChatStreamCallback) {
+//
+// 返回 *ChatStreamHandle 用于 #M26 取消: Kotlin 侧 viewModelScope 取消时调 handle.Cancel(),
+// 中断 LLM SSE 长连接, 避免 token 白烧 + radio wakeup。
+func (c *Client) ChatStream(message string, cb ChatStreamCallback) *ChatStreamHandle {
+	handle := &ChatStreamHandle{}
 	if cb == nil {
-		return
+		return handle
 	}
 	if message == "" {
 		cb.OnError("message is required")
-		return
+		return handle
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	handle.cancel = cancel
+
 	go func() {
+		defer cancel() // 正常结束也要释放, 避免 leak
 		defer func() {
 			if r := recover(); r != nil {
 				cb.OnError(fmt.Sprintf("internal panic: %v", r))
@@ -922,8 +949,13 @@ func (c *Client) ChatStream(message string, cb ChatStreamCallback) {
 		}
 
 		bridge := chatStreamBridge{cb: cb}
-		result, err := orch.RunStream(context.Background(), message, c.history, bridge)
+		result, err := orch.RunStream(ctx, message, c.history, bridge)
 		if err != nil {
+			// ctx 取消和 LLM 真错都从这里出, 文案统一别让用户看到 "context canceled" 黑话
+			if ctx.Err() != nil {
+				cb.OnError("已取消")
+				return
+			}
 			cb.OnError(fmt.Sprintf("Agent 错误: %v", err))
 			return
 		}
@@ -943,6 +975,7 @@ func (c *Client) ChatStream(message string, cb ChatStreamCallback) {
 		})
 		cb.OnDone(string(finalJSON))
 	}()
+	return handle
 }
 
 // SetAPIKey 热重载 LLM apiKey。Kotlin 侧用户在 Settings 改 key 后立即调这个, 无需重启 App。

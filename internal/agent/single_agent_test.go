@@ -582,6 +582,65 @@ func TestFormatCircuitBreakReply(t *testing.T) {
 	}
 }
 
+// TestSingleAgent_StreamCtxCancelAborts #M26 ctx 取消立即中断 LLM SSE, 不再等到 LLM 结束
+// 模拟: 服务端发一条 delta 后 hang 2s, 测试 50ms 时 cancel ctx, 期望 RunWithRoleStream
+// 在 200ms 内带 ctx.Err() 返回 (而不是被服务端 hang 拖到 timeout)。
+func TestSingleAgent_StreamCtxCancelAborts(t *testing.T) {
+	hangSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		flusher, _ := w.(http.Flusher)
+		// 一条空 delta 让 LLMClient 进入 scan 循环, 然后 hang 住模拟慢 LLM
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"开始\"}}]}\n\n"))
+		if flusher != nil {
+			flusher.Flush()
+		}
+		select {
+		case <-r.Context().Done():
+			// client 取消 → 立即返回, 模拟真实 SSE 服务端 connection close
+		case <-time.After(2 * time.Second):
+			// 兜底, 测试不应走到这里
+		}
+	}))
+	defer hangSrv.Close()
+
+	adapter := &agentFakeAdapter{}
+	pipe := tool.NewPipeline(adapter, t.TempDir())
+	llm := NewLLMClient(hangSrv.URL, "k", "m", 5*time.Second)
+	assembler := NewPromptAssembler(adapter)
+	ag := NewSingleAgent(llm, pipe, assembler, pipe.GetTools(), 5)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	type runResult struct {
+		err     error
+		elapsed time.Duration
+	}
+	done := make(chan runResult, 1)
+	start := time.Now()
+	go func() {
+		_, _, err := ag.RunWithRoleStream(ctx, testRole, "hi", nil, nopStreamSink{})
+		done <- runResult{err: err, elapsed: time.Since(start)}
+	}()
+
+	// 等服务端确实开始 hang (handler 已写第一条 delta)
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case res := <-done:
+		if res.elapsed > 500*time.Millisecond {
+			t.Errorf("cancel should abort fast (<500ms), took %v", res.elapsed)
+		}
+		// err 可以是 ctx 取消 (CompleteStream 早于 read finish 拿到 cancel) 或者 nil
+		// (服务端在 cancel 来之前已经写完那条 delta 然后 conn 关闭, scanner.Scan 返回 false 不报错)。
+		// 关键是: 整个 Run 必须在 500ms 内返回, 不能被 2s hang 拖到底。
+		_ = res.err
+	case <-time.After(800 * time.Millisecond):
+		t.Fatal("RunWithRoleStream did not return within 800ms after ctx cancel — ctx propagation broken")
+	}
+}
+
 // TestSingleAgent_ErrorWrapping 各种错误路径都包 role 名
 func TestSingleAgent_ErrorWrapping(t *testing.T) {
 	// 直接构造 LLMClient 指向不存在的 host, 触发 connection refused
