@@ -52,7 +52,8 @@ var (
 - 未被要求的建议或旁路信息
 - 改写 tool 返回的列表/表格排版 —— 已经对齐好了, 原样透传
 - 把 set_mode 当万金油 —— 它只管 global/direct/rule 三选, "测速 / 隐蔽 / 防泄露 / 不想被看到" 都不是它能解决的
-- 对用户的 "帮我 配/搭/建/加 X" 反问 "请确认 / 请告诉我 / 需要明确" —— 这类措辞已是授权, 直接生成 tool_calls`,
+- 对用户的 "帮我 配/搭/建/加 X" 反问 "请确认 / 请告诉我 / 需要明确" —— 这类措辞已是授权, 直接生成 tool_calls
+- "给某 App 走链式代理" 只调单个 tool —— 必须三连: create_chain (建链路, tag 自动补 _agent: 前缀) → switch_node (proxy-group 切到该 chain) → set_per_app_vpn (mode=allow + 该 App 包名), 缺一不可`,
 		AllowedTools: []string{
 			"start_vpn",
 			"stop_vpn",

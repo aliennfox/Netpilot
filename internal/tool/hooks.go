@@ -2,6 +2,7 @@ package tool
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/foxnetpilot/netpilot/internal/engine"
@@ -125,9 +126,22 @@ func (h *LatencyCheckPostHook) Run(toolName string, params map[string]interface{
 		return HealthStatus{OK: true}
 	}
 
-	ms, err := adapter.TestLatency(node, "https://www.gstatic.com/generate_204", 3*time.Second)
+	// `_agent:` 前缀的链式代理 (create_chain 产出) 走多跳, 单次 generate_204
+	// 端到端时延天然 2-5s, 给 8s; 普通单跳节点维持 3s。
+	timeout := 3 * time.Second
+	isChain := strings.HasPrefix(node, "_agent:")
+	if isChain {
+		timeout = 8 * time.Second
+	}
+
+	ms, err := adapter.TestLatency(node, "https://www.gstatic.com/generate_204", timeout)
 	if err != nil || ms <= 0 {
-		reason := fmt.Sprintf("节点 %s 延迟测试超时", node)
+		var reason string
+		if isChain {
+			reason = fmt.Sprintf("链式代理 %s 延迟测试超时 (>%s); 多跳出口本身较慢, 也可能是其中一跳节点不通", node, timeout)
+		} else {
+			reason = fmt.Sprintf("节点 %s 延迟测试超时", node)
+		}
 		fmt.Printf("\033[31m[Post-Hook] 延迟检查: %s 超时 ✗\033[0m\n", node)
 		return HealthStatus{OK: false, Reason: reason}
 	}
