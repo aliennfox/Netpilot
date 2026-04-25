@@ -555,7 +555,7 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 ### 🟢 轻微
 
 - **#L1** ✅ 已修(2026-04-22 commit 8dc4576): `gofmt -w .` 清零了最后 5 个违规文件
-- **#L2** `SingBoxAdapter.IsRunning()` 永远返回 false
+- **#L2** `SingBoxAdapter.IsRunning()` 永远返回 false ⏭️ **跳过 (2026-04-25 查证)**: 整仓 grep 无任何 `adapter.IsRunning()` caller,真实工作流走 `VpnController.IsRunning()`(不同接口);`EngineAdapter.IsRunning` 是 Phase 1 留的 placeholder 方法,#M12 双轨决策后永远不会实现。删接口是 cascade 改动,价值低。当前状态:接受 stub 永久存在
 - **#L3** `history.go` 40 条上限、2000 字符摘要限制硬编码
 - **#L4** `classifier.go:78` 未分类请求默认走完整三角色流水线,成本未必合理
 - **#L5** `manager.go:337-383` 的 `containsAny`/`findSubstring`/`trimPrefix` 是重造标准库
