@@ -39,16 +39,17 @@ func TestLatencyCheck_NormalNodeUses3sTimeout(t *testing.T) {
 	}
 }
 
-// TestLatencyCheck_ChainNodeUses8sTimeout `_agent:` 前缀视为链式代理, timeout 8s
-func TestLatencyCheck_ChainNodeUses8sTimeout(t *testing.T) {
-	a := &hookFakeAdapter{returnMs: 4500}
+// TestLatencyCheck_ChainNodeUses12sTimeout `_agent:` 前缀视为链式代理, timeout 12s
+// (双跳 TLS 握手实测可达 8-12s, 8s 在 SJ-SJ chain 上挂过, 见 telemetry 00:41:53)
+func TestLatencyCheck_ChainNodeUses12sTimeout(t *testing.T) {
+	a := &hookFakeAdapter{returnMs: 9500}
 	h := &LatencyCheckPostHook{}
 	st := h.Run("switch_node", map[string]interface{}{"node": "_agent:chain-jp-hk"}, nil, a)
 	if !st.OK {
-		t.Errorf("4500ms within 8s should pass for chain, got reason=%q", st.Reason)
+		t.Errorf("9500ms within 12s should pass for chain, got reason=%q", st.Reason)
 	}
-	if a.gotTimeout != 8*time.Second {
-		t.Errorf("chain timeout should be 8s, got %v", a.gotTimeout)
+	if a.gotTimeout != 12*time.Second {
+		t.Errorf("chain timeout should be 12s, got %v", a.gotTimeout)
 	}
 }
 
@@ -63,8 +64,8 @@ func TestLatencyCheck_ChainTimeoutHasFriendlyReason(t *testing.T) {
 	if !strings.Contains(st.Reason, "链式代理") {
 		t.Errorf("chain-specific reason missing: %q", st.Reason)
 	}
-	if !strings.Contains(st.Reason, "8s") {
-		t.Errorf("reason should mention 8s threshold: %q", st.Reason)
+	if !strings.Contains(st.Reason, "12s") {
+		t.Errorf("reason should mention 12s threshold: %q", st.Reason)
 	}
 }
 

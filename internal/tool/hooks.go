@@ -127,11 +127,12 @@ func (h *LatencyCheckPostHook) Run(toolName string, params map[string]interface{
 	}
 
 	// `_agent:` 前缀的链式代理 (create_chain 产出) 走多跳, 单次 generate_204
-	// 端到端时延天然 2-5s, 给 8s; 普通单跳节点维持 3s。
+	// 端到端实测 8-12s 都正常 (双跳 TLS 握手 + chain detour 串行); 给 12s。
+	// 普通单跳节点维持 3s。
 	timeout := 3 * time.Second
 	isChain := strings.HasPrefix(node, "_agent:")
 	if isChain {
-		timeout = 8 * time.Second
+		timeout = 12 * time.Second
 	}
 
 	ms, err := adapter.TestLatency(node, "https://www.gstatic.com/generate_204", timeout)
