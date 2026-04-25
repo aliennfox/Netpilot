@@ -467,3 +467,206 @@ func TestMergeTunInbound(t *testing.T) {
 		}
 	})
 }
+
+// TestDefaultDNSConfig 锁三种 DNS 模式的关键差异 (final 服务器 + rules)。
+// 这层是 set_dns_config Agent tool 的核心契约: secure→全代理 / split→直连走本地 / local→全本地。
+func TestDefaultDNSConfig(t *testing.T) {
+	tests := []struct {
+		mode      string
+		wantFinal string
+		wantRules int
+	}{
+		{"secure", "proxy-dns", 0},
+		{"split", "proxy-dns", 1},
+		{"local", "direct-dns", 0},
+		{"unknown-falls-back", "proxy-dns", 0}, // default branch == secure
+	}
+	for _, tc := range tests {
+		t.Run(tc.mode, func(t *testing.T) {
+			cfg := DefaultDNSConfig(tc.mode)
+			if cfg.Final != tc.wantFinal {
+				t.Errorf("final: want %q got %q", tc.wantFinal, cfg.Final)
+			}
+			if len(cfg.Rules) != tc.wantRules {
+				t.Errorf("rules count: want %d got %d (rules=%+v)", tc.wantRules, len(cfg.Rules), cfg.Rules)
+			}
+			if len(cfg.Servers) != 3 {
+				t.Errorf("expect 3 standard servers (proxy-dns/direct-dns/local-dns), got %d", len(cfg.Servers))
+			}
+			if cfg.Strategy != "prefer_ipv4" {
+				t.Errorf("strategy: want prefer_ipv4 got %q", cfg.Strategy)
+			}
+		})
+	}
+}
+
+// TestMergeDNS_ThreeLayerFallback 锁 mergeDNS 的优先级:
+//
+//	overlay.DNS != nil  ───→ 用 overlay
+//	overlay.DNS == nil 且 base.dns 已有 ───→ 不动 base
+//	两边都没 ───→ 注入默认 secure
+func TestMergeDNS_ThreeLayerFallback(t *testing.T) {
+	t.Run("overlay wins over base", func(t *testing.T) {
+		cfg := map[string]interface{}{
+			"dns": map[string]interface{}{
+				"servers": []interface{}{map[string]interface{}{"tag": "base-dns", "type": "udp", "server": "1.1.1.1"}},
+				"final":   "base-dns",
+			},
+		}
+		overlayDNS := &DNSConfig{
+			Servers: []DNSServer{{Type: "tls", Tag: "overlay-proxy-dns", Server: "8.8.8.8", ServerPort: 853, Detour: "proxy-group"}},
+			Final:   "overlay-proxy-dns",
+		}
+		mergeDNS(cfg, overlayDNS)
+		dns, _ := cfg["dns"].(map[string]interface{})
+		if dns["final"] != "overlay-proxy-dns" {
+			t.Errorf("overlay should win, got final=%v", dns["final"])
+		}
+	})
+
+	t.Run("no overlay keeps base dns intact", func(t *testing.T) {
+		baseFinal := "base-dns"
+		cfg := map[string]interface{}{
+			"dns": map[string]interface{}{
+				"servers": []interface{}{map[string]interface{}{"tag": "base-dns", "type": "udp", "server": "1.1.1.1"}},
+				"final":   baseFinal,
+			},
+		}
+		mergeDNS(cfg, nil)
+		dns, _ := cfg["dns"].(map[string]interface{})
+		if dns["final"] != baseFinal {
+			t.Errorf("base dns should be preserved, got final=%v", dns["final"])
+		}
+	})
+
+	t.Run("both missing injects default secure", func(t *testing.T) {
+		cfg := map[string]interface{}{}
+		mergeDNS(cfg, nil)
+		dns, ok := cfg["dns"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected dns block injected, got cfg=%+v", cfg)
+		}
+		if dns["final"] != "proxy-dns" {
+			t.Errorf("default mode is secure (final=proxy-dns), got %v", dns["final"])
+		}
+		// ensureDefaultDomainResolver 副作用:route.default_domain_resolver
+		route, _ := cfg["route"].(map[string]interface{})
+		if route == nil || route["default_domain_resolver"] != "local-dns" {
+			t.Errorf("default_domain_resolver should be local-dns, got route=%+v", route)
+		}
+	})
+}
+
+// TestMergeOutbounds_DedupAndSelectorInject 锁两条不变量:
+//  1. 同 tag 的 outbound 不重复添加 (overlay 多次写入或 base 已有同 tag 时)
+//  2. 新 tag 自动注入到 selector.outbounds 列表里 (#M6 关心的"动态 selector 成员"语义)
+func TestMergeOutbounds_DedupAndSelectorInject(t *testing.T) {
+	cfg := map[string]interface{}{
+		"outbounds": []interface{}{
+			map[string]interface{}{"type": "selector", "tag": "proxy-group", "outbounds": []interface{}{"direct-out"}},
+			map[string]interface{}{"type": "direct", "tag": "direct-out"},
+			map[string]interface{}{"type": "shadowsocks", "tag": "HK-1", "server": "old.example.com", "server_port": 443, "method": "aes-256-gcm", "password": "old"},
+		},
+	}
+
+	mergeOutbounds(cfg, []map[string]interface{}{
+		// 同 tag HK-1 应被去重 (保留 base 的 old.example.com 版本, 不被 overlay 的 new.example.com 覆盖)
+		{"type": "shadowsocks", "tag": "HK-1", "server": "new.example.com", "server_port": 443, "password": "new"},
+		// 新 tag 应入 outbounds + selector.outbounds
+		{"type": "vmess", "tag": "JP-1", "server": "jp.example.com", "server_port": 443, "uuid": "u"},
+	})
+
+	outs, _ := cfg["outbounds"].([]interface{})
+
+	// 不变量 1: HK-1 只出现 1 次
+	hk1Count := 0
+	var hk1Server string
+	for _, ob := range outs {
+		m, _ := ob.(map[string]interface{})
+		if m["tag"] == "HK-1" {
+			hk1Count++
+			hk1Server, _ = m["server"].(string)
+		}
+	}
+	if hk1Count != 1 {
+		t.Errorf("HK-1 should appear once, got %d times", hk1Count)
+	}
+	if hk1Server != "old.example.com" {
+		t.Errorf("dedupe should keep base version (server=old.example.com), got %q", hk1Server)
+	}
+
+	// 不变量 2: JP-1 加入了 outbounds, 同时进了 selector.outbounds
+	jp1Found := false
+	var selectorMembers []interface{}
+	for _, ob := range outs {
+		m, _ := ob.(map[string]interface{})
+		if m["tag"] == "JP-1" {
+			jp1Found = true
+		}
+		if m["type"] == "selector" {
+			selectorMembers, _ = m["outbounds"].([]interface{})
+		}
+	}
+	if !jp1Found {
+		t.Errorf("JP-1 should be in outbounds: %+v", outs)
+	}
+	hasJP := false
+	for _, m := range selectorMembers {
+		if m == "JP-1" {
+			hasJP = true
+			break
+		}
+	}
+	if !hasJP {
+		t.Errorf("JP-1 should auto-inject into selector.outbounds, got %+v", selectorMembers)
+	}
+
+	// HK-1 因为已存在, 不应再次进 selector (避免重复)
+	hk1InSelectorCount := 0
+	for _, m := range selectorMembers {
+		if m == "HK-1" {
+			hk1InSelectorCount++
+		}
+	}
+	if hk1InSelectorCount > 1 {
+		t.Errorf("HK-1 should not be added to selector again, got %d", hk1InSelectorCount)
+	}
+}
+
+// TestMergeConfigs_EmptyOverlayStillInjectsDNS 锁 line 23-29 的边界:
+// overlay 完全为空 (RouteRules / Outbounds / DNS / TunOverride 都是 zero value),
+// 应该走 early return 分支, 但仍然要注入默认 DNS (因为 base 没 dns)。
+func TestMergeConfigs_EmptyOverlayStillInjectsDNS(t *testing.T) {
+	basePath := writeBaseConfig(t) // base 没 dns
+	merged, err := MergeConfigs(basePath, &OverlayData{})
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(merged, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	dns, ok := got["dns"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("empty overlay should still inject default dns, got %+v", got)
+	}
+	if dns["final"] != "proxy-dns" {
+		t.Errorf("default mode is secure, want final=proxy-dns got %v", dns["final"])
+	}
+}
+
+// TestMergeConfigs_NilOverlayInjectsDefaultDNS 锁: overlay 传 nil 也要兜底注入。
+func TestMergeConfigs_NilOverlayInjectsDefaultDNS(t *testing.T) {
+	basePath := writeBaseConfig(t)
+	merged, err := MergeConfigs(basePath, nil)
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(merged, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := got["dns"]; !ok {
+		t.Fatalf("nil overlay should still inject default dns, got %+v", got)
+	}
+}
