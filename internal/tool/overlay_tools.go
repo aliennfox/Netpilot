@@ -78,11 +78,19 @@ func RegisterOverlayTools(ov *overlay.ConfigOverlay) map[string]*ToolDef {
 func toolCreateChain(ov *overlay.ConfigOverlay) *ToolDef {
 	return &ToolDef{
 		Name:        "create_chain",
-		Description: "Create a chained proxy: traffic flows through nodes in order (entry → ... → exit). The exit node is exposed as a new outbound tag for routing.",
+		Description: "Create a chained proxy AND auto-activate it on proxy-group selector (so traffic immediately goes through the chain). Pass activate=false to only create without switching. Without activation chain is dead code — selector still points to old single-hop node.",
 		IsWriteOp:   true,
 		Execute: func(ctx context.Context, a engine.EngineAdapter, params map[string]interface{}) (*ToolResult, error) {
 			chainTag, _ := params["tag"].(string)
 			nodes := toStringSlice(params["nodes"])
+			// activate 默认 true: LLM 在多轮里常漏调 switch_node, 链路创了不切等于白创。
+			// 显式传 false 才跳过切换。
+			activate := true
+			if v, ok := params["activate"]; ok {
+				if b, ok2 := v.(bool); ok2 {
+					activate = b
+				}
+			}
 			if chainTag == "" {
 				return nil, fmt.Errorf("missing param: tag")
 			}
@@ -139,14 +147,28 @@ func toolCreateChain(ov *overlay.ConfigOverlay) *ToolDef {
 				return nil, fmt.Errorf("应用配置失败: %w", err)
 			}
 
+			// 默认自动激活: 链路创完直接切 selector, 避免 LLM 漏调 switch_node。
+			// 失败不视为致命 (链路本身已创建); 用 message 报告状态由用户决定下一步。
+			activated := false
+			activateNote := ""
+			if activate {
+				if err := a.SetActiveProxy("proxy-group", chainTag); err != nil {
+					activateNote = fmt.Sprintf("（链路已创建但 selector 切换失败: %v — 你可以手动 switch_node 或换活节点重组 chain）", err)
+				} else {
+					activated = true
+					activateNote = fmt.Sprintf("，proxy-group 已切到 %s", chainTag)
+				}
+			}
+
 			return &ToolResult{
 				Success: true,
-				Message: fmt.Sprintf("已创建链路 %s: %s（共 %d 跳，%d 个新 outbound）",
-					chainTag, strings.Join(nodes, " → "), len(nodes), len(newObs)),
+				Message: fmt.Sprintf("已创建链路 %s: %s（共 %d 跳，%d 个新 outbound）%s",
+					chainTag, strings.Join(nodes, " → "), len(nodes), len(newObs), activateNote),
 				Data: map[string]interface{}{
 					"chain_tag": chainTag,
 					"nodes":     nodes,
 					"hops":      len(nodes),
+					"activated": activated,
 				},
 			}, nil
 		},

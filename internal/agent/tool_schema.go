@@ -173,6 +173,10 @@ var toolParameterSchemas = map[string]json.RawMessage{
 				"items": {"type": "string"},
 				"description": "节点 tag 顺序列表 entry→exit，至少 2 个。例 [\"JP-1\",\"HK-1\"] 表示流量经 JP-1 → HK-1 → target。节点 tag 须与 get_node_pool 返回的 tag 一致",
 				"minItems": 2
+			},
+			"activate": {
+				"type": "boolean",
+				"description": "默认 true: 创建后立即把 proxy-group selector 切到该 chain 让流量真正经过。false 仅创建不切换（仅在用户明确要求 '只建不切' 时用）。绝大多数场景不要设为 false。"
 			}
 		},
 		"required": ["tag", "nodes"]
