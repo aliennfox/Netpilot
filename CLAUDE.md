@@ -535,14 +535,17 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - 兜底: `Temperature=0.2` 降低随机性 + 高频意图扩 local router 关键词绕开 LLM (见 `internal/router/keywords.go:vpn_status` 从 9 条扩到 33 条)
 - 换 provider 提醒: 若切 OpenAI 原生 / Anthropic / OpenRouter 需重测 `required` 是否工作 —— 可能重获强制调 tool 路径
 
-**#M29 — Agent 的"应用级规则"实际是域名猜测, 不是进程 / UID 分流**(2026-04-25 能力测试时发现)
-- 现象: 用户 Chat 说 "让 Chrome 走 日本-1" / "让微信走 香港-1", Agent 调 `patch_route_rule` 只写 `domain="google.com,chrome.com"` / `domain_suffix=".wechat.com"`, 没用 `process_name` 字段
-- 根因: LLM 理解 "应用级" = 猜测该应用典型域名, 不知道 sing-box 桌面支持 `process_name` 字段, 也不知道 Android 的真·应用分流走 Per-App VPN UI (#M20) 而非 route rule
-- 影响: Chrome 访问 github / twitter / youtube 等非 google 域名**不走**日本-1, 配置不完整 Agent 不自知 —— 用户以为搞定了,实际大部分流量还走默认节点
-- 修复方向:
-  - (a) 短期: `patch_route_rule` Description 加提示 "domain 匹配是域名级, 不是进程级; Android 要真按 App 分流请引导用户去 Settings 的 Per-App VPN"
-  - (b) 中期: 新增 `set_per_app_vpn` tool, 需 `mobile/netpilot.go` 暴露 → Kotlin `PerAppVpnPrefs` 写入接口, 1-2 天
-- 暂缓: "把 xxx.com 走 yyy 节点" 是大多数消费级需求, 够用到 v1 发布;Per-App VPN 作为独立 tool 留 v1.1
+**#M29 — Agent 的"应用级规则"实际是域名猜测, 不是进程 / UID 分流** ✅ **已修 (2026-04-25)**
+- 原现象: 用户 Chat 说 "让 Chrome 走 日本-1" / "让微信走 香港-1", Agent 调 `patch_route_rule` 只写 `domain="google.com,chrome.com"` / `domain_suffix=".wechat.com"`, 没用 `process_name` 字段
+- 根因: LLM 理解 "应用级" = 猜测该应用典型域名, 不知道 Android 的真·应用分流走 Per-App VPN (#M20) 而非 route rule
+- 修复:
+  - 新增 `set_per_app_vpn` / `get_per_app_vpn` tool (`internal/tool/perapp_tools.go`) 写 overlay.tun_override → merger 注入 tun inbound `include_package`/`exclude_package` (UID 级)
+  - Boris 否定约束改 Description: `set_per_app_vpn` "ONLY correct tool for App-X 走代理/直连"; `patch_route_rule` "Do NOT use for X App 走代理/直连 — that requires set_per_app_vpn"
+  - reload 链路: overlay.SetApplyHook → mobile.PlatformReloader → Kotlin PlatformReloaderImpl → PilottyVpnService.requestReload → libbox.startOrReloadService 真热加载
+- 真机验证 (Pixel 4a, 09211JEC204960):
+  - "set per-app vpn allow chrome" → set_per_app_vpn → overlay.tun_override + merged.json TUN include_package=[com.android.chrome] + libbox config reloaded (4647 bytes)
+  - "only allow Chrome through proxy" → LLM 判断为 Per-App 范畴, 不再误调 patch_route_rule
+- commit: 78353c4 (Per-App tool) · df8b7a7 (reload 链路) · 8b9b1a4 (ApplyHook 通用化覆盖 24 个写位置) · 276e6e9 (Description 偏差修)
 
 ### 🟢 轻微
 

@@ -264,6 +264,9 @@ fun HomeScreen(
 ) {
     val pc = LocalPilottyColors.current
     val ui by vm.state.collectAsStateWithLifecycle()
+    // tab 切回 Home 时 NavHost 重新 composition, 触发一次 refresh 拉最新 status / snapshots.
+    // 不依赖 ViewModel.init 单次跑 — 用户在 Chat 触发的新 snapshot 切回 Home 才能立即看到.
+    LaunchedEffect(Unit) { vm.refresh() }
     var input by remember { mutableStateOf("") }
     // 点发送 ↑ 跳 Chat 时需要主动收 IME — 否则 MainActivity 里 imeVisible=true 会隐藏
     // 底部 nav, 用户在 Chat 页看不到 Home tab, 回不来 (2026-04-24 用户反馈的 bug)

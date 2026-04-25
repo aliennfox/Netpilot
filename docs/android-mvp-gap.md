@@ -637,16 +637,16 @@ Pilotty 有 3 项**无任一竞品提供**的能力。 这 3 项**必须在 UI �
 - **真机验证**(Pixel 4a):Home 显示 `🛡 Safety · 3 snapshots` + `最近快照: snap-20260422-002 · 04-22 12:53` + `proxy-group=direct-out` → 点 Rollback → `pipeline.ManualRollback` 找到最新快照 → 尝试通过 Clash API 恢复 `proxy-group → RN-San-Jose-VLESS` → VPN 未启所以 API unreachable 错误正确透传至 UI 红色错误行(VPN 运行时会真回滚)
 - **延期**: "每条快照带撤销按钮" 的完整列表页面(当前只有最新快照一键);haptic feedback
 - **实际工时**: ~1h(Go mobile 20 行 + AAR 重建 + Dto/Repo wire + Home Card 重写)
+- **2026-04-25 升级 (commit efc8a23)**: `Snapshot.Tool` 字段 + `pipeline.Save(adapter, toolName)` + `SnapshotDto.tool` Kotlin 字段; AgentLogCard 优先 `friendlyToolName(snap.tool)` 显示中文友好名 ("切换节点" / "Per-App VPN 配置"),老 snapshot tool 空时回落 `inferActionFromSnapshot` 差分推断兼容
 
-### D3. Agent Action Trace — Chat 内联工具调用时间线
-- **定位**: Chat 消息不是"用户说 → Agent 说",是"用户说 → Agent 思考 → 调用 tool A(带 input/output) → 调用 tool B → 最终回答"。 每一步都可点开看细节
-- **现状**: Agent 后端(`internal/agent/`)已记录 tool call trace;Chat UI 只显示最终文本回答, 过程 spinning 几秒,用户以为是"慢"
-- **需要**:
-  - (a) Chat message DTO 增加 `toolCalls: List<ToolCallEvent>` 字段 (name / input / output / duration_ms)
-  - (b) Compose 渲染:Agent 回答上方 inline timeline, 每个 tool call 一个 chip "🔧 list_nodes (320ms)" 点开 bottom-sheet 看 input/output JSON
-  - (c) 错误 tool call 红色高亮 + 展示 stack
-- **工时**: 4-6h(含后端 trace 透传 + Compose 渲染)
-- **为什么是关键**: Claude Code / Cursor 的 tool-use visibility 是用户理解 LLM 在做什么的唯一手段。 我们不做 = 用户以为 Chat 是黑箱聊天机器人 = 和 ChatGPT 没区别
+### D3. Agent Action Trace — Chat 内联工具调用时间线 ✅ 已完成 (2026-04-25 真机验证)
+- **交付**:
+  - Chat 气泡内 timeline: ▸ 折叠头 + ✓/✗ badge + duration + 友好 tool 名 (`set_per_app_vpn` → `Per-App VPN 配置`),21 个 raw tool 名 zh+en 双语映射 (`AgentToolMeta.kt`)
+  - Running ▸ 指示: durationMs=0 + 无 output/error 时显示 "…运行中" 占位; ToolEnd 后转 ✓/✗
+  - Settings "最近 AGENT 活动" 卡片: 5 条预览 + Dialog 50 条 (跨重启磁盘 telemetry,`AgentActivitySection.kt`); friendlyToolName 共用
+  - mobile.Client.RecentTelemetry / TelemetryLogger.LoadRecentFromDisk: 读 telemetry.jsonl tail (内存 ring 进程内才有效, UI 跨重启走磁盘)
+- **真机验证 09211JEC204960**: Settings 卡片 5 条预览 friendly 名生效; Dialog 含跨日条目; Chat 历史气泡展开 timeline ✓ + 输出预览
+- **commit 4b367de**: 11 文件 +420/-8
 
 ### 11.1 总战略: UI 权重分配
 
