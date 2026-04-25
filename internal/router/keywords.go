@@ -84,10 +84,12 @@ var KeywordMap = map[string][]string{
 	},
 	"show_dns": {
 		"DNS状态", "DNS配置", "当前DNS",
+		"DNS 状态", "DNS 配置", "当前 DNS",
 		"dns status", "dns config",
 	},
 	"set_dns_mode": {
 		"DNS防泄露", "DNS模式", "DNS安全", "切换DNS",
+		"DNS 防泄露", "DNS 模式", "DNS 安全", "切换 DNS",
 		"dns leak", "dns protect", "dns mode",
 	},
 	"live_connections": {
