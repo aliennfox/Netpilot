@@ -262,7 +262,11 @@ func (o *Orchestrator) runConfigureOnly(ctx context.Context, userMessage string,
 	return Result{Reply: reply, Events: events}, nil
 }
 
-// isVerificationFailed 判断验证结果是否包含失败标记
+// isVerificationFailed 判断验证结果是否包含失败标记。
+//
+// 关键修补: 中文 "不通过" / "未通过" 含 "通过" 子串, 之前直接 Contains(lower, "通过")
+// 会让 "测试不通过" 这种纯失败文本被判 hasPass, 触发不到 #H2 自动回滚。
+// 改为先剥 fail keyword 命中再扫 pass keyword, 避免子串污染。
 func isVerificationFailed(verification string) bool {
 	lower := strings.ToLower(verification)
 	failKeywords := []string{
@@ -275,20 +279,28 @@ func isVerificationFailed(verification string) bool {
 		"verification passed", "passed",
 	}
 
-	hasPass := false
 	hasFail := false
 	for _, kw := range failKeywords {
 		if strings.Contains(lower, kw) {
 			hasFail = true
-		}
-	}
-	for _, kw := range passKeywords {
-		if strings.Contains(lower, kw) {
-			hasPass = true
+			break
 		}
 	}
 
-	// 如果同时包含通过和失败，以失败为准（保守策略）
+	// 算 hasPass 时先把 fail keyword 命中位置抠掉, 否则 "不通过" 里的 "通过" 会让 hasPass=true
+	passScan := lower
+	for _, kw := range failKeywords {
+		passScan = strings.ReplaceAll(passScan, kw, "")
+	}
+	hasPass := false
+	for _, kw := range passKeywords {
+		if strings.Contains(passScan, kw) {
+			hasPass = true
+			break
+		}
+	}
+
+	// 同时含通过和失败 (LLM 写"通过 X, 但 Y 失败" 这种) → 保守策略, 不触发回滚
 	if hasFail && !hasPass {
 		return true
 	}
