@@ -351,10 +351,13 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - 已在 `internal/agent/orchestrator.go:110-117` 和 `:220` 改为 `o.pipeline.ManualRollback("")`, code 中有 `// #H2 修复` 注释
 - 遗留: 集成测试尚未加, 后续 go test 扩展时补 Verify→Rollback 路径测试
 
-**#H3 — 零 go test**(已部分缓解,仍成立)
-- 状态: `scripts/smoke.sh` 已接通端到端关键路径(status/sub/switch/latency/proxy-ping/failover/backup),真机前回归有兜底
-- 剩余缺口: 全仓库仍无 `_test.go` 文件,订阅解析器(1648 行)格式兼容性回归无保护
-- 修复方向: 优先给 `subscription/parser.go`、`overlay/merger.go`、`tool/snapshot.go`、`router/intent_router.go` 写表驱动单测
+**#H3 — 零 go test**(已大幅缓解,仍成立)
+- 状态:
+  - `scripts/smoke.sh` 已接通端到端关键路径(status/sub/switch/latency/proxy-ping/failover/backup),真机前回归有兜底
+  - `internal/subscription/parser_test.go` 已覆盖 SS / Tuic / Hysteria1+2 / AnyTLS / ShadowTLS / VLess(Reality+normal) / Trojan / VMess / WireGuard / SSH / Naive / Socks / HTTP — 41 个 top-level Test, ~110 case (commit fa124ec, 2026-04-25)
+  - `internal/subscription/clash_test.go` + `matrix_test.go` Clash YAML / sing-box JSON / fixture 矩阵
+- 剩余缺口: `overlay/merger.go`、`tool/snapshot.go`、`tool/pipeline.go`、`router/intent_router.go`、`agent/orchestrator.go` 仍无单测
+- 修复方向: 接下来给 overlay/merger 写表驱动 (TUN inbound 注入 / endpoint 分派 / DNS 模式合并),其次 router intent 分发
 
 ### 🟡 中优先级
 
