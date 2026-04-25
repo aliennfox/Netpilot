@@ -67,6 +67,11 @@ type Client struct {
 	// 注入前调用走 clientVpnAdapter 的 nil-guard, 返回可读错误而非 panic。
 	vpnControl VpnControlCallback
 
+	// 平台 reload 通道: Agent 写完 overlay (Per-App / 路由规则 / DNS 配置) 后,
+	// 通过本 callback 让 Kotlin 触发 PilottyVpnService.requestReload, 让 sing-box 吃新配置。
+	// 注入前为 nil, 写 tool 仍能正常返回 success (overlay 已落盘), 只是不会热更新。
+	reloader PlatformReloader
+
 	// Phase 9 B1: 流量实时采样 ring buffer。 Client 后台 goroutine 每秒 poll GetTrafficStats
 	// 填入, UI 通过 TrafficHistory 拿近 N 秒数据画图。 VPN 未运行时 Clash API 不可达, 采样跳过。
 	traffic     *observe.TrafficRing
@@ -85,6 +90,18 @@ type VpnControlCallback interface {
 	RequestStart()
 	RequestStop()
 	IsRunning() bool
+}
+
+// PlatformReloader 是 Kotlin 侧实现的 gomobile reverse-binding 接口, 用于在 Go 侧
+// 写完 overlay/订阅后通知运行中的 sing-box 实例热重载 merged.json。
+//
+// Android 上 sing-box 不在 Go 进程, 而是 Kotlin 通过 libbox.CommandServer 持有,
+// Go 写完文件后必须显式通过本 callback 让 Kotlin 调 PilottyVpnService.requestReload。
+// VPN 未运行时 Kotlin 实现应 no-op (当前 reloadIfRunning 已有 nil-guard)。
+//
+// gomobile 生成的 Java 方法名: requestReload。
+type PlatformReloader interface {
+	RequestReload()
 }
 
 // clientVpnAdapter 把 Client.vpnControl 翻译成 tool.VpnController 接口, 加 nil-guard。
@@ -113,6 +130,22 @@ func (a *clientVpnAdapter) RequestStop() error {
 	}
 	cb.RequestStop()
 	return nil
+}
+
+// reloaderAdapter 把 Client.reloader 翻译成 tool.PlatformReloader 接口, 加 nil-guard。
+// 每次都读 Client.reloader (可被 Kotlin 运行时替换, 通常不会), 注入前为 no-op。
+type reloaderAdapter struct {
+	client *Client
+}
+
+func (a *reloaderAdapter) RequestReload() {
+	a.client.mu.Lock()
+	r := a.client.reloader
+	a.client.mu.Unlock()
+	if r == nil {
+		return
+	}
+	r.RequestReload()
 }
 
 func (a *clientVpnAdapter) IsRunning() bool {
@@ -162,7 +195,8 @@ func NewClient(dataDir, clashAPIAddr, apiKey string) *Client {
 	pipeline.RegisterExtraTools(tool.RegisterOverlayTools(ov))
 	pipeline.RegisterExtraTools(tool.RegisterSubscriptionTools(subMgr))
 	pipeline.RegisterExtraTools(tool.RegisterDNSTools(ov))
-	pipeline.RegisterExtraTools(tool.RegisterPerAppTools(ov))
+	// reloaderAdapter 注入要等 Client 构造后做; 这里先用占位, 下面 c := &Client{...} 之后替换。
+	// 用 indirection 间接持 *Client 字段, 避免循环依赖。
 	// vpn_tools 注册引用 Client, 但 Client 此处还没构造。 下面 history block 之后的 return
 	// 拿到 c := &Client{...} 再补注册, 不在这里做。
 
@@ -218,6 +252,11 @@ func NewClient(dataDir, clashAPIAddr, apiKey string) *Client {
 	// 会返回 "VPN 控制未接入" 错误 (nil-guard)。
 	vpnAdapter := &clientVpnAdapter{client: c}
 	pipeline.RegisterExtraTools(tool.RegisterVpnTools(vpnAdapter))
+	// Per-App VPN tools 接 reloaderAdapter, 让 Agent 写完 overlay 后通知 Kotlin 触发
+	// PilottyVpnService.requestReload, 否则 sing-box 进程吃旧配置, Agent 改了用户感知不到。
+	// Kotlin 在 PilottyApp.onCreate 里 SetPlatformReloader 注入真实实现; 注入前 noop。
+	reloadAdapter := &reloaderAdapter{client: c}
+	pipeline.RegisterExtraTools(tool.RegisterPerAppTools(ov, reloadAdapter))
 	// Phase 10-D: 同一个 VpnController 同时注入给 localEngine, 让"开启 vpn"
 	// 的 keyword 本地路由 (绕过 LLM) 可用。 关键:LLM API 自己需要 VPN 才能访问,
 	// 所以必须有本地闭环路径, 否则撞鸡生蛋死循环。
@@ -330,6 +369,16 @@ func (c *Client) SetVpnControl(cb VpnControlCallback) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.vpnControl = cb
+}
+
+// SetPlatformReloader 由平台层 (Android PilottyApp.onCreate) 在 NewClient 之后注入
+// reload 通道实现。 注入后 Agent 的 set_per_app_vpn (后续会扩展到 patch_route_rule 等
+// 写 overlay 的 tool) 写完会主动通知 Kotlin 触发 PilottyVpnService.requestReload。
+// 注入前调用走 reloaderAdapter 的 nil-guard, 静默 (不报错), tool 仍正常返回。
+func (c *Client) SetPlatformReloader(r PlatformReloader) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.reloader = r
 }
 
 // SetPlatformInterface 由平台层 (Android VpnService / iOS NEPacketTunnelProvider) 在

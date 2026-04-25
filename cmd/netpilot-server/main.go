@@ -148,7 +148,7 @@ func main() {
 	pipeline.RegisterExtraTools(tool.RegisterOverlayTools(ov))
 	pipeline.RegisterExtraTools(tool.RegisterSubscriptionTools(subMgr))
 	pipeline.RegisterExtraTools(tool.RegisterDNSTools(ov))
-	pipeline.RegisterExtraTools(tool.RegisterPerAppTools(ov))
+	pipeline.RegisterExtraTools(tool.RegisterPerAppTools(ov, tool.NoopReloader))
 
 	// 设置 adapter 配置路径
 	mergedPath := ov.MergedConfigPath()

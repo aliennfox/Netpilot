@@ -16,6 +16,7 @@ import kotlinx.serialization.json.Json
 import mobile.ChatStreamCallback
 import mobile.Client
 import mobile.Mobile
+import mobile.PlatformReloader
 import mobile.VpnControlCallback
 
 /**
@@ -105,6 +106,8 @@ object PilottyCore {
     fun setApiKey(key: String): String            = require().setAPIKey(key)
     /** Phase 8: Kotlin 在 PilottyApp.onCreate 注入 VpnControlImpl, 让 Agent tool 能控制 VPN。 */
     fun setVpnControl(cb: VpnControlCallback)     = require().setVpnControl(cb)
+    /** D3 reload 通道: Agent 写完 overlay 后通知 Kotlin 触发 PilottyVpnService.requestReload。 */
+    fun setPlatformReloader(r: PlatformReloader)  = require().setPlatformReloader(r)
     fun clearHistory()                            = require().clearHistory()
     fun subscriptions(): String                   = require().subscriptions()
     fun addSubscription(name: String, url: String): String = require().addSubscription(name, url)

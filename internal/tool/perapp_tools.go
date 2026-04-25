@@ -9,21 +9,40 @@ import (
 	"github.com/foxnetpilot/netpilot/internal/overlay"
 )
 
+// PlatformReloader 是平台 (Android VpnService / iOS NE) 提供的 reload 通道:
+// Agent 写完 overlay 后调一次, 让运行中的 sing-box 实例热加载 merged.json。
+// 在 CLI/Server 模式下注入空实现 (overlay.Apply 内部已通过 adapter.Reload pkill+exec 兜底);
+// 在 Android 上由 mobile.PlatformReloader 透传到 Kotlin VpnService。
+type PlatformReloader interface {
+	RequestReload()
+}
+
+// noopReloader 占位用, CLI / 测试场景注入它避免 nil-check 散布。
+type noopReloader struct{}
+
+func (noopReloader) RequestReload() {}
+
+// NoopReloader 给上层 wiring 用的导出值。
+var NoopReloader PlatformReloader = noopReloader{}
+
 // RegisterPerAppTools 注册 Android Per-App VPN 相关工具。
 // 语义: 写 overlay.json 的 tun_override, merger 合成 merged.json 时 patch tun inbound 的
 // include_package / exclude_package 字段。 在桌面 (mixed inbound) 环境静默无效, Android 环境生效。
 //
-// 注意: Android UI 的 PerAppVpnPrefs (SharedPreferences) 是独立数据源, ConfigMerger.injectPerAppRules
-// 在 Kotlin 侧合并时会覆盖 overlay 字段 (UI 优先)。 Agent 写 overlay 在 Android 上生效窗口是:
-// 下次 VPN reload 前, 以及 PerAppVpnPrefs.mode == Off 时 (此时 Kotlin 侧不会覆盖)。
-func RegisterPerAppTools(ov *overlay.ConfigOverlay) map[string]*ToolDef {
+// reloader 在 Agent 写完 ov.Apply 后被调用, 让 Kotlin VpnService 触发 sing-box reload —
+// 关键修复 (#H?): 没这个调用 sing-box 进程会一直吃旧 merged.json, Agent 改了用户感知不到。
+// 桌面/CLI 模式可传 NoopReloader (overlay.Apply 内部已 pkill+exec 兜底)。
+func RegisterPerAppTools(ov *overlay.ConfigOverlay, reloader PlatformReloader) map[string]*ToolDef {
+	if reloader == nil {
+		reloader = NoopReloader
+	}
 	return map[string]*ToolDef{
-		"set_per_app_vpn": toolSetPerAppVpn(ov),
+		"set_per_app_vpn": toolSetPerAppVpn(ov, reloader),
 		"get_per_app_vpn": toolGetPerAppVpn(ov),
 	}
 }
 
-func toolSetPerAppVpn(ov *overlay.ConfigOverlay) *ToolDef {
+func toolSetPerAppVpn(ov *overlay.ConfigOverlay, reloader PlatformReloader) *ToolDef {
 	return &ToolDef{
 		Name:        "set_per_app_vpn",
 		Description: "Set Android Per-App VPN filter on the TUN inbound. mode=allow: only listed packages go through proxy; mode=deny: listed packages bypass proxy (all others go through); mode=off: disable app filtering. Packages are Android package names like com.android.chrome.",
@@ -41,6 +60,9 @@ func toolSetPerAppVpn(ov *overlay.ConfigOverlay) *ToolDef {
 			if err := ov.Apply(a); err != nil {
 				return nil, fmt.Errorf("写 overlay 成功但 Apply 失败: %w", err)
 			}
+			// 通知平台让 sing-box 热加载 merged.json. Android 上是 PilottyVpnService.requestReload,
+			// CLI/Server 模式是 noop (overlay.Apply 已 pkill+exec). 注入失败 / VPN 未运行时 no-op.
+			reloader.RequestReload()
 			var msg string
 			switch mode {
 			case "off":

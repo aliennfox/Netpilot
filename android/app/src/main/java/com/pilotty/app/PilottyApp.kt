@@ -38,6 +38,8 @@ class PilottyApp : Application() {
         // Phase 8: 让 Agent 的 start_vpn/stop_vpn/vpn_status tools 能驱动 VpnService。
         // 必须在 PilottyCore.init 之后, 这样 client 已构造好, setVpnControl 才有 receiver。
         PilottyCore.setVpnControl(com.pilotty.app.vpn.VpnControlImpl)
+        // D3: Agent 写 overlay 后 Go 侧通过 reloader 让 PilottyVpnService 热加载 sing-box config.
+        PilottyCore.setPlatformReloader(com.pilotty.app.vpn.PlatformReloaderImpl)
     }
 
     /**
