@@ -16,6 +16,10 @@ type Snapshot struct {
 	ID            string            `json:"id"`
 	Timestamp     time.Time         `json:"timestamp"`
 	ActiveProxies map[string]string `json:"active_proxies"` // group → selected proxy
+	// Tool 触发本次自动 snapshot 的 tool 名 (e.g. set_per_app_vpn / switch_node).
+	// Manual snapshot / 0.x 历史 snapshot 可能为空, UI 需兜底显示 "snapshot".
+	// 用于 D2 Safety card 真实 tool 显示, 不再靠 active_proxies 差分推断 (那只能识别 switch_node).
+	Tool string `json:"tool,omitempty"`
 }
 
 type SnapshotStore struct {
@@ -35,7 +39,7 @@ func NewSnapshotStore(dataDir string) *SnapshotStore {
 	return s
 }
 
-func (s *SnapshotStore) Save(adapter engine.EngineAdapter) (string, error) {
+func (s *SnapshotStore) Save(adapter engine.EngineAdapter, tool string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -63,6 +67,7 @@ func (s *SnapshotStore) Save(adapter engine.EngineAdapter) (string, error) {
 		ID:            id,
 		Timestamp:     now,
 		ActiveProxies: activeProxies,
+		Tool:          tool,
 	}
 
 	s.snapshots = append(s.snapshots, snap)

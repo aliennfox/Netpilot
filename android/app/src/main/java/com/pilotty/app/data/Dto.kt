@@ -276,6 +276,8 @@ data class SnapshotDto(
     val id: String = "",
     val timestamp: String = "",
     @SerialName("active_proxies") val activeProxies: Map<String, String> = emptyMap(),
+    /** D2 Safety card: 触发本次 snapshot 的 tool 名. 空串表示老 snapshot 或 manual, UI 兜底. */
+    val tool: String = "",
 )
 
 // D3 Action Trace · Recent Agent Activity (Settings section).

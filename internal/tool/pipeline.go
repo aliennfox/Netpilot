@@ -86,9 +86,9 @@ func (p *ToolPipeline) Execute(ctx context.Context, toolName string, params map[
 			return &ToolResult{Success: false, Message: fmt.Sprintf("操作被拒绝: %s", decision.Reason)}
 		}
 
-		// Step 3: Auto snapshot before write
+		// Step 3: Auto snapshot before write (D2: tool 名记进 snapshot, Safety card 直接显示)
 		var err error
-		snapshotID, err = p.snapshots.Save(p.adapter)
+		snapshotID, err = p.snapshots.Save(p.adapter, toolName)
 		if err != nil {
 			fmt.Printf("\033[31m[Snapshot] 保存失败: %v\033[0m\n", err)
 		} else {
@@ -165,7 +165,7 @@ func (p *ToolPipeline) Execute(ctx context.Context, toolName string, params map[
 
 // ManualSnapshot saves a snapshot on user request.
 func (p *ToolPipeline) ManualSnapshot() *ToolResult {
-	id, err := p.snapshots.Save(p.adapter)
+	id, err := p.snapshots.Save(p.adapter, "manual")
 	if err != nil {
 		return &ToolResult{Success: false, Message: fmt.Sprintf("快照保存失败: %v", err)}
 	}

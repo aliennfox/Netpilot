@@ -933,7 +933,15 @@ private fun AgentLogCard(
         } else {
             recent.forEachIndexed { i, snap ->
                 val bg = if (i % 2 == 1) pc.stripe else androidx.compose.ui.graphics.Color.Transparent
-                val (tool, target) = inferActionFromSnapshot(snap, recent.getOrNull(i + 1))
+                // D2 升级: snap.tool 非空时直接显示友好名, 否则回落差分推断 (老 snapshot 无 tool 字段)
+                val (tool, target) = if (snap.tool.isNotEmpty()) {
+                    val friendlyName = com.pilotty.app.ui.friendlyToolName(snap.tool)
+                    val primary = snap.activeProxies["proxy-group"]
+                        ?: snap.activeProxies.values.firstOrNull().orEmpty()
+                    friendlyName to primary.ifEmpty { "—" }
+                } else {
+                    inferActionFromSnapshot(snap, recent.getOrNull(i + 1))
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
