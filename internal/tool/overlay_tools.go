@@ -163,7 +163,7 @@ func deepCopyJSON(m map[string]interface{}) map[string]interface{} {
 func toolPatchRouteRule(ov *overlay.ConfigOverlay) *ToolDef {
 	return &ToolDef{
 		Name:        "patch_route_rule",
-		Description: "Add a route rule to direct matching traffic to a specified outbound",
+		Description: "Add a route rule that matches traffic by domain/IP/keyword (NOT by App). Do NOT use for 'X App 走代理/直连' on Android — that requires set_per_app_vpn (UID-level). Use this only for domain-based routing like 'netflix.com 走 HK' or 'all CN IP direct'.",
 		IsWriteOp:   true,
 		Execute: func(ctx context.Context, a engine.EngineAdapter, params map[string]interface{}) (*ToolResult, error) {
 			tag, _ := params["tag"].(string)

@@ -25,7 +25,7 @@ func RegisterPerAppTools(ov *overlay.ConfigOverlay) map[string]*ToolDef {
 func toolSetPerAppVpn(ov *overlay.ConfigOverlay) *ToolDef {
 	return &ToolDef{
 		Name:        "set_per_app_vpn",
-		Description: "Set Android Per-App VPN filter on the TUN inbound. mode=allow: only listed packages go through proxy; mode=deny: listed packages bypass proxy (all others go through); mode=off: disable app filtering. Packages are Android package names like com.android.chrome.",
+		Description: "Set Android Per-App VPN filter on TUN inbound. The ONLY correct tool for 'App X 走代理/直连' / 'only X uses VPN' / 'exclude X from VPN' on Android — matches by Android package name (UID), not domain. mode=allow: only listed packages go through proxy; mode=deny: listed packages bypass; mode=off: disable. Use Android package names (com.android.chrome, com.google.android.youtube, com.tencent.mm).",
 		IsWriteOp:   true,
 		Execute: func(ctx context.Context, a engine.EngineAdapter, params map[string]interface{}) (*ToolResult, error) {
 			mode, _ := params["mode"].(string)
