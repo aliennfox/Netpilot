@@ -351,15 +351,18 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - 已在 `internal/agent/orchestrator.go:110-117` 和 `:220` 改为 `o.pipeline.ManualRollback("")`, code 中有 `// #H2 修复` 注释
 - 遗留: 集成测试尚未加, 后续 go test 扩展时补 Verify→Rollback 路径测试
 
-**#H3 — 零 go test**(已大幅缓解,仍成立)
-- 状态: 4 个核心包加单测 (2026-04-25 一波清:commits fa124ec / bca1ab2 / 6bd995f / dc0ff09 / 8b350d8 / 4eb2abb / 9a9fe32):
+**#H3 — 零 go test**(已大幅缓解, 仅剩 local/engine 路径)
+- 状态: 5 个核心包加单测 (2026-04-25 一波清,15 个 commit,~310 case):
   - `scripts/smoke.sh` 端到端关键路径
-  - `internal/subscription` (41 top-level / ~110 case): 12 协议 parser/converter + Clash YAML + sing-box JSON + fixture 矩阵
+  - `internal/subscription` (~54 top-level / ~120 case): 12 协议 parser/converter + Clash YAML + sing-box JSON + fixture 矩阵 + Manager 端到端 (Add/Update/Remove/Import + httptest.Server)
   - `internal/overlay` (10 test): merger TUN inbound / endpoint 分派 / DNS 三模式 + 三层 fallback / outbound dedupe + selector inject / RuleSets+matchers / WG endpoint
   - `internal/router` (7 test ~50 case): intent_router 命中 + bypass / Per-App 误命中防护 / VPN 状态优先
   - `internal/tool` (5 _test.go ~50 case): pipeline 8 步集成 + SnapshotStore / PermissionManager / TelemetryLogger / overlay_tools
-- 剩余缺口: `agent/orchestrator.go` (#H2 Verify→Rollback 集成 mock LLM 复杂); `subscription/manager.go`; `local/engine.go` (Action 处理)
-- 修复方向: agent/orchestrator 是下一个高 ROI, 但需 mock LLM client + EngineAdapter 全套, 工时较大
+  - `internal/agent` (5 test ~30 case): isVerificationFailed (#H2 触发条件) + formatFinalResponse + ClassifyTask 路由 + matchesRegionAction
+- 测试驱动发现 bug: `isVerificationFailed` 中文 "不通过"/"未通过" 子串撞 "通过"
+  passKeyword 导致 #H2 自动回滚漏触发 (commit d8289d2 修)
+- 剩余缺口: `local/engine.go` (Action 处理), `agent/single_agent.go` (LLM tool-call 闭环, 需 mock LLM)
+- 修复方向: local/engine 单测 (1.5h ⭐); single_agent mock LLM 是大工程 (3h+) 价值有限
 
 ### 🟡 中优先级
 
