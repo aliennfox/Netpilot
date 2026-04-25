@@ -17,11 +17,20 @@ import com.pilotty.app.MainActivity
 import com.pilotty.app.PilottyApp
 import com.pilotty.app.PilottyCore
 import com.pilotty.app.perapp.PerAppVpnPrefs
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import libbox.CommandServer
 import libbox.CommandServerHandler
 import libbox.Libbox
 import libbox.OverrideOptions
 import libbox.TunOptions
+import org.json.JSONObject
 import java.io.File
 
 /**
@@ -46,6 +55,10 @@ class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerH
 
     private var pfd: ParcelFileDescriptor? = null
     private var commandServer: CommandServer? = null
+
+    // M3(b): 5s 刷新通知(节点名 + ⬆⬇ 速率)。 IO 调度避免主线程, SupervisorJob 防一次失败拖死整组。
+    private val notifScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var notifRefreshJob: Job? = null
 
     // ──────────────── PilottyPlatformInterface (libbox 反向回调) ─────────────────
 
@@ -211,6 +224,7 @@ class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerH
             server.startOrReloadService(configJson, OverrideOptions())
             Log.i(TAG, "sing-box service started via libbox")
             PilottyCore.markTunRunning(true)
+            startNotifRefresh()
         } catch (t: Throwable) {
             Log.e(TAG, "startService failed", t)
             // M9: 启动过程中的异常 (config_invalid / libbox 起不来) 记 CONFIG_FAIL
@@ -221,6 +235,8 @@ class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerH
     }
 
     private fun stopService() {
+        notifRefreshJob?.cancel()
+        notifRefreshJob = null
         runCatching { commandServer?.closeService() }.onFailure { Log.w(TAG, "closeService", it) }
         runCatching { commandServer?.close() }.onFailure { Log.w(TAG, "commandServer.close", it) }
         commandServer = null
@@ -245,6 +261,7 @@ class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerH
             VpnStopReasonPrefs.get(this).record(VpnStopReasonPrefs.Reason.CRASH)
         }
         stopService()
+        notifScope.cancel()
         super.onDestroy()
     }
 
@@ -296,7 +313,7 @@ class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerH
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(snap: NotifSnap? = null): Notification {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val ch = NotificationChannel(
@@ -316,9 +333,20 @@ class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerH
             stopIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        // M3(b): 文案优先用动态 snap (节点 + 速率), 回退到 "VPN 已连接" / "连接中"
+        val text = when {
+            snap != null && snap.node.isNotBlank() -> getString(
+                com.pilotty.app.R.string.notif_text_running_format,
+                snap.node,
+                formatRate(snap.upRate),
+                formatRate(snap.downRate),
+            )
+            commandServer != null -> getString(com.pilotty.app.R.string.notif_text_connected)
+            else -> getString(com.pilotty.app.R.string.notif_text_connecting)
+        }
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(com.pilotty.app.R.string.app_name))
-            .setContentText(getString(com.pilotty.app.R.string.notif_text_connected))
+            .setContentText(text)
             // M3: 小图标用品牌 tile (盾 + 对勾, 单色, 适配通知栏 tint),
             // 取代 Android 内置 ic_lock_lock (和 Pilotty 品牌无关)
             .setSmallIcon(com.pilotty.app.R.drawable.ic_tile_pilotty)
@@ -330,6 +358,54 @@ class PilottyVpnService : VpnService(), PilottyPlatformInterface, CommandServerH
             )
             .setOngoing(true)
             .build()
+    }
+
+    // M3(b): 5s 周期刷新通知。 PilottyCore.status() 拿当前节点, trafficHistory(2) 拿最近一秒速率。
+    // 失败 (VPN 没起 / Core 未 init) 时安静跳过, 不滚雪球。
+    private fun startNotifRefresh() {
+        notifRefreshJob?.cancel()
+        notifRefreshJob = notifScope.launch {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            while (isActive) {
+                val snap = fetchNotifSnap()
+                if (snap != null) {
+                    runCatching { nm.notify(NOTIF_ID, buildNotification(snap)) }
+                        .onFailure { Log.w(TAG, "notif refresh", it) }
+                }
+                delay(5_000)
+            }
+        }
+    }
+
+    private fun fetchNotifSnap(): NotifSnap? = runCatching {
+        val statusEnvelope = JSONObject(PilottyCore.status())
+        if (!statusEnvelope.optBoolean("success", false)) return@runCatching null
+        val data = statusEnvelope.optJSONObject("data") ?: return@runCatching null
+        val node = data.optString("current_node", "")
+        // trafficHistory 返回的是数组裸 JSON (无 envelope), 取最后一条的速率字段
+        val histRaw = PilottyCore.trafficHistory(2)
+        val arr = runCatching { org.json.JSONArray(histRaw) }.getOrNull()
+        var up = 0L
+        var down = 0L
+        if (arr != null && arr.length() > 0) {
+            val pt = arr.getJSONObject(arr.length() - 1)
+            up = pt.optLong("up_rate", 0L)
+            down = pt.optLong("down_rate", 0L)
+        }
+        NotifSnap(node = node, upRate = up, downRate = down)
+    }.getOrNull()
+
+    private data class NotifSnap(val node: String, val upRate: Long, val downRate: Long)
+
+    // formatRate 把 bytes/s 渲成 "12 B/s" / "1.2 KB/s" / "3.4 MB/s"。 GB/s 极少见但仍支持。
+    private fun formatRate(bps: Long): String {
+        val abs = bps.coerceAtLeast(0)
+        return when {
+            abs < 1024 -> "$abs B/s"
+            abs < 1024L * 1024 -> "%.1f KB/s".format(abs / 1024.0)
+            abs < 1024L * 1024 * 1024 -> "%.1f MB/s".format(abs / 1048576.0)
+            else -> "%.1f GB/s".format(abs / 1073741824.0)
+        }
     }
 
     // ──────────────── 工具方法 ─────────────────

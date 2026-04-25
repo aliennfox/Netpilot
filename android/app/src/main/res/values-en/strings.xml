@@ -63,6 +63,9 @@
     <!-- Notification (VpnService foreground) -->
     <string name="notif_channel_name">Pilotty VPN</string>
     <string name="notif_text_connected">VPN connected</string>
+    <!-- M3(b): dynamic notif text — Node %1$s · ⬆ %2$s · ⬇ %3$s -->
+    <string name="notif_text_running_format">Node %1$s · ⬆ %2$s · ⬇ %3$s</string>
+    <string name="notif_text_connecting">VPN connecting</string>
     <string name="notif_action_stop">Stop</string>
 
     <!-- M9 · VPN unexpected-stop banner (Home) -->

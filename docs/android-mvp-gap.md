@@ -61,12 +61,12 @@
 - **工时**: 1-2h (设计 30min + 生成 adaptive assets 用 Android Studio Image Asset Studio + 替换 manifest)
 - **用户影响**: 不做 → 用户把图标当系统默认,找不到 App;发给朋友时第一眼就觉得是半成品
 
-### M3. 通知文案 + 通知图标
-- **现状**: `PilottyVpnService.kt:274-280` 通知 channel "Pilotty VPN", title "Pilotty", text "VPN 已连接" 写死。小图标用 `android.R.drawable.ic_lock_lock` (系统自带锁图标, 和品牌无关)
-- **需要**: (a) notification 小图标用 app monochrome 版本;(b) text 带当前节点名 + ⬆⬇ 最近分钟流量;(c) 通知 action 加"停止" 按钮,免得用户为了停 VPN 还要打开 App
-- **来源**: NekoBox `ServiceNotification.kt` 有完整示例;Android 8+ 前台服务通知可见性是合规要求
-- **工时**: 2h
-- **用户影响**: 不做 → 用户在通知栏看到"VPN 已连接" 但不知道节点是哪个,想停 VPN 必须掏 App
+### M3. 通知文案 + 通知图标 ✅ 已完成 (2026-04-25)
+- **(a) 小图标 monochrome**: `setSmallIcon(R.drawable.ic_tile_pilotty)` 替换 `ic_lock_lock`,通知栏 tint 自动适配
+- **(b) 动态文案**: `PilottyVpnService.kt` 新增 5s `notifRefreshJob` 协程, 调 `PilottyCore.status()` 拿 `current_node` + `trafficHistory(2)` 算 `up_rate/down_rate`,文案变 `节点 香港-1 · ⬆ 12.3 KB/s · ⬇ 3.4 MB/s` (i18n: zh + en);未连接时回退 `VPN 已连接` / `VPN 连接中`
+- **(c) 停止 action**: 通知 builder 加 `addAction(ic_menu_close_clear_cancel, "停止", stopPi)`,锁屏下拉直接停 VPN 无需进 App
+- **commit**: feat/(android) M3 — 节点 + ⬆⬇ 速率动态通知 + 停止按钮 + monochrome 图标
+- **format helper**: `formatRate(bps)` 自动 B/s → KB/s → MB/s → GB/s 切换
 
 ### M4. #M17 订阅解析器 SS URL 丢节点 ✅ 已修(2026-04-22 晚)
 - **状态**: fix 已落在 `internal/subscription/parser.go:209-291` —— 进 `parseHostPort` 之前先 `strings.Index(body, "?")` 剥 query,query 参数回填 `node.Extra` / `node.Network`。`parser_test.go` 已加 5 个 case(sip002 basic / `?type=tcp` 回归 / `?plugin=obfs-local;obfs=tls` / legacy all-base64 / malformed)覆盖 SIP002 三种 SS 格式

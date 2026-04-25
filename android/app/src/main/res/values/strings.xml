@@ -63,6 +63,9 @@
     <!-- Notification (VpnService 前台通知) -->
     <string name="notif_channel_name">Pilotty VPN</string>
     <string name="notif_text_connected">VPN 已连接</string>
+    <!-- M3(b): 通知动态文案 — 节点 %1$s · ⬆ %2$s · ⬇ %3$s -->
+    <string name="notif_text_running_format">节点 %1$s · ⬆ %2$s · ⬇ %3$s</string>
+    <string name="notif_text_connecting">VPN 连接中</string>
     <string name="notif_action_stop">停止</string>
 
     <!-- M9 · VPN 异常退出提示 (Home banner) -->
