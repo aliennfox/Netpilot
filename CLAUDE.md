@@ -352,12 +352,14 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - 遗留: 集成测试尚未加, 后续 go test 扩展时补 Verify→Rollback 路径测试
 
 **#H3 — 零 go test**(已大幅缓解,仍成立)
-- 状态:
-  - `scripts/smoke.sh` 已接通端到端关键路径(status/sub/switch/latency/proxy-ping/failover/backup),真机前回归有兜底
-  - `internal/subscription/parser_test.go` 已覆盖 SS / Tuic / Hysteria1+2 / AnyTLS / ShadowTLS / VLess(Reality+normal) / Trojan / VMess / WireGuard / SSH / Naive / Socks / HTTP — 41 个 top-level Test, ~110 case (commit fa124ec, 2026-04-25)
-  - `internal/subscription/clash_test.go` + `matrix_test.go` Clash YAML / sing-box JSON / fixture 矩阵
-- 剩余缺口: `overlay/merger.go`、`tool/snapshot.go`、`tool/pipeline.go`、`router/intent_router.go`、`agent/orchestrator.go` 仍无单测
-- 修复方向: 接下来给 overlay/merger 写表驱动 (TUN inbound 注入 / endpoint 分派 / DNS 模式合并),其次 router intent 分发
+- 状态: 4 个核心包加单测 (2026-04-25 一波清:commits fa124ec / bca1ab2 / 6bd995f / dc0ff09 / 8b350d8 / 4eb2abb / 9a9fe32):
+  - `scripts/smoke.sh` 端到端关键路径
+  - `internal/subscription` (41 top-level / ~110 case): 12 协议 parser/converter + Clash YAML + sing-box JSON + fixture 矩阵
+  - `internal/overlay` (10 test): merger TUN inbound / endpoint 分派 / DNS 三模式 + 三层 fallback / outbound dedupe + selector inject / RuleSets+matchers / WG endpoint
+  - `internal/router` (7 test ~50 case): intent_router 命中 + bypass / Per-App 误命中防护 / VPN 状态优先
+  - `internal/tool` (5 _test.go ~50 case): pipeline 8 步集成 + SnapshotStore / PermissionManager / TelemetryLogger / overlay_tools
+- 剩余缺口: `agent/orchestrator.go` (#H2 Verify→Rollback 集成 mock LLM 复杂); `subscription/manager.go`; `local/engine.go` (Action 处理)
+- 修复方向: agent/orchestrator 是下一个高 ROI, 但需 mock LLM client + EngineAdapter 全套, 工时较大
 
 ### 🟡 中优先级
 
