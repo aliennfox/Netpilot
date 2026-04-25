@@ -118,6 +118,12 @@ type ConfigOverlay struct {
 	mergedConfigPath string // data/merged.json（sing-box 实际用的）
 	data             OverlayData
 	mu               sync.RWMutex
+	// applyHook Apply 写完 merged.json + adapter.Reload 后调一次 (无错时).
+	// 用于 Android 模式 — adapter.Reload 在嵌入式 libbox 下是 noop, 必须靠平台层 (Kotlin
+	// PilottyVpnService) 触发 libbox.startOrReloadService. 调用方在 mobile binding 里
+	// 把 reloaderAdapter 包成本 hook 注入, 一次注入覆盖所有写 overlay 的 tool / 订阅 manager.
+	// nil 时不调; CLI/Server 模式 hook 为 nil, 走 adapter.Reload 的 pkill+exec 兜底.
+	applyHook func()
 }
 
 func NewConfigOverlay(baseConfigPath, dataDir string) *ConfigOverlay {
@@ -126,6 +132,14 @@ func NewConfigOverlay(baseConfigPath, dataDir string) *ConfigOverlay {
 		overlayPath:      filepath.Join(dataDir, "overlay.json"),
 		mergedConfigPath: filepath.Join(dataDir, "merged.json"),
 	}
+}
+
+// SetApplyHook 注入 Apply 成功后的回调 (Android 用于触发 PilottyVpnService.requestReload).
+// nil 等价不注入; 重复调用以最后一次为准. 线程安全 (Apply 与 hook 无并发竞争, 由 mu 保护).
+func (o *ConfigOverlay) SetApplyHook(h func()) {
+	o.mu.Lock()
+	o.applyHook = h
+	o.mu.Unlock()
 }
 
 // MergedConfigPath 返回合并后的配置文件路径
@@ -482,9 +496,18 @@ func (o *ConfigOverlay) Apply(adapter engine.EngineAdapter) error {
 		setter.SetConfigPath(absPath)
 	}
 
-	// 重载 sing-box
+	// 重载 sing-box (CLI: pkill+exec; Android 嵌入式: noop, 真 reload 走下面 applyHook)
 	if err := adapter.Reload(); err != nil {
 		return fmt.Errorf("重载 sing-box 失败: %w", err)
+	}
+	// 平台 hook (Android: PilottyVpnService.requestReload → libbox.startOrReloadService).
+	// 一处统一调, 让 patch_route_rule / create_chain / 订阅 CRUD / Per-App / DNS 等所有
+	// 写 overlay 路径都能在 Android 上热生效, 不需要每个 tool 单独接 reloader.
+	o.mu.RLock()
+	hook := o.applyHook
+	o.mu.RUnlock()
+	if hook != nil {
+		hook()
 	}
 	return nil
 }

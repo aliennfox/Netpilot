@@ -252,11 +252,12 @@ func NewClient(dataDir, clashAPIAddr, apiKey string) *Client {
 	// 会返回 "VPN 控制未接入" 错误 (nil-guard)。
 	vpnAdapter := &clientVpnAdapter{client: c}
 	pipeline.RegisterExtraTools(tool.RegisterVpnTools(vpnAdapter))
-	// Per-App VPN tools 接 reloaderAdapter, 让 Agent 写完 overlay 后通知 Kotlin 触发
-	// PilottyVpnService.requestReload, 否则 sing-box 进程吃旧配置, Agent 改了用户感知不到。
-	// Kotlin 在 PilottyApp.onCreate 里 SetPlatformReloader 注入真实实现; 注入前 noop。
+	pipeline.RegisterExtraTools(tool.RegisterPerAppTools(ov))
+	// 一处注入 reload hook, 覆盖所有写 overlay 的 tool / 订阅 manager 路径
+	// (patch_route_rule / create_chain / 订阅 CRUD / Per-App / DNS 等). Apply 后自动调.
+	// reloaderAdapter 持 *Client, 实际 reloader callback 在 SetPlatformReloader 注入前为 noop.
 	reloadAdapter := &reloaderAdapter{client: c}
-	pipeline.RegisterExtraTools(tool.RegisterPerAppTools(ov, reloadAdapter))
+	ov.SetApplyHook(reloadAdapter.RequestReload)
 	// Phase 10-D: 同一个 VpnController 同时注入给 localEngine, 让"开启 vpn"
 	// 的 keyword 本地路由 (绕过 LLM) 可用。 关键:LLM API 自己需要 VPN 才能访问,
 	// 所以必须有本地闭环路径, 否则撞鸡生蛋死循环。
