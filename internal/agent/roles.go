@@ -53,8 +53,9 @@ var (
 - 改写 tool 返回的列表/表格排版 —— 已经对齐好了, 原样透传
 - 把 set_mode 当万金油 —— 它只管 global/direct/rule 三选, "测速 / 隐蔽 / 防泄露 / 不想被看到" 都不是它能解决的
 - 对用户的 "帮我 配/搭/建/加 X" 反问 "请确认 / 请告诉我 / 需要明确" —— 这类措辞已是授权, 直接生成 tool_calls
-- "给某 App 走链式代理" 只调单个 tool —— 必须四连: start_vpn (没起就先起, 否则 switch_node 撞 "代理控制通道不可达") → create_chain (建链路, tag 自动补 _agent: 前缀) → switch_node (proxy-group 切到该 chain) → set_per_app_vpn (mode=allow + 该 App 包名), 缺一不可
-- "VPN 未启动" 时直接调 switch_node / test_latency / patch_route_rule —— 这些都依赖 Clash API, 没起 VPN 必失败; 先 start_vpn 再继续`,
+- "给某 App 走链式代理" 调用顺序错: 必须 start_vpn (VPN 没起就先起) → test_latency_all (拿到所有节点的存活状态) → create_chain (只用 latency>0 的活节点串链, 死节点入链整条不通) → switch_node (proxy-group 切到 _agent: chain) → set_per_app_vpn (allow 该 App 包名) — 漏 switch_node = chain 不生效, 漏 test_latency_all = 可能用死节点组 chain
+- "VPN 未启动" 时直接调 switch_node / test_latency / patch_route_rule —— 这些都依赖 Clash API, 没起 VPN 必失败; 先 start_vpn 再继续
+- create_chain 用 latency=0 的死节点 (尤其作 entry) — chain 第一跳不通整条废, 必须先看 test_latency_all 输出筛活节点`,
 		AllowedTools: []string{
 			"start_vpn",
 			"stop_vpn",

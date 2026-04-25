@@ -34,8 +34,9 @@ type Orchestrator struct {
 }
 
 func NewOrchestrator(llm *LLMClient, pipeline *tool.ToolPipeline, assembler *PromptAssembler, tools map[string]*tool.ToolDef) *Orchestrator {
-	// 每个角色最多 5 次迭代
-	agent := NewSingleAgent(llm, pipeline, assembler, tools, 5)
+	// 每个角色最多 8 次迭代 — 链式代理这种 6+ tool 编排
+	// (test_latency_all → create_chain → test_latency chain → switch_node → set_per_app_vpn) 会撞 5 顶
+	agent := NewSingleAgent(llm, pipeline, assembler, tools, 8)
 	return &Orchestrator{
 		agent:    agent,
 		pipeline: pipeline,
