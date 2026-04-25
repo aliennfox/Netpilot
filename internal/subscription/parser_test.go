@@ -2,6 +2,8 @@ package subscription
 
 import (
 	"encoding/base64"
+	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -991,5 +993,592 @@ func TestParseLine_UnsupportedSkipsGracefully(t *testing.T) {
 	}
 	if nodes[0].Type != "shadowsocks" || nodes[0].Name != "TestSS" {
 		t.Errorf("survivor node wrong: %+v", nodes[0])
+	}
+}
+
+// ============================================================================
+// Trojan
+// ============================================================================
+
+func TestParseTrojan(t *testing.T) {
+	tests := []struct {
+		name        string
+		uri         string
+		wantServer  string
+		wantPort    int
+		wantPwd     string
+		wantTLS     bool
+		wantSNI     string
+		wantNetwork string
+		wantPath    string
+		wantHost    string
+		wantNameHas string
+		wantErr     bool
+	}{
+		{
+			name:        "basic tls",
+			uri:         "trojan://pass123@trojan.example.com:443?sni=trojan.example.com#HK-Trojan",
+			wantServer:  "trojan.example.com",
+			wantPort:    443,
+			wantPwd:     "pass123",
+			wantTLS:     true,
+			wantSNI:     "trojan.example.com",
+			wantNameHas: "HK-Trojan",
+		},
+		{
+			name:        "websocket transport",
+			uri:         "trojan://pw@1.2.3.4:443?type=ws&host=cdn.example.com&path=%2Fws&sni=cdn.example.com#JP-WS",
+			wantServer:  "1.2.3.4",
+			wantPort:    443,
+			wantPwd:     "pw",
+			wantTLS:     true,
+			wantSNI:     "cdn.example.com",
+			wantNetwork: "ws",
+			wantHost:    "cdn.example.com",
+			wantNameHas: "JP-WS",
+		},
+		{
+			name:        "sni falls back to host when omitted",
+			uri:         "trojan://pw@5.6.7.8:443?type=ws&host=fallback.example.com#X",
+			wantServer:  "5.6.7.8",
+			wantPort:    443,
+			wantPwd:     "pw",
+			wantTLS:     true,
+			wantSNI:     "fallback.example.com",
+			wantNetwork: "ws",
+			wantHost:    "fallback.example.com",
+		},
+		{
+			name:    "missing @ should fail",
+			uri:     "trojan://no-at-here.example.com:443",
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseTrojan(tc.uri)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %+v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Server != tc.wantServer {
+				t.Errorf("server: want %q got %q", tc.wantServer, got.Server)
+			}
+			if got.Port != tc.wantPort {
+				t.Errorf("port: want %d got %d", tc.wantPort, got.Port)
+			}
+			if got.Password != tc.wantPwd {
+				t.Errorf("password: want %q got %q", tc.wantPwd, got.Password)
+			}
+			if got.TLS != tc.wantTLS {
+				t.Errorf("tls: want %v got %v", tc.wantTLS, got.TLS)
+			}
+			if tc.wantSNI != "" && got.SNI != tc.wantSNI {
+				t.Errorf("sni: want %q got %q", tc.wantSNI, got.SNI)
+			}
+			if tc.wantNetwork != "" && got.Network != tc.wantNetwork {
+				t.Errorf("network: want %q got %q", tc.wantNetwork, got.Network)
+			}
+			if tc.wantHost != "" && got.Host != tc.wantHost {
+				t.Errorf("host: want %q got %q", tc.wantHost, got.Host)
+			}
+			if tc.wantNameHas != "" && got.Name != tc.wantNameHas {
+				t.Errorf("name: want %q got %q", tc.wantNameHas, got.Name)
+			}
+		})
+	}
+}
+
+func TestConvertTrojan(t *testing.T) {
+	t.Run("tls basic", func(t *testing.T) {
+		node := NodeConfig{Type: "trojan", Server: "trojan.example.com", Port: 443, Password: "pass123", TLS: true, SNI: "trojan.example.com"}
+		ob, err := convertTrojan(node, "T1")
+		if err != nil {
+			t.Fatalf("convert: %v", err)
+		}
+		if ob["type"] != "trojan" || ob["tag"] != "T1" || ob["server"] != "trojan.example.com" || ob["server_port"] != 443 || ob["password"] != "pass123" {
+			t.Errorf("base fields wrong: %+v", ob)
+		}
+		tls, ok := ob["tls"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("tls block missing: %+v", ob)
+		}
+		if tls["enabled"] != true || tls["server_name"] != "trojan.example.com" {
+			t.Errorf("tls fields: %+v", tls)
+		}
+	})
+
+	t.Run("ws transport", func(t *testing.T) {
+		node := NodeConfig{Type: "trojan", Server: "1.2.3.4", Port: 443, Password: "pw", TLS: true, SNI: "cdn.example.com", Network: "ws", Path: "/ws", Host: "cdn.example.com"}
+		ob, err := convertTrojan(node, "T2")
+		if err != nil {
+			t.Fatalf("convert: %v", err)
+		}
+		tr, ok := ob["transport"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("missing transport: %+v", ob)
+		}
+		if tr["type"] != "ws" || tr["path"] != "/ws" {
+			t.Errorf("transport fields: %+v", tr)
+		}
+		hdrs, ok := tr["headers"].(map[string]interface{})
+		if !ok || hdrs["Host"] != "cdn.example.com" {
+			t.Errorf("headers: %+v", tr["headers"])
+		}
+	})
+
+	t.Run("missing password rejected", func(t *testing.T) {
+		_, err := convertTrojan(NodeConfig{Type: "trojan", Server: "x", Port: 443}, "X")
+		if err == nil {
+			t.Fatalf("expected error on empty password")
+		}
+	})
+}
+
+// ============================================================================
+// VMess
+// ============================================================================
+
+func TestParseVMess(t *testing.T) {
+	mkVMess := func(obj map[string]interface{}) string {
+		raw, _ := json.Marshal(obj)
+		return "vmess://" + base64.StdEncoding.EncodeToString(raw)
+	}
+
+	tests := []struct {
+		name        string
+		uri         string
+		wantServer  string
+		wantPort    int
+		wantUUID    string
+		wantNetwork string
+		wantTLS     bool
+		wantSNI     string
+		wantNameHas string
+		wantErr     bool
+	}{
+		{
+			name: "ws + tls",
+			uri: mkVMess(map[string]interface{}{
+				"v": "2", "ps": "HK-VMess", "add": "vmess.example.com", "port": "443",
+				"id": "uuid-vmess", "aid": 0, "net": "ws", "host": "vmess.example.com",
+				"path": "/path", "tls": "tls", "sni": "vmess.example.com",
+			}),
+			wantServer:  "vmess.example.com",
+			wantPort:    443,
+			wantUUID:    "uuid-vmess",
+			wantNetwork: "ws",
+			wantTLS:     true,
+			wantSNI:     "vmess.example.com",
+			wantNameHas: "HK-VMess",
+		},
+		{
+			name: "tcp no tls, sni falls back to host when tls=tls but sni omitted (skipped: tls=none so SNI stays empty)",
+			uri: mkVMess(map[string]interface{}{
+				"ps": "JP", "add": "1.2.3.4", "port": 8080, "id": "u-jp", "net": "tcp", "tls": "",
+			}),
+			wantServer: "1.2.3.4",
+			wantPort:   8080,
+			wantUUID:   "u-jp",
+			wantTLS:    false,
+		},
+		{
+			name:    "non-base64 should fail",
+			uri:     "vmess://not-base64-!@#$%",
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseVMess(tc.uri)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %+v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Server != tc.wantServer {
+				t.Errorf("server: want %q got %q", tc.wantServer, got.Server)
+			}
+			if got.Port != tc.wantPort {
+				t.Errorf("port: want %d got %d", tc.wantPort, got.Port)
+			}
+			if got.UUID != tc.wantUUID {
+				t.Errorf("uuid: want %q got %q", tc.wantUUID, got.UUID)
+			}
+			if tc.wantNetwork != "" && got.Network != tc.wantNetwork {
+				t.Errorf("network: want %q got %q", tc.wantNetwork, got.Network)
+			}
+			if got.TLS != tc.wantTLS {
+				t.Errorf("tls: want %v got %v", tc.wantTLS, got.TLS)
+			}
+			if tc.wantSNI != "" && got.SNI != tc.wantSNI {
+				t.Errorf("sni: want %q got %q", tc.wantSNI, got.SNI)
+			}
+			if tc.wantNameHas != "" && got.Name != tc.wantNameHas {
+				t.Errorf("name: want %q got %q", tc.wantNameHas, got.Name)
+			}
+		})
+	}
+}
+
+func TestConvertVMess(t *testing.T) {
+	t.Run("ws + tls", func(t *testing.T) {
+		node := NodeConfig{Type: "vmess", Server: "vmess.example.com", Port: 443, UUID: "u1", AlterId: 0,
+			TLS: true, SNI: "vmess.example.com", Network: "ws", Path: "/path", Host: "vmess.example.com"}
+		ob, err := convertVMess(node, "V1")
+		if err != nil {
+			t.Fatalf("convert: %v", err)
+		}
+		if ob["uuid"] != "u1" || ob["security"] != "auto" || ob["alter_id"] != 0 {
+			t.Errorf("base fields: %+v", ob)
+		}
+		tls, _ := ob["tls"].(map[string]interface{})
+		if tls == nil || tls["enabled"] != true || tls["server_name"] != "vmess.example.com" {
+			t.Errorf("tls: %+v", tls)
+		}
+		tr, _ := ob["transport"].(map[string]interface{})
+		if tr == nil || tr["type"] != "ws" || tr["path"] != "/path" {
+			t.Errorf("transport: %+v", tr)
+		}
+	})
+
+	t.Run("missing uuid rejected", func(t *testing.T) {
+		_, err := convertVMess(NodeConfig{Type: "vmess", Server: "x", Port: 1}, "X")
+		if err == nil {
+			t.Fatalf("expected error on empty uuid")
+		}
+	})
+}
+
+// ============================================================================
+// VLESS (普通 — Reality 在 TestParseVLessReality_Vision 已锁)
+// ============================================================================
+
+func TestParseVLess(t *testing.T) {
+	tests := []struct {
+		name        string
+		uri         string
+		wantServer  string
+		wantPort    int
+		wantUUID    string
+		wantNetwork string
+		wantTLS     bool
+		wantSNI     string
+		wantSvcName string
+		wantNameHas string
+		wantErr     bool
+	}{
+		{
+			name:        "tls basic",
+			uri:         "vless://uuid-1@vless.example.com:443?security=tls&sni=vless.example.com&type=tcp#HK-VLess",
+			wantServer:  "vless.example.com",
+			wantPort:    443,
+			wantUUID:    "uuid-1",
+			wantNetwork: "tcp",
+			wantTLS:     true,
+			wantSNI:     "vless.example.com",
+			wantNameHas: "HK-VLess",
+		},
+		{
+			name:        "grpc with serviceName",
+			uri:         "vless://uuid-2@grpc.example.com:443?security=tls&sni=grpc.example.com&type=grpc&serviceName=mygrpc#JP-gRPC",
+			wantServer:  "grpc.example.com",
+			wantPort:    443,
+			wantUUID:    "uuid-2",
+			wantNetwork: "grpc",
+			wantTLS:     true,
+			wantSNI:     "grpc.example.com",
+			wantSvcName: "mygrpc",
+		},
+		{
+			name:    "missing @ should fail",
+			uri:     "vless://no-at.example.com:443",
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseVLess(tc.uri)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %+v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Server != tc.wantServer || got.Port != tc.wantPort || got.UUID != tc.wantUUID {
+				t.Errorf("base: server=%q port=%d uuid=%q", got.Server, got.Port, got.UUID)
+			}
+			if got.Network != tc.wantNetwork {
+				t.Errorf("network: want %q got %q", tc.wantNetwork, got.Network)
+			}
+			if got.TLS != tc.wantTLS {
+				t.Errorf("tls: want %v got %v", tc.wantTLS, got.TLS)
+			}
+			if tc.wantSNI != "" && got.SNI != tc.wantSNI {
+				t.Errorf("sni: want %q got %q", tc.wantSNI, got.SNI)
+			}
+			if tc.wantSvcName != "" && got.Extra["service_name"] != tc.wantSvcName {
+				t.Errorf("service_name: want %q got %q", tc.wantSvcName, got.Extra["service_name"])
+			}
+			if tc.wantNameHas != "" && got.Name != tc.wantNameHas {
+				t.Errorf("name: want %q got %q", tc.wantNameHas, got.Name)
+			}
+		})
+	}
+}
+
+func TestConvertVLess_NormalTLS(t *testing.T) {
+	// 普通 TLS,不带 reality —— reality 路径已被 TestParseVLessReality_Vision 覆盖
+	node := NodeConfig{Type: "vless", Server: "vless.example.com", Port: 443, UUID: "u1",
+		TLS: true, SNI: "vless.example.com", Network: "tcp"}
+	ob, err := convertVLess(node, "V")
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if ob["uuid"] != "u1" {
+		t.Errorf("uuid: %v", ob["uuid"])
+	}
+	tls, _ := ob["tls"].(map[string]interface{})
+	if tls == nil || tls["enabled"] != true || tls["server_name"] != "vless.example.com" {
+		t.Errorf("tls: %+v", tls)
+	}
+	if _, has := tls["reality"]; has {
+		t.Errorf("reality should NOT be present without public_key: %+v", tls)
+	}
+	if _, has := tls["utls"]; has {
+		t.Errorf("utls should NOT be present without fingerprint: %+v", tls)
+	}
+}
+
+// ============================================================================
+// Hysteria2
+// ============================================================================
+
+func TestParseHysteria2(t *testing.T) {
+	tests := []struct {
+		name        string
+		uri         string
+		wantServer  string
+		wantPort    int
+		wantPwd     string
+		wantSNI     string
+		wantInsec   string
+		wantObfs    string
+		wantObfsPwd string
+		wantNameHas string
+		wantErr     bool
+	}{
+		{
+			name:        "hysteria2 scheme + obfs salamander",
+			uri:         "hysteria2://pass123@hy2.example.com:8443?sni=hy2.example.com&insecure=1&obfs=salamander&obfs-password=mysalt#HK-Hy2",
+			wantServer:  "hy2.example.com",
+			wantPort:    8443,
+			wantPwd:     "pass123",
+			wantSNI:     "hy2.example.com",
+			wantInsec:   "true",
+			wantObfs:    "salamander",
+			wantObfsPwd: "mysalt",
+			wantNameHas: "HK-Hy2",
+		},
+		{
+			name:        "hy2 alias",
+			uri:         "hy2://abc@1.2.3.4:443?sni=1.2.3.4#JP-Hy",
+			wantServer:  "1.2.3.4",
+			wantPort:    443,
+			wantPwd:     "abc",
+			wantSNI:     "1.2.3.4",
+			wantNameHas: "JP-Hy",
+		},
+		{
+			name:       "trailing slash tolerated",
+			uri:        "hysteria2://p@example.com:443/?sni=example.com#X",
+			wantServer: "example.com",
+			wantPort:   443,
+			wantPwd:    "p",
+			wantSNI:    "example.com",
+		},
+		{
+			name:    "missing @ should fail",
+			uri:     "hysteria2://no-at.example.com:443",
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseHysteria2(tc.uri)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %+v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Server != tc.wantServer || got.Port != tc.wantPort || got.Password != tc.wantPwd {
+				t.Errorf("base: server=%q port=%d pwd=%q", got.Server, got.Port, got.Password)
+			}
+			if !got.TLS {
+				t.Errorf("hysteria2 should always be TLS")
+			}
+			if tc.wantSNI != "" && got.SNI != tc.wantSNI {
+				t.Errorf("sni: want %q got %q", tc.wantSNI, got.SNI)
+			}
+			if tc.wantInsec != "" && got.Extra["insecure"] != tc.wantInsec {
+				t.Errorf("insecure: want %q got %q", tc.wantInsec, got.Extra["insecure"])
+			}
+			if tc.wantObfs != "" && got.Extra["obfs"] != tc.wantObfs {
+				t.Errorf("obfs: want %q got %q", tc.wantObfs, got.Extra["obfs"])
+			}
+			if tc.wantObfsPwd != "" && got.Extra["obfs_password"] != tc.wantObfsPwd {
+				t.Errorf("obfs_password: want %q got %q", tc.wantObfsPwd, got.Extra["obfs_password"])
+			}
+			if tc.wantNameHas != "" && got.Name != tc.wantNameHas {
+				t.Errorf("name: want %q got %q", tc.wantNameHas, got.Name)
+			}
+		})
+	}
+}
+
+func TestConvertHysteria2(t *testing.T) {
+	t.Run("basic + insecure", func(t *testing.T) {
+		node := NodeConfig{Type: "hysteria2", Server: "hy2.example.com", Port: 8443, Password: "pass",
+			TLS: true, SNI: "hy2.example.com", Extra: map[string]string{"insecure": "true"}}
+		ob, err := convertHysteria2(node, "H1")
+		if err != nil {
+			t.Fatalf("convert: %v", err)
+		}
+		if ob["type"] != "hysteria2" || ob["password"] != "pass" {
+			t.Errorf("base: %+v", ob)
+		}
+		tls, _ := ob["tls"].(map[string]interface{})
+		if tls == nil || tls["server_name"] != "hy2.example.com" || tls["insecure"] != true {
+			t.Errorf("tls: %+v", tls)
+		}
+		if _, has := ob["obfs"]; has {
+			t.Errorf("no obfs configured but obfs block present: %+v", ob)
+		}
+	})
+
+	t.Run("salamander obfs", func(t *testing.T) {
+		node := NodeConfig{Type: "hysteria2", Server: "x", Port: 1, Password: "p",
+			Extra: map[string]string{"obfs": "salamander", "obfs_password": "mysalt"}}
+		ob, err := convertHysteria2(node, "H2")
+		if err != nil {
+			t.Fatalf("convert: %v", err)
+		}
+		obfs, _ := ob["obfs"].(map[string]interface{})
+		if obfs == nil || obfs["type"] != "salamander" || obfs["password"] != "mysalt" {
+			t.Errorf("obfs: %+v", obfs)
+		}
+	})
+
+	t.Run("missing password rejected", func(t *testing.T) {
+		_, err := convertHysteria2(NodeConfig{Type: "hysteria2", Server: "x", Port: 1}, "X")
+		if err == nil {
+			t.Fatalf("expected error on empty password")
+		}
+	})
+}
+
+// ============================================================================
+// WireGuard URI (TestConvertWireGuardEndpoint 已覆盖 converter, 这里只测 parser URI)
+// ============================================================================
+
+func TestParseWireGuard(t *testing.T) {
+	tests := []struct {
+		name        string
+		uri         string
+		wantServer  string
+		wantPort    int
+		wantPriv    string
+		wantPeer    string
+		wantAddr    string
+		wantMTU     string
+		wantReserve string
+		wantNameHas string
+		wantErr     bool
+	}{
+		{
+			// reserved 字段 parser 当前不做 URL decode (parser.go:843), 真实订阅都用裸逗号; 用 encoded "%2C"
+			// 会原样塞到 Extra 让 converter 拆解失败。这里锁定真实行为。
+			name:        "wireguard scheme full params",
+			uri:         "wireguard://privkey-base64@wg.example.com:51820?publickey=peer-pub&presharedkey=psk&address=10.0.0.2%2F32&mtu=1420&reserved=0,0,0#WG-JP",
+			wantServer:  "wg.example.com",
+			wantPort:    51820,
+			wantPriv:    "privkey-base64",
+			wantPeer:    "peer-pub",
+			wantAddr:    "10.0.0.2/32",
+			wantMTU:     "1420",
+			wantReserve: "0,0,0",
+			wantNameHas: "WG-JP",
+		},
+		{
+			name:        "wg alias + URL-encoded private key",
+			uri:         "wg://" + url.QueryEscape("priv+with/slash=") + "@1.2.3.4:51820?public_key=pkey&ip=10.7.0.1#X",
+			wantServer:  "1.2.3.4",
+			wantPort:    51820,
+			wantPriv:    "priv+with/slash=",
+			wantPeer:    "pkey",
+			wantAddr:    "10.7.0.1",
+			wantNameHas: "X",
+		},
+		{
+			name:    "missing @ should fail",
+			uri:     "wireguard://no-at.example.com:51820",
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseWireGuard(tc.uri)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %+v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Server != tc.wantServer || got.Port != tc.wantPort {
+				t.Errorf("base: server=%q port=%d", got.Server, got.Port)
+			}
+			if got.Extra["private_key"] != tc.wantPriv {
+				t.Errorf("private_key: want %q got %q", tc.wantPriv, got.Extra["private_key"])
+			}
+			if got.Extra["peer_public_key"] != tc.wantPeer {
+				t.Errorf("peer_public_key: want %q got %q", tc.wantPeer, got.Extra["peer_public_key"])
+			}
+			if tc.wantAddr != "" && got.Extra["local_address"] != tc.wantAddr {
+				t.Errorf("local_address: want %q got %q", tc.wantAddr, got.Extra["local_address"])
+			}
+			if tc.wantMTU != "" && got.Extra["mtu"] != tc.wantMTU {
+				t.Errorf("mtu: want %q got %q", tc.wantMTU, got.Extra["mtu"])
+			}
+			if tc.wantReserve != "" && got.Extra["reserved"] != tc.wantReserve {
+				t.Errorf("reserved: want %q got %q", tc.wantReserve, got.Extra["reserved"])
+			}
+			if tc.wantNameHas != "" && got.Name != tc.wantNameHas {
+				t.Errorf("name: want %q got %q", tc.wantNameHas, got.Name)
+			}
+		})
 	}
 }
