@@ -102,9 +102,14 @@ func (p *ToolPipeline) Execute(ctx context.Context, toolName string, params map[
 	// Step 5: Failure handling
 	if execErr != nil {
 		// Auto rollback on write failure
+		rolledBack := false
 		if tool.IsWriteOp && snapshotID != "" {
-			p.snapshots.Rollback(snapshotID, p.adapter)
-			fmt.Printf("\033[31m[Rollback] 自动回滚到 %s\033[0m\n", snapshotID)
+			if rbErr := p.snapshots.Rollback(snapshotID, p.adapter); rbErr != nil {
+				fmt.Printf("\033[31m[Rollback] 回滚失败 %s: %v (配置可能处于不一致状态)\033[0m\n", snapshotID, rbErr)
+			} else {
+				fmt.Printf("\033[31m[Rollback] 自动回滚到 %s\033[0m\n", snapshotID)
+				rolledBack = true
+			}
 		}
 		friendlyMsg := p.hooks.RunFailureHooks(toolName, params, execErr)
 
@@ -116,7 +121,7 @@ func (p *ToolPipeline) Execute(ctx context.Context, toolName string, params map[
 			Success:    false,
 			DurationMs: time.Since(start).Milliseconds(),
 			SnapshotID: snapshotID,
-			RolledBack: tool.IsWriteOp && snapshotID != "",
+			RolledBack: rolledBack,
 			Error:      execErr.Error(),
 		})
 
@@ -129,8 +134,15 @@ func (p *ToolPipeline) Execute(ctx context.Context, toolName string, params map[
 
 		// Step 7: Post-Hook failure → auto rollback
 		if !health.OK && snapshotID != "" {
-			p.snapshots.Rollback(snapshotID, p.adapter)
-			fmt.Printf("\033[31m[Rollback] 自动回滚到 %s\033[0m\n", snapshotID)
+			rolledBack := false
+			rbReason := health.Reason
+			if rbErr := p.snapshots.Rollback(snapshotID, p.adapter); rbErr != nil {
+				fmt.Printf("\033[31m[Rollback] 回滚失败 %s: %v (配置可能处于不一致状态)\033[0m\n", snapshotID, rbErr)
+				rbReason = fmt.Sprintf("%s; 回滚也失败: %v", health.Reason, rbErr)
+			} else {
+				fmt.Printf("\033[31m[Rollback] 自动回滚到 %s\033[0m\n", snapshotID)
+				rolledBack = true
+			}
 
 			p.telemetry.Log(TelemetryEntry{
 				Timestamp:  time.Now(),
@@ -139,13 +151,17 @@ func (p *ToolPipeline) Execute(ctx context.Context, toolName string, params map[
 				Success:    false,
 				DurationMs: time.Since(start).Milliseconds(),
 				SnapshotID: snapshotID,
-				RolledBack: true,
-				Error:      health.Reason,
+				RolledBack: rolledBack,
+				Error:      rbReason,
 			})
 
+			msg := fmt.Sprintf("切换失败，已自动回滚。原因: %s", health.Reason)
+			if !rolledBack {
+				msg = fmt.Sprintf("切换失败 + 回滚失败，配置可能处于不一致状态。原因: %s", rbReason)
+			}
 			return &ToolResult{
 				Success: false,
-				Message: fmt.Sprintf("切换失败，已自动回滚。原因: %s", health.Reason),
+				Message: msg,
 			}
 		}
 	}

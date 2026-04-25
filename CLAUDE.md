@@ -358,8 +358,10 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 
 ### 🟡 中优先级
 
-**#M2 — SnapshotStore.Rollback 返回值被忽略**
-- 位置: `internal/tool/pipeline.go:106, 132`
+**#M2 — SnapshotStore.Rollback 返回值被忽略** ✅ **已修(2026-04-25)**
+- 修复: `internal/tool/pipeline.go` 两处自动回滚 (Execute 失败 / Post-Hook 不通过) 都改为 check err
+- 失败时:控制台标红 "回滚失败" + telemetry `RolledBack=false` + 用户消息升级为 "切换失败 + 回滚失败,配置可能处于不一致状态"
+- 之前隐患:回滚静默失败时,UI 显示 "已自动回滚" 但实际配置还是改后状态,用户被误导
 
 **#M3 — Reload() 使用 `pkill -x sing-box`**
 - 位置: `internal/engine/singbox_adapter.go:274`
