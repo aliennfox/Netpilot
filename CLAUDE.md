@@ -351,18 +351,19 @@ sing-box 内核(当前:外部进程;Phase 3B:嵌入式 libbox)
 - 已在 `internal/agent/orchestrator.go:110-117` 和 `:220` 改为 `o.pipeline.ManualRollback("")`, code 中有 `// #H2 修复` 注释
 - 遗留: 集成测试尚未加, 后续 go test 扩展时补 Verify→Rollback 路径测试
 
-**#H3 — 零 go test**(已大幅缓解, 仅剩 local/engine 路径)
-- 状态: 5 个核心包加单测 (2026-04-25 一波清,15 个 commit,~310 case):
+**#H3 — 零 go test**(已大幅缓解, 6 包覆盖, 仅剩 single_agent mock LLM)
+- 状态: 6 个核心包加单测 (2026-04-25 一波清,17 个 commit,~340 case):
   - `scripts/smoke.sh` 端到端关键路径
   - `internal/subscription` (~54 top-level / ~120 case): 12 协议 parser/converter + Clash YAML + sing-box JSON + fixture 矩阵 + Manager 端到端 (Add/Update/Remove/Import + httptest.Server)
   - `internal/overlay` (10 test): merger TUN inbound / endpoint 分派 / DNS 三模式 + 三层 fallback / outbound dedupe + selector inject / RuleSets+matchers / WG endpoint
   - `internal/router` (7 test ~50 case): intent_router 命中 + bypass / Per-App 误命中防护 / VPN 状态优先
   - `internal/tool` (5 _test.go ~50 case): pipeline 8 步集成 + SnapshotStore / PermissionManager / TelemetryLogger / overlay_tools
-  - `internal/agent` (5 test ~30 case): isVerificationFailed (#H2 触发条件) + formatFinalResponse + ClassifyTask 路由 + matchesRegionAction
+  - `internal/agent` (~19 test / ~45 case): orchestrator (isVerificationFailed / formatFinalResponse / ClassifyTask / matchesRegionAction) + ConversationHistory 全行为面
+  - `internal/local` (18 test): Engine 路由 + VPN 三件套全分支 (nil/running/becomes-ready/stop happy/stop err) + showStatus/showSnapshots/showTelemetry + AllActionsRegistered drift catcher
 - 测试驱动发现 bug: `isVerificationFailed` 中文 "不通过"/"未通过" 子串撞 "通过"
   passKeyword 导致 #H2 自动回滚漏触发 (commit d8289d2 修)
-- 剩余缺口: `local/engine.go` (Action 处理), `agent/single_agent.go` (LLM tool-call 闭环, 需 mock LLM)
-- 修复方向: local/engine 单测 (1.5h ⭐); single_agent mock LLM 是大工程 (3h+) 价值有限
+- 剩余缺口: `agent/single_agent.go` (LLM tool-call 闭环, 需 mock LLM 工时大价值有限)
+- 修复方向: single_agent 用 httptest 模拟 OpenAI 兼容 endpoint, 但实际 prod 已被真机验证, 优先级低
 
 ### 🟡 中优先级
 
