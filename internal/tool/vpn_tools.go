@@ -124,33 +124,39 @@ func ensureVpnReadyForMeasure(ctrl VpnController) (cleanup func(), err error) {
 
 // toolStartVpn 启动 VPN 数据面 (Android: VpnService + libbox TUN)。
 //
-// 返回消息对 LLM 友好, 引导它下一步调 vpn_status 或等 2-3s ——
-// libbox 建链需要时间, 如果 LLM 下一轮立刻 get_node_pool 会撞 Clash API unreachable。
+// 同步语义: 内部 poll IsRunning() 直到 libbox 真就绪 (~3-8s) 或 15s 超时;
+// 返回 Success=true 时 Clash API 已可用, LLM 可直接调下游 tool 不必再 poll vpn_status。
+// 这是 "CLI 风格原子 tool" 设计 —— 让任何 LLM 不需推理状态机。
 func toolStartVpn(ctrl VpnController) *ToolDef {
 	return &ToolDef{
-		Name:        "start_vpn",
-		Description: "Start the local VPN tunnel (requires platform approval on first run)",
-		IsWriteOp:   true,
+		Name: "start_vpn",
+		Description: "Start the local VPN tunnel and BLOCK UNTIL READY (≤15s) or fail. " +
+			"On Success=true the Clash API is guaranteed reachable — do NOT call vpn_status afterwards. " +
+			"On first run may require platform approval (user dialog); timeout means user denied or libbox crashed.",
+		IsWriteOp: true,
 		Execute: func(ctx context.Context, _ engine.EngineAdapter, _ map[string]interface{}) (*ToolResult, error) {
 			if ctrl.IsRunning() {
 				return &ToolResult{Success: true, Message: "VPN 已在运行。"}, nil
 			}
-			if err := ctrl.RequestStart(); err != nil {
+			if err := WaitVpnReady(ctrl, 15*time.Second); err != nil {
 				return &ToolResult{Success: false, Message: fmt.Sprintf("启动失败: %v", err)}, nil
 			}
+			// libbox 起来后 Clash API listener 还需 ~1s warm-up, 否则下个 tool 撞 connection refused
+			time.Sleep(1500 * time.Millisecond)
 			return &ToolResult{
 				Success: true,
-				Message: "启动请求已发送。 VPN 约 3 秒后可用, 若需要后续操作请先用 vpn_status 确认状态。",
+				Message: "VPN 已启动并就绪, Clash API 可用。",
+				Data:    map[string]interface{}{"running": true},
 			}, nil
 		},
 	}
 }
 
-// toolStopVpn 停止 VPN 数据面。
+// toolStopVpn 停止 VPN 数据面 (同步: poll IsRunning()=false 或 5s 超时)。
 func toolStopVpn(ctrl VpnController) *ToolDef {
 	return &ToolDef{
 		Name:        "stop_vpn",
-		Description: "Stop the local VPN tunnel",
+		Description: "Stop the local VPN tunnel and BLOCK UNTIL DOWN (≤5s). On Success=true VPN is fully stopped.",
 		IsWriteOp:   true,
 		Execute: func(ctx context.Context, _ engine.EngineAdapter, _ map[string]interface{}) (*ToolResult, error) {
 			if !ctrl.IsRunning() {
@@ -159,7 +165,14 @@ func toolStopVpn(ctrl VpnController) *ToolDef {
 			if err := ctrl.RequestStop(); err != nil {
 				return &ToolResult{Success: false, Message: fmt.Sprintf("停止失败: %v", err)}, nil
 			}
-			return &ToolResult{Success: true, Message: "已请求停止 VPN。"}, nil
+			deadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) {
+				if !ctrl.IsRunning() {
+					return &ToolResult{Success: true, Message: "VPN 已停止。"}, nil
+				}
+				time.Sleep(200 * time.Millisecond)
+			}
+			return &ToolResult{Success: false, Message: "停止 VPN 超时, libbox 可能未响应。"}, nil
 		},
 	}
 }

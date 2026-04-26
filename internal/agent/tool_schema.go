@@ -233,6 +233,26 @@ var toolParameterSchemas = map[string]json.RawMessage{
 		"properties": {},
 		"required": []
 	}`),
+	"setup_app_chain": json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"app_pkg": {
+				"type": "string",
+				"description": "Android 包名, 例 com.android.chrome / com.tencent.mm / com.google.android.youtube。 流量将限定到该 App"
+			},
+			"nodes": {
+				"type": "array",
+				"items": {"type": "string"},
+				"minItems": 2,
+				"description": "链路节点 tag 顺序列表 entry→exit, 至少 2 个。 内部会先用 test_latency 校验全活, 死节点直接 fail-fast 不会浪费写盘"
+			},
+			"chain_tag": {
+				"type": "string",
+				"description": "链路出口 outbound 自定义 tag (会自动加 _agent: 前缀)。 留空则用 app_pkg 自动生成 (com.android.chrome → com-android-chrome-chain)"
+			}
+		},
+		"required": ["app_pkg", "nodes"]
+	}`),
 }
 
 // ConvertToolsToSchema 将内部 ToolDef 转为 OpenAI API 的 tools 参数格式（全量，向后兼容）

@@ -253,6 +253,30 @@ func NewClient(dataDir, clashAPIAddr, apiKey string) *Client {
 	vpnAdapter := &clientVpnAdapter{client: c}
 	pipeline.RegisterExtraTools(tool.RegisterVpnTools(vpnAdapter))
 	pipeline.RegisterExtraTools(tool.RegisterPerAppTools(ov))
+	// Phase 2: 宏 tool —— 把 "ensure VPN → 测速 → create_chain → set_per_app_vpn → verify"
+	// 收敛成一个原子 tool, LLM 不必拆 5 步。
+	pipeline.RegisterExtraTools(tool.RegisterMacroTools(vpnAdapter, ov))
+	// Phase 1.5: pipeline 在执行依赖 Clash API 的 tool 前自动 ensure VPN 就绪。
+	// 让 LLM 不必显式调 start_vpn —— "CLI 风格原子 tool" 设计。
+	pipeline.SetVpnGuard(
+		func() error {
+			if vpnAdapter.IsRunning() {
+				return nil
+			}
+			if err := tool.WaitVpnReady(vpnAdapter, 15*time.Second); err != nil {
+				return err
+			}
+			// Clash API listener warm-up
+			time.Sleep(1500 * time.Millisecond)
+			return nil
+		},
+		[]string{
+			// 直接调 Clash API 的 read tool
+			"get_node_pool", "get_connections", "get_logs",
+			// Clash API 写 tool
+			"switch_node", "set_mode",
+		},
+	)
 	// 一处注入 reload hook, 覆盖所有写 overlay 的 tool / 订阅 manager 路径
 	// (patch_route_rule / create_chain / 订阅 CRUD / Per-App / DNS 等). Apply 后自动调.
 	// reloaderAdapter 持 *Client, 实际 reloader callback 在 SetPlatformReloader 注入前为 noop.
@@ -319,6 +343,11 @@ func (c *Client) FailoverStatus() string {
 // 按时间倒序,最新的在前。每项含 id / timestamp / active_proxies (group→tag)。
 func (c *Client) Snapshots() string {
 	return okJSON(c.pipeline.Snapshots().List())
+}
+
+// LlmModel 返回当前使用的 LLM model id (UI 显示用)
+func (c *Client) LlmModel() string {
+	return config.DefaultLLMModel
 }
 
 // Rollback 手动回滚到指定快照 id;id 为空时回滚到最新快照 (D2 Safety card)。

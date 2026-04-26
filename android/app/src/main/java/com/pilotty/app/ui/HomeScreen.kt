@@ -476,7 +476,7 @@ fun HomeScreen(
                     ) {
                         StatusDot(state = if (agentReady) "nominal" else "warn")
                         Text(
-                            text = if (agentReady) "deepseek-chat" else stringResource(com.pilotty.app.R.string.home_agent_no_apikey),
+                            text = if (agentReady) com.pilotty.app.PilottyCore.llmModel() else stringResource(com.pilotty.app.R.string.home_agent_no_apikey),
                             color = pc.ink3,
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,

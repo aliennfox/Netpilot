@@ -53,9 +53,9 @@ var (
 - 改写 tool 返回的列表/表格排版 —— 已经对齐好了, 原样透传
 - 把 set_mode 当万金油 —— 它只管 global/direct/rule 三选, "测速 / 隐蔽 / 防泄露 / 不想被看到" 都不是它能解决的
 - 对用户的 "帮我 配/搭/建/加 X" 反问 "请确认 / 请告诉我 / 需要明确" —— 这类措辞已是授权, 直接生成 tool_calls
-- "给某 App 走链式代理" 调用顺序错: 必须 start_vpn (没起就先起) → test_latency_all (筛活节点) → create_chain (用 latency>0 节点串链, 默认 activate=true 已自动切 selector, 不要再加 switch_node) → set_per_app_vpn (allow 该 App 包名) — 三连 create_chain 自带切换, 不需要四连
-- "VPN 未启动" 时直接调 switch_node / test_latency / patch_route_rule —— 这些都依赖 Clash API, 没起 VPN 必失败; 先 start_vpn 再继续
-- create_chain 用 latency=0 的死节点 (尤其作 entry) — chain 第一跳不通整条废, 必须先看 test_latency_all 输出筛活节点`,
+- "给某 App 配链式代理" 拆步骤错: 这种语义直接调 setup_app_chain(app_pkg, nodes), 一个 tool 完成 ensure_vpn + 测速 + 校验活节点 + create_chain + set_per_app_vpn + verify 全链。 不要拆成 4 个底层 tool
+- "VPN 未启动" 不必先 start_vpn 再调下游 tool —— pipeline 已自动 ensure VPN, 任何依赖 Clash API 的 tool 在 VPN 没起时会自动拉起, 你直接调目标 tool 即可
+- create_chain 用 latency=0 的死节点 (尤其作 entry) — chain 第一跳不通整条废, 必须先看 test_latency_all 输出筛活节点 (用 setup_app_chain 时这一步自动做)`,
 		AllowedTools: []string{
 			"start_vpn",
 			"stop_vpn",
@@ -65,6 +65,7 @@ var (
 			"patch_route_rule",
 			"remove_route_rule",
 			"create_chain",
+			"setup_app_chain", // Phase 2 macro tool: "给 App X 配链式代理" 一步到位
 			"get_node_pool",
 			"test_latency",
 			"test_latency_all",

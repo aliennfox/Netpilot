@@ -18,6 +18,10 @@ type ToolPipeline struct {
 	telemetry *TelemetryLogger
 	adapter   engine.EngineAdapter
 	perms     *PermissionManager
+	// vpnGuard: 平台层注入的 "确保 VPN 就绪" 钩子。 在依赖 Clash API 的 tool 执行前自动调,
+	// 让 LLM 不必显式调 start_vpn (CLI 风格原子语义)。 cmd 路径不注入 (sing-box 外部进程已在跑)。
+	vpnGuard       func() error
+	requireVPNTool map[string]bool
 }
 
 func NewPipeline(adapter engine.EngineAdapter, dataDir string) *ToolPipeline {
@@ -39,6 +43,16 @@ func (p *ToolPipeline) SetPermissionManager(pm *PermissionManager) {
 }
 
 func (p *ToolPipeline) Permissions() *PermissionManager { return p.perms }
+
+// SetVpnGuard 注入 "确保 VPN 就绪" 钩子。 调用方传 ensureFn —— 通常是 WaitVpnReady 的 closure。
+// requireTools 列出哪些 tool name 在 Execute 前需要 VPN, 不在列表的 tool 不触发 guard。
+func (p *ToolPipeline) SetVpnGuard(ensureFn func() error, requireTools []string) {
+	p.vpnGuard = ensureFn
+	p.requireVPNTool = make(map[string]bool, len(requireTools))
+	for _, n := range requireTools {
+		p.requireVPNTool[n] = true
+	}
+}
 
 // RegisterExtraTools 注册额外的工具（如 overlay tools）
 func (p *ToolPipeline) RegisterExtraTools(extra map[string]*ToolDef) {
@@ -93,6 +107,25 @@ func (p *ToolPipeline) Execute(ctx context.Context, toolName string, params map[
 			fmt.Printf("\033[31m[Snapshot] 保存失败: %v\033[0m\n", err)
 		} else {
 			fmt.Printf("\033[33m[Snapshot] 已保存: %s\033[0m\n", snapshotID)
+		}
+	}
+
+	// Step 3.5: VPN bootstrap — Clash-API-dependent tool 在 VPN 没起时自动拉起 (Phase 1.5)
+	if p.vpnGuard != nil && p.requireVPNTool[toolName] {
+		if gErr := p.vpnGuard(); gErr != nil {
+			p.telemetry.Log(TelemetryEntry{
+				Timestamp:  time.Now(),
+				Tool:       toolName,
+				Params:     params,
+				Success:    false,
+				DurationMs: time.Since(start).Milliseconds(),
+				SnapshotID: snapshotID,
+				Error:      "vpn-guard: " + gErr.Error(),
+			})
+			return &ToolResult{
+				Success: false,
+				Message: fmt.Sprintf("VPN 未就绪, 无法执行 %s: %v", toolName, gErr),
+			}
 		}
 	}
 

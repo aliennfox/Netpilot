@@ -43,6 +43,7 @@ object PilottyCore {
     private fun require(): Client = client ?: error("PilottyCore.init() not called")
 
     // ---- thin proxies (JSON 字符串原样返回，调用方解析) ----
+    fun llmModel(): String                        = require().llmModel()
     fun status(): String                          = require().status()
     fun nodes(): String                           = require().nodes()
     fun switchNode(group: String, node: String): String = require().switchNode(group, node)
