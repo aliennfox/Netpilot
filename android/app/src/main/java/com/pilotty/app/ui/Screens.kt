@@ -411,11 +411,19 @@ private fun ToolCallTimeline(events: List<ToolEventDto>) {
                         else -> pc.error
                     }
                     val displayName = friendlyToolName(e.name)
+                    val atomic = isAtomicTool(e.name)
                     val runningSuffix = if (running)
                         " · " + androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.chat_tool_running)
                     else ""
+                    // macro tool 输出含 [N/M] 多步 trace + 综合结论, 给更大 preview 长度
+                    val previewLimit = if (atomic) 320 else 140
                     val detail = buildString {
                         append(displayName)
+                        if (atomic) {
+                            append(" [")
+                            append(androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.chat_tool_atomic_badge))
+                            append("]")
+                        }
                         if (e.role.isNotEmpty()) append(" · ").append(e.role)
                         if (running) {
                             append(runningSuffix)
@@ -423,8 +431,8 @@ private fun ToolCallTimeline(events: List<ToolEventDto>) {
                             append(" · ").append(formatDurationMs(e.durationMs))
                             val extra = if (ok) e.outputPreview else e.error
                             if (extra.isNotEmpty()) {
-                                append("\n").append(extra.take(140))
-                                if (extra.length > 140) append("…")
+                                append("\n").append(extra.take(previewLimit))
+                                if (extra.length > previewLimit) append("…")
                             }
                         }
                     }

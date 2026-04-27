@@ -179,6 +179,13 @@
     <string name="tool_name_get_dns_config">Read DNS config</string>
     <string name="tool_name_set_dns_config">Change DNS mode</string>
 
+    <!-- D3 Action Trace · atomic macro tools (multi-step bundles) -->
+    <string name="tool_name_setup_app_chain">Per-App proxy chain</string>
+    <string name="tool_name_switch_to_fastest_node">Switch to fastest</string>
+    <string name="tool_name_import_and_activate_subscription">Import and activate</string>
+    <string name="tool_name_diagnose_connectivity">Diagnose connectivity</string>
+    <string name="chat_tool_atomic_badge">atomic</string>
+
     <!-- D3 Action Trace · running indicator -->
     <string name="chat_tool_running">…running</string>
 

@@ -29,6 +29,20 @@ private val toolNameResMap = mapOf(
     "remove_subscription" to R.string.tool_name_remove_subscription,
     "get_dns_config" to R.string.tool_name_get_dns_config,
     "set_dns_config" to R.string.tool_name_set_dns_config,
+    // 原子 macro tool (Phase 2 + B 方向 #1/#2/#3): 一步完成多个底层 tool 的语义级原子操作
+    "setup_app_chain" to R.string.tool_name_setup_app_chain,
+    "switch_to_fastest_node" to R.string.tool_name_switch_to_fastest_node,
+    "import_and_activate_subscription" to R.string.tool_name_import_and_activate_subscription,
+    "diagnose_connectivity" to R.string.tool_name_diagnose_connectivity,
+)
+
+// atomicToolNames 标记哪些 tool 是 macro/原子 tool. UI 给它们额外视觉标识 (徽章 + 更大的 output preview),
+// 因为它们的 Message 通常包含 [N/M] 步骤 trace + 综合结论, 比单步底层 tool 信息密度高.
+private val atomicToolNames = setOf(
+    "setup_app_chain",
+    "switch_to_fastest_node",
+    "import_and_activate_subscription",
+    "diagnose_connectivity",
 )
 
 @Composable
@@ -36,3 +50,6 @@ fun friendlyToolName(rawName: String): String {
     val resId = toolNameResMap[rawName] ?: return rawName
     return stringResource(resId)
 }
+
+/** 这是不是 macro/原子 tool — UI 用它判断要不要加徽章 + 用更大 output preview 长度. */
+fun isAtomicTool(rawName: String): Boolean = rawName in atomicToolNames

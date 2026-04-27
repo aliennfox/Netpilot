@@ -179,6 +179,13 @@
     <string name="tool_name_get_dns_config">读 DNS 配置</string>
     <string name="tool_name_set_dns_config">改 DNS 模式</string>
 
+    <!-- D3 Action Trace · 原子宏 tool (一步完成多个底层 tool) -->
+    <string name="tool_name_setup_app_chain">App 链式代理</string>
+    <string name="tool_name_switch_to_fastest_node">切到最快节点</string>
+    <string name="tool_name_import_and_activate_subscription">导入并激活订阅</string>
+    <string name="tool_name_diagnose_connectivity">综合连通性诊断</string>
+    <string name="chat_tool_atomic_badge">原子</string>
+
     <!-- D3 Action Trace · running 指示 -->
     <string name="chat_tool_running">…运行中</string>
 
