@@ -1,7 +1,14 @@
 package com.pilotty.app.ui.theme
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.SpringSpec
+import androidx.compose.animation.core.TweenSpec
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -12,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
@@ -91,32 +99,109 @@ private fun buildDark() = PilottyColorScheme(
     isDark = true,
 )
 
+// M3 完整 13-slot Typography scale (https://m3.material.io/styles/typography/type-scale-tokens)
+// Pilotty 选 SansSerif + 紧字距 + 不浮夸字号, 保留品牌"工程感"调性。
+// 业务代码继续可以 inline TextStyle, 但新组件应优先 MaterialTheme.typography.<slot>.
 private val AppTypography = Typography(
-    labelSmall = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 10.sp,
-        letterSpacing = 1.6.sp,
+    // Display — 仅用于 splash / huge headline; 未来 hero scenes
+    displayLarge = TextStyle(
+        fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold,
+        fontSize = 57.sp, lineHeight = 64.sp, letterSpacing = (-0.25).sp,
     ),
-    bodyMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Normal,
-        fontSize = 14.sp,
-        lineHeight = 21.sp,
+    displayMedium = TextStyle(
+        fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold,
+        fontSize = 45.sp, lineHeight = 52.sp, letterSpacing = 0.sp,
+    ),
+    displaySmall = TextStyle(
+        fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold,
+        fontSize = 36.sp, lineHeight = 44.sp, letterSpacing = 0.sp,
+    ),
+    // Headline — section 大标题
+    headlineLarge = TextStyle(
+        fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold,
+        fontSize = 32.sp, lineHeight = 40.sp, letterSpacing = 0.sp,
+    ),
+    headlineMedium = TextStyle(
+        fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold,
+        fontSize = 28.sp, lineHeight = 36.sp, letterSpacing = 0.sp,
+    ),
+    headlineSmall = TextStyle(
+        fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold,
+        fontSize = 24.sp, lineHeight = 32.sp, letterSpacing = 0.sp,
+    ),
+    // Title — 卡片 / 行标题
+    titleLarge = TextStyle(
+        fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold,
+        fontSize = 22.sp, lineHeight = 28.sp, letterSpacing = (-0.44).sp,
     ),
     titleMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 15.sp,
-        letterSpacing = (-0.15).sp,
+        fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold,
+        fontSize = 15.sp, lineHeight = 24.sp, letterSpacing = (-0.15).sp,
     ),
-    titleLarge = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Bold,
-        fontSize = 22.sp,
-        letterSpacing = (-0.44).sp,
+    titleSmall = TextStyle(
+        fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold,
+        fontSize = 13.sp, lineHeight = 20.sp, letterSpacing = 0.1.sp,
+    ),
+    // Body — 主要内容
+    bodyLarge = TextStyle(
+        fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal,
+        fontSize = 16.sp, lineHeight = 24.sp, letterSpacing = 0.5.sp,
+    ),
+    bodyMedium = TextStyle(
+        fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal,
+        fontSize = 14.sp, lineHeight = 21.sp, letterSpacing = 0.25.sp,
+    ),
+    bodySmall = TextStyle(
+        fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal,
+        fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 0.4.sp,
+    ),
+    // Label — 按钮 / chip / overline
+    labelLarge = TextStyle(
+        fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold,
+        fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = 0.1.sp,
+    ),
+    labelMedium = TextStyle(
+        fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold,
+        fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 0.5.sp,
+    ),
+    labelSmall = TextStyle(
+        fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold,
+        fontSize = 10.sp, lineHeight = 14.sp, letterSpacing = 1.6.sp,
     ),
 )
+
+// M3 Shapes 系统 (https://m3.material.io/styles/shape/shape-scale-tokens)
+// Pilotty 沿用偏圆调性: extraSmall/Small 用 chip / 小标签;
+// medium 用普通 Card; large 用 prominent surface; extraLarge 接近 pill.
+// MaterialTheme 把这些自动透给 Card/Button/MenuItem 等, 业务代码新组件
+// 应用 MaterialTheme.shapes.<size> 而不是 RoundedCornerShape inline.
+private val AppShapes = Shapes(
+    extraSmall = RoundedCornerShape(4.dp),
+    small = RoundedCornerShape(8.dp),
+    medium = RoundedCornerShape(12.dp),
+    large = RoundedCornerShape(16.dp),
+    extraLarge = RoundedCornerShape(28.dp),
+)
+
+// M3 Motion 推荐 spec (https://m3.material.io/styles/motion/easing-and-duration/applying-easing-and-duration)
+// 暴露给业务代码作 animateFloatAsState / AnimatedVisibility 等的默认 animationSpec.
+// 不用 staticCompositionLocalOf — 这些是纯函数 spec, 全局共用。
+object PilottyMotion {
+    // Standard — 通用 UI 状态变化 (按下回弹, fade, expand)
+    val springStandard: SpringSpec<Float> = spring(
+        dampingRatio = Spring.DampingRatioNoBouncy,
+        stiffness = Spring.StiffnessMediumLow,
+    )
+    // Emphasized — 重要状态切换 (页面进出, hero animation)
+    val springEmphasized: SpringSpec<Float> = spring(
+        dampingRatio = Spring.DampingRatioLowBouncy,
+        stiffness = Spring.StiffnessMedium,
+    )
+    // Tween — 当时长可预测/必须线性时 (progress / 节流脉冲)
+    val tweenShort: TweenSpec<Float> = tween(durationMillis = 200)
+    val tweenMedium: TweenSpec<Float> = tween(durationMillis = 350)
+    val tweenLong: TweenSpec<Float> = tween(durationMillis = 500)
+}
 
 @Composable
 fun PilottyTheme(
@@ -150,6 +235,11 @@ fun PilottyTheme(
         )
     }
     CompositionLocalProvider(LocalPilottyColors provides pc) {
-        MaterialTheme(colorScheme = m3, typography = AppTypography, content = content)
+        MaterialTheme(
+            colorScheme = m3,
+            typography = AppTypography,
+            shapes = AppShapes,
+            content = content,
+        )
     }
 }
