@@ -8,8 +8,11 @@ const (
 
 	// LLM
 	DefaultLLMBaseURL = "https://api.siliconflow.cn/v1"
-	DefaultLLMModel   = "deepseek-ai/DeepSeek-V4-Flash"
-	// DefaultLLMTimeout V4 Flash 是 MoE + reasoning, 首 token 30-90s 常态。 60s 会撞 awaiting-headers 超时。
+	// 2026-04-27 切 Qwen3-32B: V4 Flash 在测速→选最快节点的 2nd-turn tool_call 上反复卡死
+	// (reasoning model 把后续 tool_call 当 text 输出, stream 不结束). Qwen3-32B 默认开 thinking,
+	// 需在 request body 加 enable_thinking=false (见 llm_client.go) 才能稳定走 tool-use 路径.
+	DefaultLLMModel = "Qwen/Qwen3-32B"
+	// DefaultLLMTimeout Qwen3-32B 关 thinking 后首 token 一般 < 5s, 但留够 tool 长链路 buffer.
 	DefaultLLMTimeout = 180 // seconds
 	DefaultMaxIter    = 10
 	// DefaultLLMTemperature 降低 DeepSeek-V3 的 tool-pick 随机性。默认 1.0 会导致同一 prompt

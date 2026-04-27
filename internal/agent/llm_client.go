@@ -64,7 +64,13 @@ type CompletionRequest struct {
 	ToolChoice  string    `json:"tool_choice,omitempty"` // "auto", "none", or "required"
 	Temperature *float64  `json:"temperature,omitempty"` // nil = provider 默认; 指针用于区分 "未设置" 和 "设 0"
 	Stream      bool      `json:"stream,omitempty"`
+	// EnableThinking Qwen3 系列默认开 thinking mode, 把推理当 text 输出会让 tool_call 被吞.
+	// 显式 false 走 non-thinking 路径, tool-use 稳; SiliconFlow 对非 Qwen 模型忽略此字段.
+	EnableThinking *bool `json:"enable_thinking,omitempty"`
 }
+
+// BoolPtr 返回 bool 指针, 用于构造 CompletionRequest.EnableThinking
+func BoolPtr(v bool) *bool { return &v }
 
 // Float64Ptr 返回 float64 指针,用于构造 CompletionRequest.Temperature
 func Float64Ptr(v float64) *float64 { return &v }
