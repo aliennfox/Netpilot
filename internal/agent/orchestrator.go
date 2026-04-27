@@ -105,7 +105,11 @@ func (o *Orchestrator) Run(ctx context.Context, userMessage string, history *Con
 		verification, events, err = o.agent.RunWithRole(ctx, RoleVerify, verifyInput, history)
 		allEvents = append(allEvents, events...)
 		if err != nil {
-			return Result{Events: allEvents}, fmt.Errorf("验证阶段失败: %w", err)
+			// Verify 是 sanity check, LLM API 暂时性故障 (503/timeout) 不该把整个对话标红 ——
+			// Configure 已经成功落地, Verify 跑不动只是没拿到一句"已通过"总结.
+			// 软降级: 把 err 转成 verification 文本, 由 formatFinalResponse 拼到末尾.
+			verification = fmt.Sprintf("(验证步骤暂跳过: %v — 主任务已完成, 看 Configure 输出确认。)", err)
+			err = nil
 		}
 
 		// 验证失败 → 自动回滚 (#H2 修复: 原先调 pipeline.Execute("rollback", nil) 会进入占位 tool,
@@ -214,7 +218,15 @@ func (o *Orchestrator) RunStream(ctx context.Context, userMessage string, histor
 		reply, events, err := o.agent.RunWithRoleStream(ctx, RoleVerify, verifyInput, history, phaseSink{role: RoleVerify.Name, outer: sink})
 		allEvents = append(allEvents, events...)
 		if err != nil {
-			return Result{Events: allEvents}, fmt.Errorf("验证阶段失败: %w", err)
+			// 同 Run 路径: Verify LLM 暂时性故障软降级, 不让 Configure 已成功的对话被红框收尾
+			verification = fmt.Sprintf("(验证步骤暂跳过: %v — 主任务已完成, 看 Configure 输出确认。)", err)
+			reply = verification
+			err = nil
+			sink.OnPhaseEnd(RoleVerify.Name, verification)
+			return Result{
+				Reply:  formatFinalResponse(plan, diagnosis, configResult, verification),
+				Events: allEvents,
+			}, nil
 		}
 		verification = reply
 		if isVerificationFailed(verification) {
