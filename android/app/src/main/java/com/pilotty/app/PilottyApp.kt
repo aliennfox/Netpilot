@@ -5,7 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.util.Log
-import com.pilotty.app.agent.ApiKeyPrefs
+import com.pilotty.app.agent.LLMConfigPrefs
 import libbox.Libbox
 import libbox.SetupOptions
 import java.io.File
@@ -32,9 +32,15 @@ class PilottyApp : Application() {
 
         bootstrapConfigAssets()
 
-        val apiKey = ApiKeyPrefs.get(this).key
-        Log.i(TAG, "PilottyCore.init apiKey=${if (apiKey.isBlank()) "<empty>" else "sk-***${apiKey.takeLast(4)}"}")
-        PilottyCore.init(this, clashAPIAddr = "127.0.0.1:9090", apiKey = apiKey)
+        // 三件套配置: LLMConfigPrefs.get 内部会自动从老 ApiKeyPrefs 迁移单字段 apiKey, 无需手动处理。
+        val cfg = LLMConfigPrefs.get(this).state.value
+        Log.i(TAG, "PilottyCore.init apiKey=${if (cfg.apiKey.isBlank()) "<empty>" else "sk-***${cfg.apiKey.takeLast(4)}"} baseURL=${cfg.baseURL.ifBlank { "<default>" }} model=${cfg.model.ifBlank { "<default>" }}")
+        PilottyCore.init(this, clashAPIAddr = "127.0.0.1:9090", apiKey = cfg.apiKey)
+        // 把 baseURL/model 推给 Go (apiKey 已通过 init 传过)。 init 后调以保证 Client 已构造。
+        if (cfg.baseURL.isNotBlank() || cfg.model.isNotBlank()) {
+            runCatching { PilottyCore.setLLMConfig(cfg.baseURL, cfg.model, cfg.apiKey) }
+                .onFailure { Log.w(TAG, "setLLMConfig at boot failed", it) }
+        }
         // Phase 8: 让 Agent 的 start_vpn/stop_vpn/vpn_status tools 能驱动 VpnService。
         // 必须在 PilottyCore.init 之后, 这样 client 已构造好, setVpnControl 才有 receiver。
         PilottyCore.setVpnControl(com.pilotty.app.vpn.VpnControlImpl)

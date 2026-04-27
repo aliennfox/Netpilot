@@ -266,7 +266,7 @@ private fun SubScreenScaffold(
 @Composable
 fun SettingsAgentScreen(onBack: () -> Unit, onNavigateAgentTools: () -> Unit) {
     SubScreenScaffold(title = "Agent", onBack = onBack) {
-        AgentApiKeySection()
+        AgentLLMSection()
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionHead(stringResource(com.pilotty.app.R.string.settings_agent_tools))
             EntryCard(

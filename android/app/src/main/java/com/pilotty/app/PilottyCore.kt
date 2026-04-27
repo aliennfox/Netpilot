@@ -105,6 +105,12 @@ object PilottyCore {
     )
     /** M8 热重载: 用户在 Settings 改 apiKey 后立即调这个, 无需重启 App。 空字符串 = 关 Agent。 */
     fun setApiKey(key: String): String            = require().setAPIKey(key)
+    /** 三件套热重载: baseURL/model 空 → 走 default; apiKey 空 → 关 Agent。 */
+    fun setLLMConfig(baseURL: String, model: String, apiKey: String): String =
+        require().setLLMConfig(baseURL, model, apiKey)
+    /** 代理 GET {baseURL}/models 拉 provider 模型列表。 baseURL/key 空 → 用当前生效值。 */
+    fun listLLMModels(baseURL: String, apiKey: String): String =
+        require().listLLMModels(baseURL, apiKey)
     /** Phase 8: Kotlin 在 PilottyApp.onCreate 注入 VpnControlImpl, 让 Agent tool 能控制 VPN。 */
     fun setVpnControl(cb: VpnControlCallback)     = require().setVpnControl(cb)
     /** D3 reload 通道: Agent 写完 overlay 后通知 Kotlin 触发 PilottyVpnService.requestReload。 */

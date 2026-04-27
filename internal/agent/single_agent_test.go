@@ -482,8 +482,8 @@ func TestSingleAgent_CircuitBreakOnRepeatedRoleDeny(t *testing.T) {
 // TestSingleAgent_NoBreakOnTransientFailure 偶发失败 (1 次) 不该熔断, LLM 还有机会改正
 func TestSingleAgent_NoBreakOnTransientFailure(t *testing.T) {
 	agent, srv, _ := buildSingleAgent(t, []string{
-		makeToolCallResp("switch_node", `{"group":""}`),  // iter1: 失败
-		makeFinalResp("好的, 我换法子, 不再试 switch_node。"), // iter2: 不再试同 tool, stop
+		makeToolCallResp("switch_node", `{"group":""}`), // iter1: 失败
+		makeFinalResp("好的, 我换法子, 不再试 switch_node。"),     // iter2: 不再试同 tool, stop
 	})
 	defer srv.Close()
 
@@ -506,10 +506,10 @@ func TestSingleAgent_NoBreakOnTransientFailure(t *testing.T) {
 // (success 清零自己的 count, 第 3 次 失败时 count 重新从 1 起步, 不到阈值)
 func TestSingleAgent_SuccessResetsFailureCount(t *testing.T) {
 	agent, srv, _ := buildSingleAgent(t, []string{
-		makeToolCallResp("switch_node", `{"group":""}`),                     // iter1: switch_node 失败 1 (count=1)
+		makeToolCallResp("switch_node", `{"group":""}`),                          // iter1: switch_node 失败 1 (count=1)
 		makeToolCallResp("switch_node", `{"group":"proxy-group","node":"HK-1"}`), // iter2: switch_node 成功 (count 清零)
-		makeToolCallResp("switch_node", `{"group":""}`),                     // iter3: switch_node 又失败 (count=1, 不熔断)
-		makeFinalResp("尝试结束。"),                                          // iter4: stop
+		makeToolCallResp("switch_node", `{"group":""}`),                          // iter3: switch_node 又失败 (count=1, 不熔断)
+		makeFinalResp("尝试结束。"),                                                   // iter4: stop
 	})
 	defer srv.Close()
 
@@ -533,9 +533,9 @@ func TestSingleAgent_SuccessResetsFailureCount(t *testing.T) {
 func TestSingleAgent_PerToolIndependentCount(t *testing.T) {
 	// switch_node 失败 1 次, get_node_pool 失败 1 次 (都不到阈值), 然后 stop
 	agent, srv, _ := buildSingleAgent(t, []string{
-		makeToolCallResp("switch_node", `{"group":""}`),    // iter1: switch_node 失败 1 次
+		makeToolCallResp("switch_node", `{"group":""}`),     // iter1: switch_node 失败 1 次
 		makeToolCallResp("get_node_pool", `not-valid-json`), // iter2: get_node_pool 参数解析失败 1 次
-		makeFinalResp("ok"),                                  // iter3: stop
+		makeFinalResp("ok"), // iter3: stop
 	})
 	defer srv.Close()
 

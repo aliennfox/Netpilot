@@ -16,6 +16,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,6 +79,12 @@ type Client struct {
 	traffic     *observe.TrafficRing
 	trafficStop chan struct{}
 	trafficOnce sync.Once
+
+	// LLM 三件套配置。 Kotlin 持久化, 启动 + 用户改时 push 给 Go (SetLLMConfig)。
+	// baseURL/model 为空走 config.DefaultLLM*; apiKey 为空 disable Agent。
+	llmBaseURL string
+	llmModel   string
+	llmAPIKey  string
 }
 
 // VpnControlCallback 是 Kotlin 侧实现的 gomobile reverse-binding 接口, 让 Go Agent Tool
@@ -246,6 +254,9 @@ func NewClient(dataDir, clashAPIAddr, apiKey string) *Client {
 		failover:     fo,
 		traffic:      observe.NewTrafficRing(300), // 最多 5 分钟窗口
 		trafficStop:  make(chan struct{}),
+		llmBaseURL:   config.DefaultLLMBaseURL,
+		llmModel:     config.DefaultLLMModel,
+		llmAPIKey:    apiKey,
 	}
 	// Phase 8: 注册 VPN 生命周期 tools, 用 clientVpnAdapter 间接读 c.vpnControl。
 	// Kotlin 在 PilottyApp.onCreate 里 SetVpnControl 注入真实 callback, 之前这些 tool 调用
@@ -348,8 +359,13 @@ func (c *Client) Snapshots() string {
 	return okJSON(c.pipeline.Snapshots().List())
 }
 
-// LlmModel 返回当前使用的 LLM model id (UI 显示用)
+// LlmModel 返回当前生效的 LLM model id (UI 显示用)
 func (c *Client) LlmModel() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.llmModel != "" {
+		return c.llmModel
+	}
 	return config.DefaultLLMModel
 }
 
@@ -1010,25 +1026,130 @@ func (c *Client) ChatStream(message string, cb ChatStreamCallback) *ChatStreamHa
 	return handle
 }
 
-// SetAPIKey 热重载 LLM apiKey。Kotlin 侧用户在 Settings 改 key 后立即调这个, 无需重启 App。
-// key 为空 → 关闭 orchestrator (Agent 回到"未启用"状态)。
-// 线程安全：持 Client.mu 重建 orchestrator。
+// SetAPIKey 热重载 LLM apiKey (旧 API, 保留向后兼容)。 内部转 SetLLMConfig 保持
+// baseURL/model 不变 (已配置过则用现值, 否则走 default)。
 func (c *Client) SetAPIKey(key string) string {
 	c.mu.Lock()
+	baseURL := c.llmBaseURL
+	model := c.llmModel
+	c.mu.Unlock()
+	return c.SetLLMConfig(baseURL, model, key)
+}
+
+// SetLLMConfig 热重载 LLM 三件套 (BaseURL + Model + APIKey)。
+// 任意字段空 → 走 config.DefaultLLM* 兜底 (apiKey 例外: 空就 disable agent)。
+// 线程安全：持 Client.mu 重建 orchestrator。
+//
+// 返回 JSON: {"agent_ready":true|false, "base_url":"...", "model":"..."}
+func (c *Client) SetLLMConfig(baseURL, model, apiKey string) string {
+	c.mu.Lock()
 	defer c.mu.Unlock()
-	if key == "" {
+
+	if baseURL == "" {
+		baseURL = config.DefaultLLMBaseURL
+	}
+	if model == "" {
+		model = config.DefaultLLMModel
+	}
+	c.llmBaseURL = baseURL
+	c.llmModel = model
+	c.llmAPIKey = apiKey
+
+	if apiKey == "" {
 		c.orchestrator = nil
-		return okJSON(map[string]interface{}{"agent_ready": false})
+		return okJSON(map[string]interface{}{
+			"agent_ready": false,
+			"base_url":    baseURL,
+			"model":       model,
+		})
 	}
 	llmClient := agent.NewLLMClient(
-		config.DefaultLLMBaseURL,
-		key,
-		config.DefaultLLMModel,
+		baseURL, apiKey, model,
 		time.Duration(config.DefaultLLMTimeout)*time.Second,
 	)
 	assembler := agent.NewPromptAssembler(c.adapter)
 	c.orchestrator = agent.NewOrchestrator(llmClient, c.pipeline, assembler, c.pipeline.GetTools())
-	return okJSON(map[string]interface{}{"agent_ready": true})
+	return okJSON(map[string]interface{}{
+		"agent_ready": true,
+		"base_url":    baseURL,
+		"model":       model,
+	})
+}
+
+// LLMConfig 返回当前生效的 LLM 三件套 (apiKey 不返回, UI 自己 mask)。
+func (c *Client) LLMConfig() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	baseURL := c.llmBaseURL
+	if baseURL == "" {
+		baseURL = config.DefaultLLMBaseURL
+	}
+	model := c.llmModel
+	if model == "" {
+		model = config.DefaultLLMModel
+	}
+	return okJSON(map[string]interface{}{
+		"base_url": baseURL,
+		"model":    model,
+	})
+}
+
+// ListLLMModels 代理 GET {baseURL}/models 返回 provider 支持的模型列表。
+// SiliconFlow / OpenAI / dashscope 都兼容这个 endpoint。 baseURL/key 空走当前生效值。
+//
+// 返回 JSON: {"models":["id1","id2",...]} 或 {"error":"..."}
+// 模型 id 按 OpenAI 标准在 data[].id 字段, 直接打平成数组返回给 Kotlin。
+func (c *Client) ListLLMModels(baseURL, apiKey string) string {
+	if baseURL == "" {
+		c.mu.Lock()
+		baseURL = c.llmBaseURL
+		c.mu.Unlock()
+	}
+	if baseURL == "" {
+		baseURL = config.DefaultLLMBaseURL
+	}
+	if apiKey == "" {
+		c.mu.Lock()
+		apiKey = c.llmAPIKey
+		c.mu.Unlock()
+	}
+	if apiKey == "" {
+		return errStr("缺少 API Key")
+	}
+	url := baseURL + "/models"
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return errJSON(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	httpClient := &http.Client{Timeout: 15 * time.Second}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return errJSON(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return errJSON(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return errStr(fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(body)))
+	}
+	var raw struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return errJSON(fmt.Errorf("解析失败: %w", err))
+	}
+	models := make([]string, 0, len(raw.Data))
+	for _, m := range raw.Data {
+		if m.ID != "" {
+			models = append(models, m.ID)
+		}
+	}
+	return okJSON(map[string]interface{}{"models": models})
 }
 
 // ClearHistory 清空对话历史。 同步删磁盘文件, 确保 App 重启不恢复。

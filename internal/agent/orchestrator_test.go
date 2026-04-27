@@ -21,7 +21,7 @@ func TestIsVerificationFailed(t *testing.T) {
 		{"未生效 → fail", "节点切换未生效", true},
 		{"不通过 → fail", "测试不通过", true},
 		{"hybrid: pass + fail → 保守按 fail", "整体通过, 但有一个项目失败", false}, // hasPass=true → 不触发
-		{"hybrid: fail + pass → 保守按 fail", "失败, 但部分功能通过", false},   // 同上 hasPass=true
+		{"hybrid: fail + pass → 保守按 fail", "失败, 但部分功能通过", false},    // 同上 hasPass=true
 		{"only fail no pass → trigger rollback", "节点连接失败, 测试不通过", true},
 		{"过 substring 不该误触发, but '通' is included so... 实际命中通过 keyword", "通行流量", false},
 	}
@@ -197,10 +197,10 @@ func TestMatchesRegionAction(t *testing.T) {
 	}
 
 	misses := []string{
-		"日本",         // 没动作词
-		"找个节点",      // 没地区
-		"今天好",        // 都没
-		"找个 abc",   // 地区不在白名单
+		"日本",     // 没动作词
+		"找个节点",   // 没地区
+		"今天好",    // 都没
+		"找个 abc", // 地区不在白名单
 	}
 	for _, s := range misses {
 		t.Run("miss/"+s, func(t *testing.T) {
