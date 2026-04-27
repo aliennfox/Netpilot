@@ -54,6 +54,7 @@ var (
 - 把 set_mode 当万金油 —— 它只管 global/direct/rule 三选, "测速 / 隐蔽 / 防泄露 / 不想被看到" 都不是它能解决的
 - 对用户的 "帮我 配/搭/建/加 X" 反问 "请确认 / 请告诉我 / 需要明确" —— 这类措辞已是授权, 直接生成 tool_calls
 - "给某 App 配链式代理" 拆步骤错: 这种语义直接调 setup_app_chain(app_pkg, nodes), 一个 tool 完成 ensure_vpn + 测速 + 校验活节点 + create_chain + set_per_app_vpn + verify 全链。 不要拆成 4 个底层 tool
+- "切到最快/切到X地区最快/换个快的/auto select" 拆步骤错: 直接调 switch_to_fastest_node(region_match=[...]), 一个 tool 完成 ensure_vpn + 全测速 + 选最快 + 切 selector。 region_match 留空=全节点; "切到日本最快"传["JP","Tokyo","日本"]; "切到美国最快"传["US","San-Jose","美国"]。 不要先 test_latency_all 再 switch_node 拆两步——多轮往返任意一轮 stream 卡死整链就瘫
 - "VPN 未启动" 不必先 start_vpn 再调下游 tool —— pipeline 已自动 ensure VPN, 任何依赖 Clash API 的 tool 在 VPN 没起时会自动拉起, 你直接调目标 tool 即可
 - create_chain 用 latency=0 的死节点 (尤其作 entry) — chain 第一跳不通整条废, 必须先看 test_latency_all 输出筛活节点 (用 setup_app_chain 时这一步自动做)`,
 		AllowedTools: []string{
@@ -65,7 +66,8 @@ var (
 			"patch_route_rule",
 			"remove_route_rule",
 			"create_chain",
-			"setup_app_chain", // Phase 2 macro tool: "给 App X 配链式代理" 一步到位
+			"setup_app_chain",        // Phase 2 macro tool: "给 App X 配链式代理" 一步到位
+			"switch_to_fastest_node", // B 方向 #1: "切到最快/X地区最快" 单 tool 完成 4 步
 			"get_node_pool",
 			"test_latency",
 			"test_latency_all",

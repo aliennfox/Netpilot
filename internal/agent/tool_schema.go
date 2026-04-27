@@ -253,6 +253,21 @@ var toolParameterSchemas = map[string]json.RawMessage{
 		},
 		"required": ["app_pkg", "nodes"]
 	}`),
+	"switch_to_fastest_node": json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"region_match": {
+				"type": "array",
+				"items": {"type": "string"},
+				"description": "可选, 节点 tag substring 白名单 (大小写不敏感, 任一命中即视为候选)。 \"切到日本最快\" 传 [\"JP\",\"Tokyo\",\"日本\"]; \"切到美国最快\" 传 [\"US\",\"San-Jose\",\"美国\"]; 留空 = 全节点比较"
+			},
+			"skip_vpn_ensure": {
+				"type": "boolean",
+				"description": "可选, 默认 false。 false=VPN 没启动时自动拉起再测; true=直接测 (仅在你确定 VPN 已开时用)"
+			}
+		},
+		"required": []
+	}`),
 }
 
 // ConvertToolsToSchema 将内部 ToolDef 转为 OpenAI API 的 tools 参数格式（全量，向后兼容）

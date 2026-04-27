@@ -21,8 +21,135 @@ import (
 // ctrl 不能为 nil; ov 不能为 nil。
 func RegisterMacroTools(ctrl VpnController, ov *overlay.ConfigOverlay) map[string]*ToolDef {
 	return map[string]*ToolDef{
-		"setup_app_chain": toolSetupAppChain(ctrl, ov),
+		"setup_app_chain":        toolSetupAppChain(ctrl, ov),
+		"switch_to_fastest_node": toolSwitchToFastestNode(ctrl),
 	}
+}
+
+// toolSwitchToFastestNode 把 "切到最快节点" 三步缩成 1 个原子 tool。
+//
+// 用户高频意图 ("切到最快" / "切到日本最快" / "换个延迟低的") 之前要 LLM 自己拆:
+// test_latency_all → 解析输出选最快 → switch_node 三轮往返。 任意一轮 stream 卡死或
+// LLM 推理偏题, 整链路就瘫。 收敛成原子 tool: LLM 只需识别意图, 1 次 tool_call 完事,
+// stream 卡死面积砍 90%。
+//
+// params:
+//   - region_match: 可选 []string, 节点 tag substring 白名单 (大小写不敏感)。
+//     例: ["JP", "Tokyo", "日本"] = "切到日本最快"; 空 = "切到最快"。
+//     LLM 应根据用户描述判断 region 多语言别名一并传入, 比如 ["US","San-Jose","美国","美"]。
+//   - skip_vpn_ensure: 可选 bool, 默认 false。 vpn 未启动时自动拉起 (符合 ensure 语义)。
+func toolSwitchToFastestNode(ctrl VpnController) *ToolDef {
+	return &ToolDef{
+		Name: "switch_to_fastest_node",
+		Description: "ATOMIC: switch proxy-group selector to the lowest-latency live node in ONE call. " +
+			"Internally: ensure VPN running → measure all nodes → filter by region_match if given → pick lowest-latency → switch_node. " +
+			"Use this for ANY '切到最快/切到X地区最快/换个快的/auto select' request. " +
+			"region_match is optional substring whitelist (case-insensitive) on node tag — for '切到日本最快' pass [\"JP\",\"Tokyo\",\"日本\"]. " +
+			"DO NOT call test_latency_all + switch_node separately, this tool does both atomically and reports a single Success/failure.",
+		IsWriteOp: true,
+		Execute: func(ctx context.Context, a engine.EngineAdapter, params map[string]interface{}) (*ToolResult, error) {
+			regionMatch := toStringSlice(params["region_match"])
+			skipEnsure := false
+			if v, ok := params["skip_vpn_ensure"]; ok {
+				if b, ok2 := v.(bool); ok2 {
+					skipEnsure = b
+				}
+			}
+
+			trace := strings.Builder{}
+			if len(regionMatch) > 0 {
+				trace.WriteString(fmt.Sprintf("switch_to_fastest_node: region_match=%v\n", regionMatch))
+			} else {
+				trace.WriteString("switch_to_fastest_node: 全节点\n")
+			}
+
+			// 步骤 1: ensure VPN
+			if !skipEnsure {
+				trace.WriteString("[1/4] ensure VPN... ")
+				if !ctrl.IsRunning() {
+					if err := WaitVpnReady(ctrl, 15*time.Second); err != nil {
+						return &ToolResult{Success: false, Message: trace.String() + "失败\n  " + err.Error()}, nil
+					}
+					time.Sleep(1500 * time.Millisecond)
+				}
+				trace.WriteString("OK\n")
+			}
+
+			// 步骤 2: 列节点
+			trace.WriteString("[2/4] 列节点... ")
+			proxies, err := a.GetProxies()
+			if err != nil {
+				return &ToolResult{Success: false, Message: trace.String() + "失败\n  " + err.Error()}, nil
+			}
+			realNodes := filterRealNodes(proxies)
+			candidates := realNodes
+			if len(regionMatch) > 0 {
+				candidates = filterByTagSubstr(realNodes, regionMatch)
+			}
+			if len(candidates) == 0 {
+				return &ToolResult{
+					Success: false,
+					Message: trace.String() + fmt.Sprintf("失败\n  无匹配节点 (region_match=%v, 节点池总数=%d)", regionMatch, len(realNodes)),
+				}, nil
+			}
+			trace.WriteString(fmt.Sprintf("%d 个候选\n", len(candidates)))
+
+			// 步骤 3: 并发测速
+			trace.WriteString("[3/4] 并发测速... ")
+			results := concurrentLatencyTest(a, candidates)
+			var best *latencyEntry
+			for i := range results {
+				if results[i].Latency <= 0 {
+					continue
+				}
+				if best == nil || results[i].Latency < best.Latency {
+					b := results[i]
+					best = &b
+				}
+			}
+			if best == nil {
+				return &ToolResult{
+					Success: false,
+					Message: trace.String() + "失败\n  所有候选节点超时, 检查机场/订阅",
+				}, nil
+			}
+			trace.WriteString(fmt.Sprintf("最快 %s (%dms)\n", best.Tag, best.Latency))
+
+			// 步骤 4: 切换 selector
+			trace.WriteString("[4/4] 切换 selector... ")
+			if err := a.SetActiveProxy("proxy-group", best.Tag); err != nil {
+				return &ToolResult{Success: false, Message: trace.String() + "失败\n  " + err.Error()}, nil
+			}
+			trace.WriteString("OK\n")
+
+			return &ToolResult{
+				Success: true,
+				Message: trace.String() + fmt.Sprintf("\n✓ 已切到 %s (延迟 %dms)", best.Tag, best.Latency),
+				Data: map[string]interface{}{
+					"node":           best.Tag,
+					"latency_ms":     best.Latency,
+					"candidates":     len(candidates),
+					"region_match":   regionMatch,
+					"total_measured": len(results),
+				},
+			}, nil
+		},
+	}
+}
+
+// filterByTagSubstr 节点 tag 大小写不敏感 substring 命中 needles 任一即收。
+func filterByTagSubstr(nodes []engine.ProxyInfo, needles []string) []engine.ProxyInfo {
+	var out []engine.ProxyInfo
+	for _, n := range nodes {
+		tagLower := strings.ToLower(n.Tag)
+		for _, needle := range needles {
+			if strings.Contains(tagLower, strings.ToLower(needle)) {
+				out = append(out, n)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // toolSetupAppChain 把 "给 App X 配 N 跳链式代理" 编排成原子 tool。

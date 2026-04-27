@@ -49,9 +49,9 @@ func newMacroAdapter() *macroFakeAdapter {
 			},
 		},
 		latencyMap: map[string]int{
-			"JP-1":  120,
-			"HK-1":  85,
-			"US-1":  240,
+			"JP-1": 120,
+			"HK-1": 85,
+			"US-1": 240,
 			// DEAD-NODE 故意不在 map 里 -> 测速 fail
 		},
 	}
@@ -208,6 +208,89 @@ func TestSetupAppChain_AutoStartVpn(t *testing.T) {
 	}
 	if !ctrl.IsRunning() {
 		t.Error("expected VPN running after macro completed")
+	}
+}
+
+// TestSwitchToFastestNode_HappyPath VPN 已开 + 节点全活 → 选最低延迟切 selector
+func TestSwitchToFastestNode_HappyPath(t *testing.T) {
+	ctrl := &fakeVpnController{}
+	ctrl.running.Store(true)
+	adapter := newMacroAdapter()
+	tool := toolSwitchToFastestNode(ctrl)
+
+	res, err := tool.Execute(context.Background(), adapter, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("expected Success, got msg=%q", res.Message)
+	}
+	// HK-1 (85ms) 是 newMacroAdapter latencyMap 里最低活节点
+	data := res.Data.(map[string]interface{})
+	if data["node"] != "HK-1" {
+		t.Errorf("expected best=HK-1, got %v", data["node"])
+	}
+	if data["latency_ms"] != 85 {
+		t.Errorf("expected latency_ms=85, got %v", data["latency_ms"])
+	}
+	if adapter.groups["proxy-group"].Now != "HK-1" {
+		t.Errorf("expected adapter switched to HK-1, got %q", adapter.groups["proxy-group"].Now)
+	}
+}
+
+// TestSwitchToFastestNode_RegionMatch region_match 限定候选, 仅在白名单内选
+func TestSwitchToFastestNode_RegionMatch(t *testing.T) {
+	ctrl := &fakeVpnController{}
+	ctrl.running.Store(true)
+	adapter := newMacroAdapter()
+	tool := toolSwitchToFastestNode(ctrl)
+
+	// "JP" 仅命中 JP-1 (120ms), HK-1 / US-1 排除
+	res, _ := tool.Execute(context.Background(), adapter, map[string]interface{}{
+		"region_match": []interface{}{"JP"},
+	})
+	if !res.Success {
+		t.Fatalf("expected Success: %q", res.Message)
+	}
+	data := res.Data.(map[string]interface{})
+	if data["node"] != "JP-1" {
+		t.Errorf("region_match=[JP] expected JP-1, got %v", data["node"])
+	}
+}
+
+// TestSwitchToFastestNode_RegionMatchNoCandidate region 没匹配 → fail-fast
+func TestSwitchToFastestNode_RegionMatchNoCandidate(t *testing.T) {
+	ctrl := &fakeVpnController{}
+	ctrl.running.Store(true)
+	adapter := newMacroAdapter()
+	tool := toolSwitchToFastestNode(ctrl)
+
+	res, _ := tool.Execute(context.Background(), adapter, map[string]interface{}{
+		"region_match": []interface{}{"XX-Nonexistent"},
+	})
+	if res.Success {
+		t.Fatal("expected fail when no candidate matches region")
+	}
+	if !strings.Contains(res.Message, "无匹配节点") {
+		t.Errorf("err msg should mention 无匹配节点: %q", res.Message)
+	}
+}
+
+// TestSwitchToFastestNode_AutoStartVpn VPN 没开 → 内部 WaitVpnReady 自动拉起
+func TestSwitchToFastestNode_AutoStartVpn(t *testing.T) {
+	ctrl := &fakeVpnController{readyAfter: 200 * time.Millisecond}
+	adapter := newMacroAdapter()
+	tool := toolSwitchToFastestNode(ctrl)
+
+	res, err := tool.Execute(context.Background(), adapter, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("expected Success: %q", res.Message)
+	}
+	if ctrl.startCalls.Load() != 1 {
+		t.Errorf("expected 1 RequestStart, got %d", ctrl.startCalls.Load())
 	}
 }
 
