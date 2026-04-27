@@ -98,6 +98,20 @@ object PilottyRepository {
     suspend fun rollback(id: String = ""): MessageDto = call { PilottyCore.rollback(id) }
 
     fun clearHistory() = PilottyCore.clearHistory()
+
+    /** 多会话切换: 把目标会话所有 (role, content, source) 一次性灌回 Go 侧 history, Agent 重新"记得" */
+    fun restoreHistory(entries: List<Triple<String, String, String>>) {
+        val arr = kotlinx.serialization.json.buildJsonArray {
+            entries.forEach { (role, content, source) ->
+                add(kotlinx.serialization.json.buildJsonObject {
+                    put("role", kotlinx.serialization.json.JsonPrimitive(role))
+                    put("content", kotlinx.serialization.json.JsonPrimitive(content))
+                    put("source", kotlinx.serialization.json.JsonPrimitive(source))
+                })
+            }
+        }
+        runCatching { PilottyCore.restoreHistory(arr.toString()) }
+    }
     fun agentReady(): Boolean = PilottyCore.agentReady()
     fun version(): String = PilottyCore.version()
 

@@ -43,6 +43,72 @@ func formatCircuitBreakReply(toolName, lastErr string) string {
 		toolName, toolFailureCircuitBreakThreshold, lastErr)
 }
 
+// formatToolFailure 把 tool 失败包成给 LLM 看的结构化错误 + 自纠提示
+// 参考 Claude Code toolExecution.ts 的 corrective context 模式: 失败不是终点,
+// 是给 LLM 的"下一步该做什么"hint。 失败回灌 (error + params received + next-step
+// suggestion) 比裸 error message 显著降低反复幻觉的频率。
+func formatToolFailure(toolName string, params map[string]interface{}, errMsg, hint string) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "[%s] 失败: %s", toolName, errMsg)
+	if len(params) > 0 {
+		if b, err := json.Marshal(params); err == nil && len(b) > 0 {
+			fmt.Fprintf(&sb, "\n  入参: %s", truncateResult(string(b), 200))
+		}
+	}
+	if hint != "" {
+		fmt.Fprintf(&sb, "\n  下一步建议: %s", hint)
+	}
+	return sb.String()
+}
+
+// suggestRecovery 根据错误文本启发式给出下一步建议。 关键词匹配, 中英文都覆盖。
+// 这层 hint 是给 LLM 看的, 不是给用户的; 用 imperative 语气让 LLM 直接照做。
+func suggestRecovery(errMsg string) string {
+	e := strings.ToLower(errMsg)
+	switch {
+	case (strings.Contains(errMsg, "节点") && (strings.Contains(errMsg, "不存在") || strings.Contains(errMsg, "未找到"))) ||
+		(strings.Contains(e, "node") && (strings.Contains(e, "not found") || strings.Contains(e, "unknown"))):
+		return "先调用 get_node_pool 看准确的节点 tag 列表, 再用精确名重试"
+	case (strings.Contains(errMsg, "vpn") || strings.Contains(e, "vpn")) &&
+		(strings.Contains(errMsg, "未启动") || strings.Contains(e, "not running") || strings.Contains(e, "not started")):
+		return "先调 start_vpn 启动 VPN 隧道, 等就绪后再调本工具"
+	case strings.Contains(errMsg, "权限") || strings.Contains(e, "permission denied") || strings.Contains(e, "forbidden"):
+		return "此操作需要 Configure 角色; 让 orchestrator 委派或换只读 tool"
+	case strings.Contains(errMsg, "参数") || strings.Contains(e, "missing field") || strings.Contains(e, "invalid param") || strings.Contains(e, "required"):
+		return "params schema 有缺失或类型错的字段; 对照 tool 定义补全后重试"
+	case strings.Contains(errMsg, "订阅") || strings.Contains(e, "subscription") && strings.Contains(e, "not found"):
+		return "先调 list_subscriptions 看可用订阅 name, 再用精确名重试"
+	case strings.Contains(errMsg, "超时") || strings.Contains(e, "timeout") || strings.Contains(e, "deadline"):
+		return "上游响应超时; 不要立即 retry 同一调用, 改换查询型 tool 收集更多状态"
+	default:
+		return "如错误持续, 先调相关查询 tool (list_*/ get_*) 确认前置状态后再重试; 不要重复同样参数"
+	}
+}
+
+// formatUnknownTool 全局未知 tool 名: LLM 调了不在 registry 里的 tool。
+// 参考 Claude Code buildSchemaNotSentHint 模式 — 不熔断, 列出当前角色可用 tool 让 LLM 自纠。
+func formatUnknownTool(toolName, roleName string, allowed []string) string {
+	avail := strings.Join(allowed, ", ")
+	if len(avail) > 400 {
+		avail = avail[:400] + "..."
+	}
+	return fmt.Sprintf(
+		"[%s] 未知工具 — 此 tool 不在已注册集合内, 不会被执行。 当前角色 %s 可用工具: [%s]. "+
+			"请用准确的 tool 名重试 (检查拼写或换近义工具)。",
+		toolName, roleName, avail,
+	)
+}
+
+// formatRoleDeny 角色拒绝重导向: 不是 dead end, 是告诉 LLM "这事不归你管, 让上层接管"。
+// 让 LLM 选别的同语义合规 tool 或主动放弃当前 tool 调用 (orchestrator 会在下个角色再试)。
+func formatRoleDeny(toolName, roleName string) string {
+	return fmt.Sprintf(
+		"[%s] 角色限制 — 当前 %s 角色无权使用此工具 (orchestrator 将在 Configure 阶段委派写操作). "+
+			"如果当前轮次只是诊断, 请用只读工具收集证据后给出结论, 不要硬拗写工具.",
+		toolName, roleName,
+	)
+}
+
 // SingleAgent 是单角色 LLM Agent 执行器，实现 tool-use 闭环。
 // Orchestrator 用它来运行每个角色阶段。
 type SingleAgent struct {
@@ -129,19 +195,33 @@ func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMess
 		var summaryParts []string
 
 		for _, tc := range choice.Message.ToolCalls {
-			// 硬性检查：只读角色不允许调写操作
-			if !isToolAllowed(tc.Function.Name, role.AllowedTools) {
-				denyMsg := fmt.Sprintf("当前角色 %s 无权使用此工具", role.Name)
-				summaryParts = append(summaryParts,
-					fmt.Sprintf("[%s] 被拒绝: %s", tc.Function.Name, denyMsg))
+			// 全局未知 tool 名: LLM 幻觉了不存在的 tool, 不熔断, 返回可用列表让自纠
+			if _, exists := a.tools[tc.Function.Name]; !exists {
+				msg := formatUnknownTool(tc.Function.Name, role.Name, role.AllowedTools)
+				summaryParts = append(summaryParts, msg)
 				events = append(events, ToolEvent{
 					Name:        tc.Function.Name,
 					ArgsSummary: truncateResult(tc.Function.Arguments, 120),
-					Error:       denyMsg,
+					Error:       "unknown tool",
 					Role:        role.Name,
 				})
 				toolFailCount[tc.Function.Name]++
-				lastToolError[tc.Function.Name] = denyMsg
+				lastToolError[tc.Function.Name] = "unknown tool"
+				continue
+			}
+
+			// 角色拒绝: 重导向 hint 而非 dead end
+			if !isToolAllowed(tc.Function.Name, role.AllowedTools) {
+				denyMsg := formatRoleDeny(tc.Function.Name, role.Name)
+				summaryParts = append(summaryParts, denyMsg)
+				events = append(events, ToolEvent{
+					Name:        tc.Function.Name,
+					ArgsSummary: truncateResult(tc.Function.Arguments, 120),
+					Error:       "role denied",
+					Role:        role.Name,
+				})
+				toolFailCount[tc.Function.Name]++
+				lastToolError[tc.Function.Name] = "role denied"
 				continue
 			}
 
@@ -151,16 +231,18 @@ func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMess
 			var params map[string]interface{}
 			if tc.Function.Arguments != "" {
 				if err := json.Unmarshal([]byte(tc.Function.Arguments), &params); err != nil {
-					summaryParts = append(summaryParts,
-						fmt.Sprintf("[%s] 参数解析失败: %s", tc.Function.Name, err.Error()))
+					msg := formatToolFailure(tc.Function.Name, nil,
+						"参数 JSON 解析失败: "+err.Error(),
+						"确保 arguments 是合法 JSON 对象, 字段类型对照 tool schema")
+					summaryParts = append(summaryParts, msg)
 					events = append(events, ToolEvent{
 						Name:        tc.Function.Name,
 						ArgsSummary: truncateResult(tc.Function.Arguments, 120),
-						Error:       "参数解析失败: " + err.Error(),
+						Error:       "params parse: " + err.Error(),
 						Role:        role.Name,
 					})
 					toolFailCount[tc.Function.Name]++
-					lastToolError[tc.Function.Name] = "参数解析失败: " + err.Error()
+					lastToolError[tc.Function.Name] = "params parse: " + err.Error()
 					continue
 				}
 			}
@@ -184,9 +266,11 @@ func (a *SingleAgent) RunWithRole(ctx context.Context, role *AgentRole, userMess
 				delete(toolFailCount, tc.Function.Name)
 				delete(lastToolError, tc.Function.Name)
 			} else {
-				evt.Error = truncateResult(stripANSI(result.Message), 200)
-				summaryParts = append(summaryParts,
-					fmt.Sprintf("[%s] 失败: %s", tc.Function.Name, cleanMsg))
+				rawErr := stripANSI(result.Message)
+				evt.Error = truncateResult(rawErr, 200)
+				msg := formatToolFailure(tc.Function.Name, params,
+					truncateResult(rawErr, 600), suggestRecovery(rawErr))
+				summaryParts = append(summaryParts, msg)
 				toolFailCount[tc.Function.Name]++
 				lastToolError[tc.Function.Name] = evt.Error
 			}
@@ -296,20 +380,37 @@ func (a *SingleAgent) RunWithRoleStream(ctx context.Context, role *AgentRole, us
 		// 有 tool calls → 执行并回填
 		var summaryParts []string
 		for _, tc := range toolCalls {
-			if !isToolAllowed(tc.Function.Name, role.AllowedTools) {
-				denyMsg := fmt.Sprintf("当前角色 %s 无权使用此工具", role.Name)
+			// 全局未知 tool 名: 不熔断, 列出可用 tool 让 LLM 自纠
+			if _, exists := a.tools[tc.Function.Name]; !exists {
+				msg := formatUnknownTool(tc.Function.Name, role.Name, role.AllowedTools)
 				evt := ToolEvent{
 					Name:        tc.Function.Name,
 					ArgsSummary: truncateResult(tc.Function.Arguments, 120),
-					Error:       denyMsg,
+					Error:       "unknown tool",
 					Role:        role.Name,
 				}
 				sink.OnToolEnd(evt)
 				events = append(events, evt)
-				summaryParts = append(summaryParts,
-					fmt.Sprintf("[%s] 被拒绝: %s", tc.Function.Name, denyMsg))
+				summaryParts = append(summaryParts, msg)
 				toolFailCount[tc.Function.Name]++
-				lastToolError[tc.Function.Name] = denyMsg
+				lastToolError[tc.Function.Name] = "unknown tool"
+				continue
+			}
+
+			// 角色拒绝: 重导向 hint
+			if !isToolAllowed(tc.Function.Name, role.AllowedTools) {
+				denyMsg := formatRoleDeny(tc.Function.Name, role.Name)
+				evt := ToolEvent{
+					Name:        tc.Function.Name,
+					ArgsSummary: truncateResult(tc.Function.Arguments, 120),
+					Error:       "role denied",
+					Role:        role.Name,
+				}
+				sink.OnToolEnd(evt)
+				events = append(events, evt)
+				summaryParts = append(summaryParts, denyMsg)
+				toolFailCount[tc.Function.Name]++
+				lastToolError[tc.Function.Name] = "role denied"
 				continue
 			}
 
@@ -323,18 +424,20 @@ func (a *SingleAgent) RunWithRoleStream(ctx context.Context, role *AgentRole, us
 			var params map[string]interface{}
 			if tc.Function.Arguments != "" {
 				if err := json.Unmarshal([]byte(tc.Function.Arguments), &params); err != nil {
+					msg := formatToolFailure(tc.Function.Name, nil,
+						"参数 JSON 解析失败: "+err.Error(),
+						"确保 arguments 是合法 JSON 对象, 字段类型对照 tool schema")
 					evt := ToolEvent{
 						Name:        tc.Function.Name,
 						ArgsSummary: truncateResult(tc.Function.Arguments, 120),
-						Error:       "参数解析失败: " + err.Error(),
+						Error:       "params parse: " + err.Error(),
 						Role:        role.Name,
 					}
 					sink.OnToolEnd(evt)
 					events = append(events, evt)
-					summaryParts = append(summaryParts,
-						fmt.Sprintf("[%s] 参数解析失败: %s", tc.Function.Name, err.Error()))
+					summaryParts = append(summaryParts, msg)
 					toolFailCount[tc.Function.Name]++
-					lastToolError[tc.Function.Name] = "参数解析失败: " + err.Error()
+					lastToolError[tc.Function.Name] = "params parse: " + err.Error()
 					continue
 				}
 			}
@@ -362,8 +465,10 @@ func (a *SingleAgent) RunWithRoleStream(ctx context.Context, role *AgentRole, us
 				delete(toolFailCount, tc.Function.Name)
 				delete(lastToolError, tc.Function.Name)
 			} else {
-				summaryParts = append(summaryParts,
-					fmt.Sprintf("[%s] 失败: %s", tc.Function.Name, cleanMsg))
+				rawErr := stripANSI(result.Message)
+				msg := formatToolFailure(tc.Function.Name, params,
+					truncateResult(rawErr, 600), suggestRecovery(rawErr))
+				summaryParts = append(summaryParts, msg)
 				toolFailCount[tc.Function.Name]++
 				lastToolError[tc.Function.Name] = evt.Error
 			}

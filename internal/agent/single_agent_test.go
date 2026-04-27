@@ -215,8 +215,9 @@ func TestSingleAgent_ToolDeniedByRoleWhitelist(t *testing.T) {
 	if events[0].Name != "set_mode" {
 		t.Errorf("event name: %q", events[0].Name)
 	}
-	if !strings.Contains(events[0].Error, "无权使用") {
-		t.Errorf("event Error should mention 无权使用, got %q", events[0].Error)
+	// 角色拒绝改成 "role denied" marker (Claude Code corrective context 模式), 真实 hint 在 summary 里
+	if !strings.Contains(events[0].Error, "role denied") {
+		t.Errorf("event Error should mention role denied, got %q", events[0].Error)
 	}
 }
 
@@ -235,7 +236,8 @@ func TestSingleAgent_MalformedToolArgs(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("expect 1 event, got %d", len(events))
 	}
-	if !strings.Contains(events[0].Error, "参数解析失败") {
+	// 参数解析失败改用 "params parse" marker
+	if !strings.Contains(events[0].Error, "params parse") {
 		t.Errorf("event Error: %q", events[0].Error)
 	}
 }

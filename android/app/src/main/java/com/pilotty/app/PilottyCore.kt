@@ -110,6 +110,8 @@ object PilottyCore {
     /** D3 reload 通道: Agent 写完 overlay 后通知 Kotlin 触发 PilottyVpnService.requestReload。 */
     fun setPlatformReloader(r: PlatformReloader)  = require().setPlatformReloader(r)
     fun clearHistory()                            = require().clearHistory()
+    /** 多会话切换: 用目标会话的消息重置 Go 侧 ConversationHistory (entriesJSON = [{role,content,source}...]) */
+    fun restoreHistory(entriesJSON: String): String = require().restoreHistory(entriesJSON)
     fun subscriptions(): String                   = require().subscriptions()
     fun addSubscription(name: String, url: String): String = require().addSubscription(name, url)
     fun removeSubscription(id: String): String    = require().removeSubscription(id)

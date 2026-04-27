@@ -33,7 +33,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.pilotty.app.chat.ChatHistoryPrefs
+import com.pilotty.app.chat.ChatSessionStore
 import com.pilotty.app.data.*
 import com.pilotty.app.ui.agent.AgentQueryBus
 import com.pilotty.app.ui.components.*
@@ -69,12 +69,17 @@ data class ChatUi(
 )
 
 class ChatViewModel : ViewModel() {
-    // Phase 7.1: 启动时从 SP 恢复历史气泡; send/clear 写回 SP。 Go 侧 ConversationHistory
-    // 另行持久到 filesDir/chat_history.json 保证 LLM system prompt 摘要跨重启连续。
-    private val prefs: ChatHistoryPrefs? = com.pilotty.app.PilottyApp.appContext?.let { ChatHistoryPrefs.get(it) }
+    // Phase 11: 多会话持久化, 替代单会话的 ChatHistoryPrefs。 Go 侧 ConversationHistory
+    // (LLM 上下文摘要) 仍是单 active 实例, 切会话时清掉让 Agent 重新开始。
+    private val store: ChatSessionStore? = com.pilotty.app.PilottyApp.appContext?.let { ChatSessionStore.get(it) }
 
-    private val _state = MutableStateFlow(ChatUi(messages = loadPersistedMessages()))
+    private val _state = MutableStateFlow(ChatUi(messages = loadActiveMessages()))
     val state: StateFlow<ChatUi> = _state.asStateFlow()
+
+    val sessions: StateFlow<List<ChatSessionStore.Session>> =
+        store?.sessions ?: MutableStateFlow(emptyList<ChatSessionStore.Session>()).asStateFlow()
+    val activeId: StateFlow<String> =
+        store?.activeId ?: MutableStateFlow<String>("").asStateFlow()
 
     // 顶栏副标实时显示 VPN 状态: tunRunning 变化触发 instant 刷, 8s ticker 兜底节点切换
     private val _vpnHint = MutableStateFlow("VPN 未启动")
@@ -109,11 +114,45 @@ class ChatViewModel : ViewModel() {
             .onFailure { _vpnHint.value = "VPN 已启动" }
     }
 
-    private fun loadPersistedMessages(): List<ChatMessage> =
-        prefs?.state?.value?.map { ChatMessage(it.role, it.text, it.source, it.events) } ?: emptyList()
+    private fun loadActiveMessages(): List<ChatMessage> =
+        store?.activeMessages()?.map { ChatMessage(it.role, it.text, it.source, it.events) } ?: emptyList()
 
     private fun persist(messages: List<ChatMessage>) {
-        prefs?.save(messages.map { ChatHistoryPrefs.Entry(it.role, it.text, it.source, it.events) })
+        store?.saveActive(messages.map { ChatSessionStore.Entry(it.role, it.text, it.source, it.events) })
+    }
+
+    fun newSession() {
+        streamJob?.cancel()
+        streamJob = null
+        runCatching { PilottyRepository.clearHistory() }
+        store?.newSession()
+        _state.value = ChatUi()
+    }
+
+    fun switchSession(id: String) {
+        if (id == store?.activeId?.value) return
+        streamJob?.cancel()
+        streamJob = null
+        store?.switchTo(id)
+        val msgs = loadActiveMessages()
+        _state.value = ChatUi(messages = msgs)
+        // 灌回该会话上下文到 Go 侧 history → Agent 重新"记得"该会话之前的对话
+        runCatching {
+            PilottyRepository.restoreHistory(
+                msgs.map { Triple(it.role, it.text, it.source.ifEmpty { "agent" }) }
+            )
+        }
+    }
+
+    fun deleteSession(id: String) {
+        val wasActive = id == store?.activeId?.value
+        store?.delete(id)
+        if (wasActive) {
+            streamJob?.cancel()
+            streamJob = null
+            runCatching { PilottyRepository.clearHistory() }
+            _state.value = ChatUi(messages = loadActiveMessages())
+        }
     }
 
     /**
@@ -246,10 +285,9 @@ class ChatViewModel : ViewModel() {
         _state.value = _state.value.copy(sending = false, streamingPhase = "", error = null)
     }
 
+    /** 兼容 /clear 命令: 等同新建会话 (旧会话仍保留在抽屉里, 不再 destructive 清空) */
     fun clear() {
-        PilottyRepository.clearHistory()
-        _state.value = ChatUi()
-        prefs?.clear()
+        newSession()
     }
 }
 
@@ -426,16 +464,22 @@ fun ChatScreen(
     val pc = LocalPilottyColors.current
     val ui by vm.state.collectAsStateWithLifecycle()
     val vpnHint by vm.vpnHint.collectAsStateWithLifecycle()
+    val sessions by vm.sessions.collectAsStateWithLifecycle()
+    val activeId by vm.activeId.collectAsStateWithLifecycle()
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
-    // /help 本地响应的文案, 透传给 VM
     val helpText = androidx.compose.ui.res.stringResource(com.pilotty.app.R.string.chat_help_message)
+
+    val drawerState = androidx.compose.material3.rememberDrawerState(
+        initialValue = androidx.compose.material3.DrawerValue.Closed,
+    )
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var pendingDeleteId by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(ui.messages.size) {
         if (ui.messages.isNotEmpty()) listState.animateScrollToItem(ui.messages.size - 1)
     }
 
-    // D1: Home "Ask the agent" → Chat 自动发送。 收到 pending query 就丢 vm.send + consume
     val pendingQuery by AgentQueryBus.pending.collectAsStateWithLifecycle()
     LaunchedEffect(pendingQuery) {
         pendingQuery?.let {
@@ -444,6 +488,28 @@ fun ChatScreen(
         }
     }
 
+    androidx.compose.material3.ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ChatSessionsDrawer(
+                sessions = sessions,
+                activeId = activeId,
+                onSelect = { id ->
+                    vm.switchSession(id)
+                    scope.launch { drawerState.close() }
+                },
+                onNew = {
+                    vm.newSession()
+                    scope.launch { drawerState.close() }
+                },
+                onLongPress = { id -> pendingDeleteId = id },
+                onOpenAgentTrace = {
+                    scope.launch { drawerState.close() }
+                    onNavigateAgentTrace()
+                },
+            )
+        },
+    ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -461,14 +527,14 @@ fun ChatScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.weight(1f),
             ) {
-                // Action Trace 入口: 跳 Settings → Agent → 最近活动 (复用已有 AgentActivitySection)
+                // ≡ 打开会话抽屉
                 Text(
                     "≡",
                     color = pc.ink,
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
-                        .clickable { onNavigateAgentTrace() }
+                        .clickable { scope.launch { drawerState.open() } }
                         .padding(horizontal = 4.dp, vertical = 2.dp),
                 )
                 Column {
@@ -491,7 +557,7 @@ fun ChatScreen(
             Surface(
                 color = pc.surface2,
                 shape = RoundedCornerShape(999.dp),
-                onClick = { vm.clear() },
+                onClick = { vm.newSession() },
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -709,6 +775,173 @@ fun ChatScreen(
                     }
                 }
             }
+        }
+    }
+    } // ModalNavigationDrawer trailing lambda close
+
+    // 删除会话二次确认
+    pendingDeleteId?.let { id ->
+        val target = sessions.firstOrNull { it.id == id }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { pendingDeleteId = null },
+            title = { Text("删除会话?") },
+            text = {
+                Text(
+                    "确定删除 \"${target?.title?.ifEmpty { "(空会话)" } ?: "会话"}\" 吗? 此操作不可撤销。",
+                    color = pc.ink2,
+                    fontSize = 13.sp,
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    vm.deleteSession(id)
+                    pendingDeleteId = null
+                }) { Text("删除", color = pc.error) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { pendingDeleteId = null }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun ChatSessionsDrawer(
+    sessions: List<com.pilotty.app.chat.ChatSessionStore.Session>,
+    activeId: String,
+    onSelect: (String) -> Unit,
+    onNew: () -> Unit,
+    onLongPress: (String) -> Unit,
+    onOpenAgentTrace: () -> Unit,
+) {
+    val pc = LocalPilottyColors.current
+    androidx.compose.material3.ModalDrawerSheet(
+        drawerContainerColor = pc.surface,
+        modifier = Modifier.fillMaxHeight(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 16.dp),
+        ) {
+            Text(
+                "会话",
+                color = pc.ink,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 8.dp, bottom = 12.dp),
+            )
+
+            Surface(
+                color = pc.surface2,
+                shape = MaterialTheme.shapes.medium,
+                onClick = onNew,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("+", color = pc.accent, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("新会话", color = pc.ink, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            if (sessions.isEmpty()) {
+                Text("暂无会话", color = pc.ink3, fontSize = 12.sp, modifier = Modifier.padding(8.dp))
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    items(sessions, key = { it.id }) { s ->
+                        val isActive = s.id == activeId
+                        Surface(
+                            color = if (isActive) pc.surface3 else pc.surface,
+                            shape = MaterialTheme.shapes.medium,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .combinedClickable(
+                                    onClick = { onSelect(s.id) },
+                                    onLongClick = { onLongPress(s.id) },
+                                ),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        s.title.ifEmpty { "(空会话)" },
+                                        color = if (isActive) pc.ink else pc.ink2,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                                        maxLines = 1,
+                                    )
+                                    Text(
+                                        formatRelativeTime(s.lastUpdatedAt),
+                                        color = pc.ink3,
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                    )
+                                }
+                                Text(
+                                    "${s.messages.size}",
+                                    color = pc.ink3,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            HorizontalDivider(color = pc.hairline, modifier = Modifier.padding(vertical = 8.dp))
+            Surface(
+                color = pc.surface,
+                shape = MaterialTheme.shapes.medium,
+                onClick = onOpenAgentTrace,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text("Agent 最近活动", color = pc.ink, fontSize = 13.sp)
+                    Text("›", color = pc.ink3, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Text(
+                "长按会话条目可删除 · 切到旧会话时 Agent 不再记得当时的上下文",
+                color = pc.ink4,
+                fontSize = 9.5.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            )
+        }
+    }
+}
+
+private fun formatRelativeTime(ts: Long): String {
+    val now = System.currentTimeMillis()
+    val diff = (now - ts) / 1000
+    return when {
+        diff < 60 -> "刚刚"
+        diff < 3600 -> "${diff / 60}m ago"
+        diff < 86400 -> "${diff / 3600}h ago"
+        diff < 86400 * 7 -> "${diff / 86400}d ago"
+        else -> {
+            val cal = java.util.Calendar.getInstance().apply { timeInMillis = ts }
+            "%02d-%02d".format(cal.get(java.util.Calendar.MONTH) + 1, cal.get(java.util.Calendar.DAY_OF_MONTH))
         }
     }
 }

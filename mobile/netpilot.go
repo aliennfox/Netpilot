@@ -1036,6 +1036,38 @@ func (c *Client) ClearHistory() {
 	}
 }
 
+// RestoreHistory 用给定的会话条目重置 ConversationHistory (多会话切换场景)。
+// entriesJSON: [{"role":"user|assistant","content":"...","source":"agent|local"}...]
+// 调用后 Go 侧 history 完全等同输入, Agent 下一轮 LLM 调用就能"记得"该会话上下文。
+// 异步刷盘, 确保进程重启后仍然指向当前 active 会话。
+func (c *Client) RestoreHistory(entriesJSON string) string {
+	if c == nil {
+		return errStr("client not initialized")
+	}
+	type entry struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+		Source  string `json:"source"`
+	}
+	var entries []entry
+	if err := json.Unmarshal([]byte(entriesJSON), &entries); err != nil {
+		return errJSON(err)
+	}
+	c.history.Clear()
+	for _, e := range entries {
+		if e.Role == "" || e.Content == "" {
+			continue
+		}
+		src := e.Source
+		if src == "" {
+			src = "agent"
+		}
+		c.history.Add(e.Role, e.Content, src)
+	}
+	c.flushHistoryAsync()
+	return okJSON(map[string]any{"restored": len(entries)})
+}
+
 // --- Subscriptions ---
 
 // Subscriptions 列出所有订阅（JSON 数组）。
