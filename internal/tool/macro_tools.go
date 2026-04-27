@@ -8,6 +8,7 @@ import (
 
 	"github.com/foxnetpilot/netpilot/internal/engine"
 	"github.com/foxnetpilot/netpilot/internal/overlay"
+	"github.com/foxnetpilot/netpilot/internal/subscription"
 )
 
 // RegisterMacroTools 注册"宏 tool" —— 把多个底层 tool 编排成一个原子操作,
@@ -19,11 +20,152 @@ import (
 // 收敛成 1 个 tool, LLM 只需识别意图, 不必规划状态机。 这是 Claude Code 的 Skill bundle 思路。
 //
 // ctrl 不能为 nil; ov 不能为 nil。
-func RegisterMacroTools(ctrl VpnController, ov *overlay.ConfigOverlay) map[string]*ToolDef {
-	return map[string]*ToolDef{
+// RegisterMacroTools 注册宏 tool。 subMgr 可选 (nil 时跳过订阅相关 macro), 兼容
+// CLI 和测试场景。 mobile 路径必传。
+func RegisterMacroTools(ctrl VpnController, ov *overlay.ConfigOverlay, subMgr *subscription.SubscriptionManager) map[string]*ToolDef {
+	tools := map[string]*ToolDef{
 		"setup_app_chain":        toolSetupAppChain(ctrl, ov),
 		"switch_to_fastest_node": toolSwitchToFastestNode(ctrl),
 	}
+	if subMgr != nil {
+		tools["import_and_activate_subscription"] = toolImportAndActivateSubscription(ctrl, subMgr)
+	}
+	return tools
+}
+
+// toolImportAndActivateSubscription "导订阅 + 切到能用的节点" 收敛为单 tool_call。
+//
+// 用户高频意图 ("导这个订阅" / "import this sub" / "添加订阅然后激活") 之前要 LLM 自己拆:
+// import_subscription → list_subscriptions 看 tags → switch_node 三轮往返。 与 #1 同款,
+// 任意一轮 stream 卡死整个流程瘫。
+//
+// params:
+//   - url: required. 订阅 URL (http/https) 或单节点 URI (ss/vmess/vless/trojan/...)。
+//   - name: optional. 订阅显示名, 留空 mgr 会用 URL host 派生。
+//   - pick_fastest: optional bool, 默认 true。 true=测速选最快; false=直接选第一个 tag。
+func toolImportAndActivateSubscription(ctrl VpnController, mgr *subscription.SubscriptionManager) *ToolDef {
+	return &ToolDef{
+		Name: "import_and_activate_subscription",
+		Description: "ATOMIC: import a subscription URL and switch proxy-group to its best node in ONE call. " +
+			"Internally: import_subscription → ensure VPN running → measure imported nodes → pick lowest-latency (or first if pick_fastest=false) → switch_node. " +
+			"Use this for ANY '导这个订阅/导入这个订阅然后激活/import this sub and use it' request. " +
+			"DO NOT call import_subscription + switch_node separately, this tool does both atomically and reports a single Success/failure.",
+		IsWriteOp: true,
+		Execute: func(ctx context.Context, a engine.EngineAdapter, params map[string]interface{}) (*ToolResult, error) {
+			url, _ := params["url"].(string)
+			url = strings.TrimSpace(url)
+			if url == "" {
+				return nil, fmt.Errorf("missing param: url (订阅 URL 或节点 URI)")
+			}
+			name, _ := params["name"].(string)
+			pickFastest := true
+			if v, ok := params["pick_fastest"]; ok {
+				if b, ok2 := v.(bool); ok2 {
+					pickFastest = b
+				}
+			}
+
+			trace := strings.Builder{}
+			trace.WriteString(fmt.Sprintf("import_and_activate_subscription: url=%s\n", url))
+
+			// 步骤 1: 导入
+			trace.WriteString("[1/4] 导入订阅... ")
+			count, summary, err := mgr.AddSubscription(name, url)
+			if err != nil {
+				return &ToolResult{Success: false, Message: trace.String() + "失败\n  " + err.Error()}, nil
+			}
+			trace.WriteString(fmt.Sprintf("OK (%d 节点)\n", count))
+
+			// 找新导入订阅的 tags (按 name 匹配, 否则取最新的)
+			tags := findSubscriptionTags(mgr, name, url)
+			if len(tags) == 0 {
+				return &ToolResult{Success: false, Message: trace.String() + "失败\n  订阅导入但找不到节点 tag (subscription store 可能未同步)\n" + summary}, nil
+			}
+
+			// 步骤 2: ensure VPN
+			trace.WriteString("[2/4] ensure VPN... ")
+			if !ctrl.IsRunning() {
+				if err := WaitVpnReady(ctrl, 15*time.Second); err != nil {
+					return &ToolResult{Success: false, Message: trace.String() + "失败\n  " + err.Error()}, nil
+				}
+				time.Sleep(1500 * time.Millisecond)
+			}
+			trace.WriteString("OK\n")
+
+			// 步骤 3: 选目标节点
+			trace.WriteString("[3/4] 选节点... ")
+			var target string
+			var targetLatency int
+			if pickFastest && len(tags) > 1 {
+				// 把 tags 包成 ProxyInfo 喂 concurrentLatencyTest
+				probe := make([]engine.ProxyInfo, 0, len(tags))
+				for _, t := range tags {
+					probe = append(probe, engine.ProxyInfo{Tag: t})
+				}
+				results := concurrentLatencyTest(a, probe)
+				for i := range results {
+					if results[i].Latency <= 0 {
+						continue
+					}
+					if target == "" || results[i].Latency < targetLatency {
+						target = results[i].Tag
+						targetLatency = results[i].Latency
+					}
+				}
+				if target == "" {
+					return &ToolResult{Success: false, Message: trace.String() + "失败\n  所有节点超时, 检查机场/订阅"}, nil
+				}
+				trace.WriteString(fmt.Sprintf("最快 %s (%dms)\n", target, targetLatency))
+			} else {
+				target = tags[0]
+				trace.WriteString(fmt.Sprintf("第一个 %s\n", target))
+			}
+
+			// 步骤 4: 切 selector
+			trace.WriteString("[4/4] 切换 selector... ")
+			if err := a.SetActiveProxy("proxy-group", target); err != nil {
+				return &ToolResult{Success: false, Message: trace.String() + "失败\n  " + err.Error()}, nil
+			}
+			trace.WriteString("OK\n")
+
+			data := map[string]interface{}{
+				"node":          target,
+				"imported_tags": tags,
+				"node_count":    count,
+			}
+			if targetLatency > 0 {
+				data["latency_ms"] = targetLatency
+			}
+			return &ToolResult{
+				Success: true,
+				Message: trace.String() + fmt.Sprintf("\n✓ 订阅已导入 (%d 节点) + 已切到 %s", count, target),
+				Data:    data,
+			}, nil
+		},
+	}
+}
+
+// findSubscriptionTags 找 mgr 里最近导入的订阅 tags。 优先 name 精确匹配, 其次 URL 匹配,
+// 再次 fallback 到 store 里最末一条 (最新创建)。
+func findSubscriptionTags(mgr *subscription.SubscriptionManager, name, url string) []string {
+	subs := mgr.Store().List()
+	if len(subs) == 0 {
+		return nil
+	}
+	if name != "" {
+		for _, s := range subs {
+			if s.Name == name {
+				return s.Tags
+			}
+		}
+	}
+	for _, s := range subs {
+		if s.URL == url {
+			return s.Tags
+		}
+	}
+	// fallback: 最后一条 (按 store 顺序最新)
+	return subs[len(subs)-1].Tags
 }
 
 // toolSwitchToFastestNode 把 "切到最快节点" 三步缩成 1 个原子 tool。

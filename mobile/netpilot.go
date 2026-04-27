@@ -266,7 +266,7 @@ func NewClient(dataDir, clashAPIAddr, apiKey string) *Client {
 	pipeline.RegisterExtraTools(tool.RegisterPerAppTools(ov))
 	// Phase 2: 宏 tool —— 把 "ensure VPN → 测速 → create_chain → set_per_app_vpn → verify"
 	// 收敛成一个原子 tool, LLM 不必拆 5 步。
-	pipeline.RegisterExtraTools(tool.RegisterMacroTools(vpnAdapter, ov))
+	pipeline.RegisterExtraTools(tool.RegisterMacroTools(vpnAdapter, ov, subMgr))
 	// Phase 1.5: pipeline 在执行依赖 Clash API 的 tool 前自动 ensure VPN 就绪。
 	// 让 LLM 不必显式调 start_vpn —— "CLI 风格原子 tool" 设计。
 	pipeline.SetVpnGuard(

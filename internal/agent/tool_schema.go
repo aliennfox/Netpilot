@@ -253,6 +253,24 @@ var toolParameterSchemas = map[string]json.RawMessage{
 		},
 		"required": ["app_pkg", "nodes"]
 	}`),
+	"import_and_activate_subscription": json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"url": {
+				"type": "string",
+				"description": "订阅 URL (http/https) 或单节点 URI (ss/vmess/vless/trojan/...)。 必填"
+			},
+			"name": {
+				"type": "string",
+				"description": "可选, 订阅显示名。 留空时自动从 URL host 派生"
+			},
+			"pick_fastest": {
+				"type": "boolean",
+				"description": "可选, 默认 true。 true=测速选最快节点切 selector; false=直接选第一个 tag (跳过测速, 适合用户只想'先把节点导进来')"
+			}
+		},
+		"required": ["url"]
+	}`),
 	"switch_to_fastest_node": json.RawMessage(`{
 		"type": "object",
 		"properties": {

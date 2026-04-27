@@ -2,7 +2,11 @@ package tool
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +15,7 @@ import (
 
 	"github.com/foxnetpilot/netpilot/internal/engine"
 	"github.com/foxnetpilot/netpilot/internal/overlay"
+	"github.com/foxnetpilot/netpilot/internal/subscription"
 )
 
 // macroFakeAdapter 嵌入 fakeAdapter, 加 TestLatency 让 macro_tools 测试能跑。
@@ -291,6 +296,188 @@ func TestSwitchToFastestNode_AutoStartVpn(t *testing.T) {
 	}
 	if ctrl.startCalls.Load() != 1 {
 		t.Errorf("expected 1 RequestStart, got %d", ctrl.startCalls.Load())
+	}
+}
+
+// macroSSURI 构造 ss:// URI, 节点名作为 fragment, SanitizeTag 后等于 fragment 原值
+func macroSSURI(name, host string, port int) string {
+	userInfo := base64.RawStdEncoding.EncodeToString([]byte("aes-256-gcm:pass-" + name))
+	return fmt.Sprintf("ss://%s@%s:%d#%s", userInfo, host, port, name)
+}
+
+// macroSSList 把多条 SS URI 拼成 base64 订阅 body
+func macroSSList(uris ...string) string {
+	plain := strings.Join(uris, "\n")
+	return base64.StdEncoding.EncodeToString([]byte(plain))
+}
+
+// buildImportFixture 起 httptest server + 实例化 SubscriptionManager (overlay+adapter 真实)
+// 返回的 mgr 已注入到 macroFakeAdapter 的 latencyMap 用 names 配, 让 toolImportAndActivateSubscription 测速正确
+func buildImportFixture(t *testing.T, latency map[string]int, uris []string) (*subscription.SubscriptionManager, *macroFakeAdapter, string, func()) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, macroSSList(uris...))
+	}))
+
+	dir := t.TempDir()
+	basePath := filepath.Join(dir, "minimal.json")
+	cfg := `{
+		"outbounds": [
+			{"type": "selector", "tag": "proxy-group", "outbounds": ["direct-out"]},
+			{"type": "direct", "tag": "direct-out"}
+		],
+		"route": {"final": "proxy-group"}
+	}`
+	if err := writeFile(basePath, cfg); err != nil {
+		t.Fatalf("write base: %v", err)
+	}
+	store := subscription.NewSubscriptionStore(dir)
+	ov := overlay.NewConfigOverlay(basePath, dir)
+
+	adapter := &macroFakeAdapter{latencyMap: latency}
+	mgr := subscription.NewSubscriptionManager(store, ov, adapter)
+	return mgr, adapter, srv.URL, func() { srv.Close() }
+}
+
+// TestImportAndActivateSubscription_HappyPath 导入 → 测速 → 切到最快
+func TestImportAndActivateSubscription_HappyPath(t *testing.T) {
+	ctrl := &fakeVpnController{}
+	ctrl.running.Store(true)
+	mgr, adapter, url, closeFn := buildImportFixture(t,
+		map[string]int{"JP-Sub": 220, "HK-Sub": 80, "US-Sub": 350},
+		[]string{
+			macroSSURI("JP-Sub", "1.1.1.1", 443),
+			macroSSURI("HK-Sub", "2.2.2.2", 443),
+			macroSSURI("US-Sub", "3.3.3.3", 443),
+		},
+	)
+	defer closeFn()
+	// 让 adapter.SetActiveProxy 不 nil-panic
+	adapter.groups = map[string]*engine.ProxyGroup{
+		"proxy-group": {Tag: "proxy-group", Type: "Selector", Now: ""},
+	}
+
+	tool := toolImportAndActivateSubscription(ctrl, mgr)
+	res, err := tool.Execute(context.Background(), adapter, map[string]interface{}{
+		"url": url,
+	})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("expected Success, got msg=%q", res.Message)
+	}
+	data := res.Data.(map[string]interface{})
+	if data["node"] != "HK-Sub" {
+		t.Errorf("expected fastest=HK-Sub, got %v", data["node"])
+	}
+	if data["latency_ms"] != 80 {
+		t.Errorf("expected latency_ms=80, got %v", data["latency_ms"])
+	}
+	if adapter.groups["proxy-group"].Now != "HK-Sub" {
+		t.Errorf("expected selector switched to HK-Sub, got %q", adapter.groups["proxy-group"].Now)
+	}
+}
+
+// TestImportAndActivateSubscription_PickFastestFalse 直接选第一个 tag, 不测速
+func TestImportAndActivateSubscription_PickFastestFalse(t *testing.T) {
+	ctrl := &fakeVpnController{}
+	ctrl.running.Store(true)
+	mgr, adapter, url, closeFn := buildImportFixture(t,
+		map[string]int{"JP-Sub": 220, "HK-Sub": 80}, // 即使 HK 更快, false 时也走第一个
+		[]string{
+			macroSSURI("JP-Sub", "1.1.1.1", 443),
+			macroSSURI("HK-Sub", "2.2.2.2", 443),
+		},
+	)
+	defer closeFn()
+	adapter.groups = map[string]*engine.ProxyGroup{
+		"proxy-group": {Tag: "proxy-group", Type: "Selector"},
+	}
+
+	tool := toolImportAndActivateSubscription(ctrl, mgr)
+	res, _ := tool.Execute(context.Background(), adapter, map[string]interface{}{
+		"url":          url,
+		"pick_fastest": false,
+	})
+	if !res.Success {
+		t.Fatalf("expected Success, got msg=%q", res.Message)
+	}
+	data := res.Data.(map[string]interface{})
+	if data["node"] != "JP-Sub" {
+		t.Errorf("pick_fastest=false should pick first tag JP-Sub, got %v", data["node"])
+	}
+	if _, has := data["latency_ms"]; has {
+		t.Errorf("pick_fastest=false should NOT measure latency, but Data has latency_ms=%v", data["latency_ms"])
+	}
+}
+
+// TestImportAndActivateSubscription_MissingURL 缺 url 必须 fail-fast
+func TestImportAndActivateSubscription_MissingURL(t *testing.T) {
+	ctrl := &fakeVpnController{}
+	ctrl.running.Store(true)
+	tool := toolImportAndActivateSubscription(ctrl, nil) // mgr 不会被调到, 参数校验先 fail
+	_, err := tool.Execute(context.Background(), &macroFakeAdapter{}, map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing url")
+	}
+	if !strings.Contains(err.Error(), "url") {
+		t.Errorf("err msg should mention url: %v", err)
+	}
+}
+
+// TestImportAndActivateSubscription_AllNodesDead pick_fastest=true + 所有节点 timeout → 报错不切
+func TestImportAndActivateSubscription_AllNodesDead(t *testing.T) {
+	ctrl := &fakeVpnController{}
+	ctrl.running.Store(true)
+	mgr, adapter, url, closeFn := buildImportFixture(t,
+		map[string]int{}, // 空 map → 所有 tag 都 timeout
+		[]string{
+			macroSSURI("JP-Sub", "1.1.1.1", 443),
+			macroSSURI("HK-Sub", "2.2.2.2", 443),
+		},
+	)
+	defer closeFn()
+	adapter.groups = map[string]*engine.ProxyGroup{
+		"proxy-group": {Tag: "proxy-group", Type: "Selector"},
+	}
+
+	tool := toolImportAndActivateSubscription(ctrl, mgr)
+	res, _ := tool.Execute(context.Background(), adapter, map[string]interface{}{
+		"url": url,
+	})
+	if res.Success {
+		t.Fatal("expected fail when all nodes timeout")
+	}
+	if !strings.Contains(res.Message, "超时") {
+		t.Errorf("err msg should mention 超时: %q", res.Message)
+	}
+}
+
+// TestFindSubscriptionTags_NameMatch findSubscriptionTags 优先 name 精确匹配
+func TestFindSubscriptionTags_NameMatch(t *testing.T) {
+	mgr, _, url, closeFn := buildImportFixture(t,
+		map[string]int{"JP-Sub": 100},
+		[]string{macroSSURI("JP-Sub", "1.1.1.1", 443)},
+	)
+	defer closeFn()
+
+	if _, _, err := mgr.AddSubscription("my-sub", url); err != nil {
+		t.Fatalf("setup add: %v", err)
+	}
+	tags := findSubscriptionTags(mgr, "my-sub", "")
+	if len(tags) != 1 || tags[0] != "JP-Sub" {
+		t.Errorf("name match should return [JP-Sub], got %v", tags)
+	}
+	// URL fallback
+	tags2 := findSubscriptionTags(mgr, "", url)
+	if len(tags2) != 1 || tags2[0] != "JP-Sub" {
+		t.Errorf("url match should return [JP-Sub], got %v", tags2)
+	}
+	// neither match → fallback last
+	tags3 := findSubscriptionTags(mgr, "nope", "https://nope.example")
+	if len(tags3) != 1 {
+		t.Errorf("fallback should return last entry tags, got %v", tags3)
 	}
 }
 
