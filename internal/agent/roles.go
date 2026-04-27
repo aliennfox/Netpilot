@@ -23,7 +23,8 @@ var (
 - markdown 标题 (# ##)、表情符号
 - 画蛇添足: 用户问具体事实时不主动加建议, 用户问列表时不只给摘要
 - 重复同一意思、补充用户没问的旁路信息
-- 改写 tool 返回的列表/表格排版 —— 已经对齐好了, 原样透传`,
+- 改写 tool 返回的列表/表格排版 —— 已经对齐好了, 原样透传
+- "我连不上/网络好像有问题/为什么访问不了 X/网速慢/it's slow" 拆步骤错: 直接调 diagnose_connectivity, 一个 tool 完成 vpn_status + 节点测速摘要 + 连接快照 + DNS 模式 + suspect 结论。 不要拆成 vpn_status + test_latency_all + get_connections + get_dns_config 多步——四轮往返任意一轮 stream 卡死整个诊断就瘫`,
 		AllowedTools: []string{
 			"get_node_pool",
 			"test_latency",
@@ -35,6 +36,7 @@ var (
 			"get_dns_config",
 			"get_per_app_vpn",
 			"vpn_status",
+			"diagnose_connectivity", // B 方向 #3: "我连不上/网络有问题" 单 tool 综合诊断
 		},
 	}
 

@@ -21,9 +21,11 @@ import (
 // macroFakeAdapter 嵌入 fakeAdapter, 加 TestLatency 让 macro_tools 测试能跑。
 //
 // latencyMap: tag → ms; 不存在的 tag 返回 0+error 模拟死节点。
+// connections: 可选, GetConnections 返回它 (默认空)。
 type macroFakeAdapter struct {
 	fakeAdapter
-	latencyMap map[string]int
+	latencyMap  map[string]int
+	connections []engine.ConnectionInfo
 }
 
 func (m *macroFakeAdapter) TestLatency(tag string, _ string, _ time.Duration) (int, error) {
@@ -37,6 +39,11 @@ func (m *macroFakeAdapter) TestLatency(tag string, _ string, _ time.Duration) (i
 func (m *macroFakeAdapter) Reload() error { return nil }
 
 func (m *macroFakeAdapter) SetConfigPath(_ string) {}
+
+// GetConnections 返回预置连接列表 (diagnose_connectivity 测试用)
+func (m *macroFakeAdapter) GetConnections() ([]engine.ConnectionInfo, error) {
+	return m.connections, nil
+}
 
 // newMacroAdapter 构造能跑 setup_app_chain 的 fake — 包含 4 个节点 (3 活 1 死) + selector
 func newMacroAdapter() *macroFakeAdapter {
@@ -478,6 +485,131 @@ func TestFindSubscriptionTags_NameMatch(t *testing.T) {
 	tags3 := findSubscriptionTags(mgr, "nope", "https://nope.example")
 	if len(tags3) != 1 {
 		t.Errorf("fallback should return last entry tags, got %v", tags3)
+	}
+}
+
+// TestDiagnoseConnectivity_VpnStopped 不跑 VPN → suspect=VPN_STOPPED 且不调测速
+func TestDiagnoseConnectivity_VpnStopped(t *testing.T) {
+	ctrl := &fakeVpnController{}
+	// 不 Store(true), 默认 false
+	ov := newTestOverlay(t)
+	adapter := newMacroAdapter()
+	tool := toolDiagnoseConnectivity(ctrl, ov)
+
+	res, err := tool.Execute(context.Background(), adapter, map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("expected Success (read-only never fails), got %q", res.Message)
+	}
+	data := res.Data.(map[string]interface{})
+	if data["vpn_running"] != false {
+		t.Errorf("vpn_running expected false, got %v", data["vpn_running"])
+	}
+	suspect, _ := data["suspect"].(string)
+	if !strings.HasPrefix(suspect, "VPN_STOPPED") {
+		t.Errorf("expected suspect=VPN_STOPPED..., got %q", suspect)
+	}
+	if !strings.Contains(res.Message, "节点: skip") {
+		t.Errorf("VPN 未启动应跳过测速: %q", res.Message)
+	}
+}
+
+// TestDiagnoseConnectivity_Healthy VPN 运行 + 多数节点活 + 当前出口非 direct → HEALTHY
+func TestDiagnoseConnectivity_Healthy(t *testing.T) {
+	ctrl := &fakeVpnController{}
+	ctrl.running.Store(true)
+	ov := newTestOverlay(t)
+	adapter := newMacroAdapter()
+	// 给 1 条假活动连接, 让 IDLE 路径不命中
+	adapter.connections = []engine.ConnectionInfo{
+		{ID: "1", Destination: "x.example.com:443", Protocol: "tcp", Chain: "proxy-group"},
+	}
+	tool := toolDiagnoseConnectivity(ctrl, ov)
+
+	res, _ := tool.Execute(context.Background(), adapter, map[string]interface{}{})
+	if !res.Success {
+		t.Fatalf("expected Success: %q", res.Message)
+	}
+	data := res.Data.(map[string]interface{})
+	suspect := data["suspect"].(string)
+	if !strings.HasPrefix(suspect, "HEALTHY") {
+		t.Errorf("expected HEALTHY, got %q (data=%v)", suspect, data)
+	}
+	if data["best_node"] != "HK-1" {
+		t.Errorf("best_node expected HK-1 (85ms), got %v", data["best_node"])
+	}
+	// 4 节点中 1 个 dead (DEAD-NODE) + 3 活 (JP-1/HK-1/US-1) + 1 selector group 已被 filterRealNodes 滤掉
+	if data["nodes_live"] != 3 || data["nodes_dead"] != 1 {
+		t.Errorf("nodes_live/dead expected 3/1, got %v/%v", data["nodes_live"], data["nodes_dead"])
+	}
+}
+
+// TestDiagnoseConnectivity_AllNodesDead VPN 运行但所有节点 timeout → suspect=ALL_NODES_DEAD
+func TestDiagnoseConnectivity_AllNodesDead(t *testing.T) {
+	ctrl := &fakeVpnController{}
+	ctrl.running.Store(true)
+	ov := newTestOverlay(t)
+	adapter := newMacroAdapter()
+	adapter.latencyMap = map[string]int{} // 全部 timeout
+	tool := toolDiagnoseConnectivity(ctrl, ov)
+
+	res, _ := tool.Execute(context.Background(), adapter, map[string]interface{}{})
+	data := res.Data.(map[string]interface{})
+	suspect := data["suspect"].(string)
+	if !strings.HasPrefix(suspect, "ALL_NODES_DEAD") {
+		t.Errorf("expected ALL_NODES_DEAD, got %q", suspect)
+	}
+	if data["nodes_live"] != 0 {
+		t.Errorf("nodes_live should be 0, got %v", data["nodes_live"])
+	}
+}
+
+// TestDiagnoseConnectivity_Idle VPN 运行 + 节点活 + 0 连接 → IDLE
+func TestDiagnoseConnectivity_Idle(t *testing.T) {
+	ctrl := &fakeVpnController{}
+	ctrl.running.Store(true)
+	ov := newTestOverlay(t)
+	adapter := newMacroAdapter()
+	// connections 为 nil/空
+	tool := toolDiagnoseConnectivity(ctrl, ov)
+
+	res, _ := tool.Execute(context.Background(), adapter, map[string]interface{}{})
+	data := res.Data.(map[string]interface{})
+	suspect := data["suspect"].(string)
+	if !strings.HasPrefix(suspect, "IDLE") {
+		t.Errorf("expected IDLE, got %q", suspect)
+	}
+	if data["active_connections"] != 0 {
+		t.Errorf("active_connections expected 0, got %v", data["active_connections"])
+	}
+}
+
+// TestDiagnoseSuspect 单元测试 suspect 决策表 — 不依赖 fake adapter
+func TestDiagnoseSuspect(t *testing.T) {
+	cases := []struct {
+		name        string
+		vpnRunning  bool
+		live        int
+		dead        int
+		currentNode string
+		conns       int
+		wantPrefix  string
+	}{
+		{"vpn stopped", false, 0, 0, "", 0, "VPN_STOPPED"},
+		{"all dead", true, 0, 5, "HK-1", 0, "ALL_NODES_DEAD"},
+		{"selector empty", true, 3, 0, "", 0, "NO_CURRENT_NODE"},
+		{"selector direct", true, 3, 0, "direct-out", 0, "NO_CURRENT_NODE"},
+		{"mostly dead", true, 1, 5, "HK-1", 0, "MOSTLY_DEAD"},
+		{"idle healthy", true, 3, 1, "HK-1", 0, "IDLE"},
+		{"healthy active", true, 3, 1, "HK-1", 7, "HEALTHY"},
+	}
+	for _, tc := range cases {
+		got := diagnoseSuspect(tc.vpnRunning, tc.live, tc.dead, tc.currentNode, tc.conns)
+		if !strings.HasPrefix(got, tc.wantPrefix) {
+			t.Errorf("[%s] want prefix %q, got %q", tc.name, tc.wantPrefix, got)
+		}
 	}
 }
 

@@ -26,11 +26,143 @@ func RegisterMacroTools(ctrl VpnController, ov *overlay.ConfigOverlay, subMgr *s
 	tools := map[string]*ToolDef{
 		"setup_app_chain":        toolSetupAppChain(ctrl, ov),
 		"switch_to_fastest_node": toolSwitchToFastestNode(ctrl),
+		"diagnose_connectivity":  toolDiagnoseConnectivity(ctrl, ov),
 	}
 	if subMgr != nil {
 		tools["import_and_activate_subscription"] = toolImportAndActivateSubscription(ctrl, subMgr)
 	}
 	return tools
+}
+
+// toolDiagnoseConnectivity 把 "我连不上/网络有问题/为什么访问不了 X" 类问询的
+// 4 步综合诊断 (vpn_status + 节点测速摘要 + 连接快照 + DNS 模式) 收敛为单 tool_call。
+//
+// 设计动机: 用户报障时往往不知道哪一层断, LLM 拆 4 个 read tool 串行查 + stream 卡死面积大;
+// 此 tool 一次调用产出结构化报告 + 一句话 suspect 结论, LLM 直接照搬给用户。 这是 RoleDiagnose
+// 角色的 "用户问障 → 一次查清楚" 主线 tool, 比拼凑底层 read tool 输出更稳。
+//
+// 只读, 不改任何配置 (IsWriteOp=false), pipeline 不会触发 snapshot/rollback。
+func toolDiagnoseConnectivity(ctrl VpnController, ov *overlay.ConfigOverlay) *ToolDef {
+	return &ToolDef{
+		Name: "diagnose_connectivity",
+		Description: "READ-ONLY ATOMIC: collect a full network health snapshot (VPN status + selector node + node latency summary + active connection count + DNS mode) in ONE call and return a single 'suspect: X' verdict. " +
+			"Use this for ANY '我连不上/网络好像有问题/为什么访问不了 X/it's slow/why can't I reach Y' diagnostic request — DO NOT call vpn_status + test_latency_all + get_connections + get_dns_config separately, this tool aggregates them and reports one structured Message ready to forward to the user.",
+		IsWriteOp: false,
+		Execute: func(ctx context.Context, a engine.EngineAdapter, params map[string]interface{}) (*ToolResult, error) {
+			report := strings.Builder{}
+			data := map[string]interface{}{}
+
+			// [1/4] VPN 状态 + 当前 selector 节点
+			vpnRunning := ctrl != nil && ctrl.IsRunning()
+			data["vpn_running"] = vpnRunning
+			if vpnRunning {
+				report.WriteString("VPN: 运行中")
+			} else {
+				report.WriteString("VPN: 未启动")
+			}
+			var currentNode string
+			if vpnRunning {
+				if grp, err := a.GetProxyGroup("proxy-group"); err == nil && grp != nil {
+					currentNode = grp.Now
+					data["current_node"] = currentNode
+					report.WriteString(fmt.Sprintf(" · 当前出口=%s", currentNode))
+				}
+			}
+			report.WriteString("\n")
+
+			// [2/4] 节点测速摘要 (仅 VPN 运行时跑, 否则全是 timeout 没意义)
+			var bestTag string
+			var bestLatency int
+			deadCount := 0
+			liveCount := 0
+			if vpnRunning {
+				if proxies, err := a.GetProxies(); err == nil {
+					real := filterRealNodes(proxies)
+					results := concurrentLatencyTest(a, real)
+					for _, r := range results {
+						if r.Latency <= 0 {
+							deadCount++
+							continue
+						}
+						liveCount++
+						if bestTag == "" || r.Latency < bestLatency {
+							bestTag = r.Tag
+							bestLatency = r.Latency
+						}
+					}
+					data["nodes_live"] = liveCount
+					data["nodes_dead"] = deadCount
+					data["nodes_total"] = liveCount + deadCount
+					if bestTag != "" {
+						data["best_node"] = bestTag
+						data["best_latency_ms"] = bestLatency
+						report.WriteString(fmt.Sprintf("节点: %d 活/%d 死 · 最快 %s (%dms)\n", liveCount, deadCount, bestTag, bestLatency))
+					} else {
+						report.WriteString(fmt.Sprintf("节点: 0 活/%d 死 · 全超时\n", deadCount))
+					}
+				} else {
+					report.WriteString(fmt.Sprintf("节点: 拉取失败 (%s)\n", err.Error()))
+				}
+			} else {
+				report.WriteString("节点: skip (VPN 未启动跑测速没意义)\n")
+			}
+
+			// [3/4] 连接快照 (仅活动数, 不暴露具体 host 减 PII)
+			activeConns := 0
+			if vpnRunning {
+				if conns, err := a.GetConnections(); err == nil {
+					activeConns = len(conns)
+				}
+			}
+			data["active_connections"] = activeConns
+			report.WriteString(fmt.Sprintf("活动连接: %d\n", activeConns))
+
+			// [4/4] DNS 模式
+			dnsMode := "unknown"
+			if ov != nil {
+				dns := ov.GetDNS()
+				if dns == nil {
+					dns = overlay.DefaultDNSConfig("secure")
+				}
+				dnsMode = inferDNSMode(dns)
+			}
+			data["dns_mode"] = dnsMode
+			report.WriteString(fmt.Sprintf("DNS: %s\n", dnsMode))
+
+			// 综合 suspect 结论 — LLM 可直接转告用户
+			suspect := diagnoseSuspect(vpnRunning, liveCount, deadCount, currentNode, activeConns)
+			data["suspect"] = suspect
+			report.WriteString("\nsuspect: " + suspect)
+
+			return &ToolResult{
+				Success: true,
+				Message: report.String(),
+				Data:    data,
+			}, nil
+		},
+	}
+}
+
+// diagnoseSuspect 根据收集的指标产出一句话 suspect 结论。 输出语义是 "最可能的故障来源",
+// 用户/LLM 拿到 "VPN_STOPPED" / "ALL_NODES_DEAD" / "NO_CURRENT_NODE" / "HEALTHY" 这种短码
+// 就知道下一步该做什么 (start_vpn / 换订阅 / switch_to_fastest_node / 没事)。
+func diagnoseSuspect(vpnRunning bool, liveCount, deadCount int, currentNode string, activeConns int) string {
+	if !vpnRunning {
+		return "VPN_STOPPED — 先调 start_vpn 或让用户手动启 VPN"
+	}
+	if liveCount == 0 && deadCount > 0 {
+		return "ALL_NODES_DEAD — 全部节点超时, 建议 import_and_activate_subscription 换源"
+	}
+	if currentNode == "" || currentNode == "direct-out" {
+		return "NO_CURRENT_NODE — selector 没指向真实节点, 调 switch_to_fastest_node"
+	}
+	if liveCount > 0 && deadCount > liveCount*2 {
+		return "MOSTLY_DEAD — 多数节点超时但有活节点, 当前出口可能是其中之一; 可调 switch_to_fastest_node 切活的"
+	}
+	if activeConns == 0 {
+		return "IDLE — 链路看起来健康但当前没活动连接, 用户重新发起请求看下"
+	}
+	return "HEALTHY — VPN 运行 + 节点活 + 当前出口 OK + 有活动连接, 故障可能在远端站点"
 }
 
 // toolImportAndActivateSubscription "导订阅 + 切到能用的节点" 收敛为单 tool_call。

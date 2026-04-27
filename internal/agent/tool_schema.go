@@ -253,6 +253,11 @@ var toolParameterSchemas = map[string]json.RawMessage{
 		},
 		"required": ["app_pkg", "nodes"]
 	}`),
+	"diagnose_connectivity": json.RawMessage(`{
+		"type": "object",
+		"properties": {},
+		"required": []
+	}`),
 	"import_and_activate_subscription": json.RawMessage(`{
 		"type": "object",
 		"properties": {
