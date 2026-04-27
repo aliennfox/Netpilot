@@ -129,6 +129,16 @@ func TestClassifyTask(t *testing.T) {
 		{"切到香港", "切到香港", false, true, true},
 		{"用美国", "用美国节点", false, true, true},
 
+		// 真机暴露 (2026-04-27): "切到 + 排名形容词" 之前 fall through 到 Diagnose-only,
+		// 导致 LLM 看不到 switch_node 干瞪眼。 现在覆盖切节点高频简写 + 链/订阅/Per-App 动作
+		{"切到延迟最低", "切到延迟最低的节点", false, true, true},
+		{"切最快", "切最快的节点", false, true, true},
+		{"换到延迟最低", "换到延迟最低的", false, true, true},
+		{"切节点", "切节点", false, true, true},
+		{"导入订阅", "导入订阅 https://x.y/sub", false, true, true},
+		{"配链", "给 Chrome 配链式代理", false, true, true},
+		{"应用走代理", "让 Chrome 走代理", false, true, true},
+
 		// 默认: 只诊断
 		{"无关闲聊默认 Diagnose", "今天天气真好", true, false, false},
 	}
