@@ -275,6 +275,9 @@ func NewClient(dataDir, clashAPIAddr, apiKey string) *Client {
 			"get_node_pool", "get_connections", "get_logs",
 			// Clash API 写 tool
 			"switch_node", "set_mode",
+			// 默认 activate=true 时尾调 SetActiveProxy 切 selector, 也是 Clash API 写。
+			// activate=false 罕见 (LLM 漏切等于白创), 一并 ensure VPN 不亏。
+			"create_chain",
 		},
 	)
 	// 一处注入 reload hook, 覆盖所有写 overlay 的 tool / 订阅 manager 路径

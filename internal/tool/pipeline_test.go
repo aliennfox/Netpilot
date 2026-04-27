@@ -373,3 +373,87 @@ func TestPipeline_ManualRollback_NoSnapshots(t *testing.T) {
 		t.Errorf("msg should mention 没有可用的快照, got %q", res.Message)
 	}
 }
+
+// TestPipeline_VpnGuardSkippedForUnregisteredTool — VpnGuard 注册后, 不在
+// requireVPNTool 列表里的 tool 不该触发 ensureFn (避免纯 overlay 写盘也强拉 VPN)
+func TestPipeline_VpnGuardSkippedForUnregisteredTool(t *testing.T) {
+	pipe, _, _ := buildTestPipeline(t, newFakeAdapter(), nil, nil, nil)
+	guardCalls := 0
+	pipe.SetVpnGuard(
+		func() error { guardCalls++; return nil },
+		[]string{"switch_node"},
+	)
+	pipe.tools["patch_route_rule"] = mkWriteTool("patch_route_rule",
+		func(context.Context, engine.EngineAdapter, map[string]interface{}) (*ToolResult, error) {
+			return &ToolResult{Success: true, Message: "rule added"}, nil
+		})
+
+	res := pipe.Execute(context.Background(), "patch_route_rule", nil)
+	if !res.Success {
+		t.Fatalf("expected success, got %+v", res)
+	}
+	if guardCalls != 0 {
+		t.Errorf("VpnGuard should NOT fire for tool not in requireVPNTool, got %d calls", guardCalls)
+	}
+}
+
+// TestPipeline_VpnGuardTriggeredForRegisteredTool — 注册了 switch_node 时,
+// 调 switch_node 必须先调 ensureFn (Phase 1.5 auto-bootstrap 核心契约)
+func TestPipeline_VpnGuardTriggeredForRegisteredTool(t *testing.T) {
+	pipe, _, _ := buildTestPipeline(t, newFakeAdapter(), nil, nil, nil)
+	guardCalls := 0
+	executeCalled := false
+	pipe.SetVpnGuard(
+		func() error { guardCalls++; return nil },
+		[]string{"switch_node", "create_chain"},
+	)
+	pipe.tools["switch_node"] = mkWriteTool("switch_node",
+		func(_ context.Context, a engine.EngineAdapter, p map[string]interface{}) (*ToolResult, error) {
+			executeCalled = true
+			node, _ := p["node"].(string)
+			_ = a.SetActiveProxy("proxy-group", node)
+			return &ToolResult{Success: true, Message: "switched"}, nil
+		})
+
+	res := pipe.Execute(context.Background(), "switch_node", map[string]interface{}{"node": "JP-1"})
+	if !res.Success {
+		t.Fatalf("expected success, got %+v", res)
+	}
+	if guardCalls != 1 {
+		t.Errorf("VpnGuard should fire exactly once for registered tool, got %d", guardCalls)
+	}
+	if !executeCalled {
+		t.Error("Execute should run after guard returns nil")
+	}
+}
+
+// TestPipeline_VpnGuardFailureBlocksExecute — guard 报错 (用户拒绝 VPN 授权 / 超时)
+// 必须阻断 Execute 且 telemetry 标 vpn-guard 错误, 用户消息明示哪个 tool 因 VPN 失败
+func TestPipeline_VpnGuardFailureBlocksExecute(t *testing.T) {
+	pipe, _, _ := buildTestPipeline(t, newFakeAdapter(), nil, nil, nil)
+	pipe.SetVpnGuard(
+		func() error { return errors.New("user denied VPN permission") },
+		[]string{"create_chain"},
+	)
+	executed := false
+	pipe.tools["create_chain"] = mkWriteTool("create_chain",
+		func(context.Context, engine.EngineAdapter, map[string]interface{}) (*ToolResult, error) {
+			executed = true
+			return &ToolResult{Success: true}, nil
+		})
+
+	res := pipe.Execute(context.Background(), "create_chain", nil)
+	if res.Success {
+		t.Fatalf("guard failure should block tool, got %+v", res)
+	}
+	if executed {
+		t.Error("Execute must NOT run when guard fails")
+	}
+	if !strings.Contains(res.Message, "create_chain") || !strings.Contains(res.Message, "VPN") {
+		t.Errorf("user msg should name the blocked tool + VPN reason, got %q", res.Message)
+	}
+	entries := pipe.telemetry.Recent(10)
+	if len(entries) != 1 || entries[0].Success || !strings.Contains(entries[0].Error, "vpn-guard") {
+		t.Errorf("telemetry should record vpn-guard error, got %+v", entries)
+	}
+}
