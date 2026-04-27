@@ -11,6 +11,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -636,7 +637,7 @@ fun HomeScreen(
                 ) {
                     Surface(
                         color = pc.surface,
-                        shape = RoundedCornerShape(16.dp),
+                        shape = MaterialTheme.shapes.large,
                         shadowElevation = if (pc.isDark) 0.dp else 4.dp,
                         border = if (pc.isDark) androidx.compose.foundation.BorderStroke(1.dp, pc.hairline) else null,
                         modifier = Modifier.fillMaxWidth(),
@@ -671,7 +672,7 @@ fun HomeScreen(
                             Box(
                                 modifier = Modifier
                                     .size(36.dp)
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(MaterialTheme.shapes.medium)
                                     .background(if (input.isNotEmpty()) pc.accent else pc.surface2)
                                     .clickable(enabled = input.isNotEmpty()) {
                                         AgentQueryBus.post(input)
@@ -720,7 +721,7 @@ private fun VpnStopBanner(
     Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
         Surface(
             color = pc.surface,
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+            shape = MaterialTheme.shapes.medium,
             border = androidx.compose.foundation.BorderStroke(1.dp, pc.warn),
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -792,7 +793,7 @@ private fun ActiveNodeCard(
                     StatusDot(state = if (running) "nominal" else "warn")
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
+                            .clip(MaterialTheme.shapes.extraSmall)
                             .background(pc.accent)
                             .padding(horizontal = 8.dp, vertical = 3.dp),
                     ) {

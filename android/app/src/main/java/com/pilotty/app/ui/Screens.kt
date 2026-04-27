@@ -476,7 +476,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                             modifier = Modifier
                                 .padding(top = 2.dp)
                                 .size(26.dp)
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(MaterialTheme.shapes.small)
                                 .background(pc.accent),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -564,7 +564,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
         ) {
             Surface(
                 color = pc.surface,
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.large,
                 shadowElevation = if (pc.isDark) 0.dp else 4.dp,
                 border = if (pc.isDark) androidx.compose.foundation.BorderStroke(1.dp, pc.hairline) else null,
                 modifier = Modifier.fillMaxWidth(),
@@ -601,7 +601,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                     Box(
                         modifier = Modifier
                             .size(36.dp)
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(MaterialTheme.shapes.medium)
                             .background(if (input.isNotBlank()) pc.accent else pc.surface2)
                             .clickable(enabled = !ui.sending && input.isNotBlank()) {
                                 vm.send(input, helpText)
@@ -833,7 +833,7 @@ fun NodesScreen(
         // 搜索栏 — Surface + shadow, 不再是 border outline
         Surface(
             color = pc.surface,
-            shape = RoundedCornerShape(12.dp),
+            shape = MaterialTheme.shapes.medium,
             shadowElevation = if (pc.isDark) 0.dp else 4.dp,
             border = if (pc.isDark) androidx.compose.foundation.BorderStroke(1.dp, pc.hairline) else null,
             modifier = Modifier
@@ -871,7 +871,7 @@ fun NodesScreen(
         ui.error?.let {
             Surface(
                 color = pc.surface2,
-                shape = RoundedCornerShape(12.dp),
+                shape = MaterialTheme.shapes.medium,
                 border = androidx.compose.foundation.BorderStroke(1.dp, pc.error),
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -887,7 +887,7 @@ fun NodesScreen(
         ui.toast?.let {
             Surface(
                 color = pc.surface2,
-                shape = RoundedCornerShape(12.dp),
+                shape = MaterialTheme.shapes.medium,
                 border = androidx.compose.foundation.BorderStroke(1.dp, pc.hairlineStrong),
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -949,7 +949,7 @@ fun NodesScreen(
                 item {
                     Surface(
                         color = pc.surface,
-                        shape = RoundedCornerShape(16.dp),
+                        shape = MaterialTheme.shapes.large,
                         shadowElevation = if (pc.isDark) 0.dp else 4.dp,
                         border = if (pc.isDark) androidx.compose.foundation.BorderStroke(1.dp, pc.hairline) else null,
                         modifier = Modifier.fillMaxWidth(),
@@ -1043,7 +1043,7 @@ private fun NodeCard(
                 if (isFastest) {
                     Surface(
                         color = pc.accent,
-                        shape = RoundedCornerShape(4.dp),
+                        shape = MaterialTheme.shapes.extraSmall,
                     ) {
                         Text(
                             "FASTEST",

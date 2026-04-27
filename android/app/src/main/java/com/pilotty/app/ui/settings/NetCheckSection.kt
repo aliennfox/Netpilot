@@ -1,6 +1,11 @@
 package com.pilotty.app.ui.settings
 
 import android.util.Log
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -176,15 +181,25 @@ private fun NetCheckRow(
                 )
             }
         }
-        if (expanded && line.detail.isNotEmpty()) {
-            Spacer(Modifier.height(2.dp))
-            Text(
-                line.detail,
-                color = pc.ink3,
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(start = 16.dp, end = 4.dp),
-            )
+        // M3 Motion: 给详情面板 expand/collapse 加 spring 弹性 (fadeIn 用 PilottyMotion.springStandard,
+        // expandVertically/shrinkVertically 走默认 IntSize spring 因为我们的 motion token 仅 Float 版本).
+        AnimatedVisibility(
+            visible = expanded && line.detail.isNotEmpty(),
+            enter = fadeIn(animationSpec = com.pilotty.app.ui.theme.PilottyMotion.springStandard) +
+                expandVertically(),
+            exit = fadeOut(animationSpec = com.pilotty.app.ui.theme.PilottyMotion.springStandard) +
+                shrinkVertically(),
+        ) {
+            Column {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    line.detail,
+                    color = pc.ink3,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(start = 16.dp, end = 4.dp),
+                )
+            }
         }
     }
 }
