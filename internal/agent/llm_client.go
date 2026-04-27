@@ -64,9 +64,13 @@ type CompletionRequest struct {
 	ToolChoice  string    `json:"tool_choice,omitempty"` // "auto", "none", or "required"
 	Temperature *float64  `json:"temperature,omitempty"` // nil = provider 默认; 指针用于区分 "未设置" 和 "设 0"
 	Stream      bool      `json:"stream,omitempty"`
-	// EnableThinking Qwen3 系列默认开 thinking mode, 把推理当 text 输出会让 tool_call 被吞.
-	// 显式 false 走 non-thinking 路径, tool-use 稳; SiliconFlow 对非 Qwen 模型忽略此字段.
+	// EnableThinking Qwen3 系列默认开 thinking, 把推理当 text 输出会吞 tool_call.
+	// 顶层裸字段在 SiliconFlow 被忽略 (vllm/sglang 后端只看 chat_template_kwargs),
+	// 但 OpenRouter / 阿里 dashscope 部分版本接顶层, 双写不亏.
 	EnableThinking *bool `json:"enable_thinking,omitempty"`
+	// ChatTemplateKwargs SiliconFlow / vllm / sglang 把 chat_template 参数包在这.
+	// 关 thinking 必经路径: {"enable_thinking": false}.
+	ChatTemplateKwargs map[string]interface{} `json:"chat_template_kwargs,omitempty"`
 }
 
 // BoolPtr 返回 bool 指针, 用于构造 CompletionRequest.EnableThinking
@@ -161,6 +165,7 @@ func (c *LLMClient) Complete(ctx context.Context, req CompletionRequest) (*Compl
 // OpenAI 协议里 content / tool_calls 每次只给 delta, 需要上层累积。
 type StreamDelta struct {
 	ContentDelta   string
+	ReasoningDelta string          // Qwen3 / DeepSeek-R1 thinking token (上层默认丢弃, 不喂用户 UI)
 	ToolCallDeltas []ToolCallDelta // 本 chunk 里出现的 tool_call 分片 (带 index)
 	FinishReason   string          // "stop" / "tool_calls" / "length" / ""
 }
@@ -176,13 +181,19 @@ type ToolCallDelta struct {
 }
 
 // streamChunkRaw 是 SSE payload 的 OpenAI-兼容原始 schema。
+//
+// 2026-04-27 加 reasoning_content: Qwen3 / DeepSeek-R1 系列 thinking 走单独字段,
+// 不解析就被丢弃。 若 thinking 没真正关掉, content 出现前 stream 可能因 token
+// 配额或 provider 行为提前断, UI 表现 "开半句没下文"。 解析后即便 thinking 仍开
+// 也能拼出真 content。
 type streamChunkRaw struct {
 	Choices []struct {
 		Index int `json:"index"`
 		Delta struct {
-			Role      string                   `json:"role,omitempty"`
-			Content   string                   `json:"content,omitempty"`
-			ToolCalls []streamChunkRawToolCall `json:"tool_calls,omitempty"`
+			Role             string                   `json:"role,omitempty"`
+			Content          string                   `json:"content,omitempty"`
+			ReasoningContent string                   `json:"reasoning_content,omitempty"`
+			ToolCalls        []streamChunkRawToolCall `json:"tool_calls,omitempty"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason,omitempty"`
 	} `json:"choices"`
@@ -255,8 +266,9 @@ func (c *LLMClient) CompleteStream(ctx context.Context, req CompletionRequest, o
 		}
 		ch := raw.Choices[0]
 		delta := StreamDelta{
-			ContentDelta: ch.Delta.Content,
-			FinishReason: ch.FinishReason,
+			ContentDelta:   ch.Delta.Content,
+			ReasoningDelta: ch.Delta.ReasoningContent,
+			FinishReason:   ch.FinishReason,
 		}
 		for _, tc := range ch.Delta.ToolCalls {
 			delta.ToolCallDeltas = append(delta.ToolCallDeltas, ToolCallDelta{
