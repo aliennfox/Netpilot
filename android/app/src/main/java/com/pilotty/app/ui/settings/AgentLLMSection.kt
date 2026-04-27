@@ -179,19 +179,23 @@ fun AgentLLMSection() {
                                     val result = withContext(Dispatchers.IO) {
                                         runCatching {
                                             PilottyCore.listLLMModels(draftBase.trim(), draftKey.trim())
-                                        }.getOrElse { """{"error":"${it.message}"}""" }
+                                        }.getOrElse { """{"success":false,"error":"${it.message}"}""" }
                                     }
                                     modelListLoading = false
-                                    val parsed = runCatching { Json.decodeFromString<ModelsResp>(result) }
-                                        .getOrNull()
-                                    if (parsed?.error != null) {
-                                        modelListError = parsed.error
-                                    } else if (parsed?.models != null) {
-                                        modelList = parsed.models
-                                        modelMenuOpen = modelList.isNotEmpty()
-                                        if (modelList.isEmpty()) modelListError = "无模型返回"
-                                    } else {
-                                        modelListError = "解析失败"
+                                    // Go okJSON 包 envelope: {success,data:{models}|error,error}
+                                    val parsed = runCatching {
+                                        val lenient = Json { ignoreUnknownKeys = true }
+                                        lenient.decodeFromString<EnvelopeResp>(result)
+                                    }.getOrNull()
+                                    when {
+                                        parsed == null -> modelListError = "解析失败: ${result.take(80)}"
+                                        parsed.success != true -> modelListError = parsed.error ?: "未知错误"
+                                        parsed.data?.models != null -> {
+                                            modelList = parsed.data.models
+                                            modelMenuOpen = modelList.isNotEmpty()
+                                            if (modelList.isEmpty()) modelListError = "无模型返回"
+                                        }
+                                        else -> modelListError = "无 data.models 字段: ${result.take(80)}"
                                     }
                                 }
                             },
@@ -253,9 +257,15 @@ fun AgentLLMSection() {
 }
 
 @Serializable
-private data class ModelsResp(
-    val models: List<String>? = null,
+private data class EnvelopeResp(
+    val success: Boolean? = null,
     val error: String? = null,
+    val data: ModelsData? = null,
+)
+
+@Serializable
+private data class ModelsData(
+    val models: List<String>? = null,
 )
 
 @Composable
