@@ -5,21 +5,17 @@ import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.TweenSpec
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -208,65 +204,40 @@ object PilottyMotion {
 }
 
 /**
- * PilottyTheme — Material You dynamic color (Android 12+) + brand fallback (≤Android 11).
+ * PilottyTheme — 固定品牌色 (royal blue accent), 不跟随壁纸动态色.
  *
- * Android 12+ 下颜色跟随系统壁纸自动派生,颜色 token (accent / surface / ink) 全部从
- * `dynamicDarkColorScheme` / `dynamicLightColorScheme` 拉, 萤光绿不再硬写。
- * Android 11- 走 buildDark()/buildLight() 保留经典萤光绿品牌作 fallback。
+ * 之前试过 Material You 动态色 (Android 12+ dynamicXXXColorScheme), 撤掉的原因:
+ *   1) 壁纸派生的 primary 不可控, 在很多壁纸下视觉很丑;
+ *   2) PilottyColorScheme.accentOnBg 派生 bug 一度导致按钮文字与底色重叠 (bg=primary, fg=primary);
+ *   3) Pilotty 的"控制台 / 飞行仪表盘"调性需要稳定品牌色, 不应该跟用户主屏漂移.
  *
- * 业务代码继续通过 `LocalPilottyColors.current` 拿 token —— 屏蔽 Material You 与 brand
- * fallback 的差异, 只看 PilottyColorScheme 这层抽象。
+ * 业务代码继续通过 `LocalPilottyColors.current` 拿 token —— 这层抽象保留, 方便未来需要时
+ * 再单独评估是否要回到动态色 (届时务必先修对比度推导, 见上面踩坑记录).
  */
 @Composable
 fun PilottyTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
-    val context = LocalContext.current
-    val supportsDynamic = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val pc = if (darkTheme) buildDark() else buildLight()
 
-    val m3 = when {
-        supportsDynamic && darkTheme -> dynamicDarkColorScheme(context)
-        supportsDynamic && !darkTheme -> dynamicLightColorScheme(context)
-        darkTheme -> {
-            val brand = buildDark()
-            darkColorScheme(
-                primary = brand.accent, onPrimary = brand.accentOnBg,
-                background = brand.bg, onBackground = brand.ink,
-                surface = brand.surface, onSurface = brand.ink,
-                surfaceVariant = brand.surface2, onSurfaceVariant = brand.ink2,
-                error = brand.error,
-            )
-        }
-        else -> {
-            val brand = buildLight()
-            lightColorScheme(
-                primary = brand.accent, onPrimary = brand.accentOnBg,
-                background = brand.bg, onBackground = brand.ink,
-                surface = brand.surface, onSurface = brand.ink,
-                surfaceVariant = brand.surface2, onSurfaceVariant = brand.ink2,
-                error = brand.error,
-            )
-        }
-    }
-
-    // PilottyColorScheme 层: dynamic 时从 m3.colorScheme 派生, fallback 时用品牌色
-    val pc = if (supportsDynamic) {
-        // 从 dynamic colorScheme 派生 PilottyColorScheme 各 slot. ink/surface 跟随壁纸,
-        // hairline 等"工程感"灰 token 仍然用品牌固定值 (壁纸派生的灰太软, 卡片边界看不清).
-        val brand = if (darkTheme) buildDark() else buildLight()
-        brand.copy(
-            accent = m3.primary,
-            accentInk = m3.onPrimary,
-            accentOnBg = m3.primary,
-            bg = m3.background,
-            surface = m3.surface,
-            surface2 = m3.surfaceVariant,
-            ink = m3.onSurface,
-            ink2 = m3.onSurfaceVariant,
-            error = m3.error,
+    val m3 = if (darkTheme) {
+        darkColorScheme(
+            primary = pc.accent, onPrimary = pc.accentOnBg,
+            background = pc.bg, onBackground = pc.ink,
+            surface = pc.surface, onSurface = pc.ink,
+            surfaceVariant = pc.surface2, onSurfaceVariant = pc.ink2,
+            error = pc.error,
         )
-    } else if (darkTheme) buildDark() else buildLight()
+    } else {
+        lightColorScheme(
+            primary = pc.accent, onPrimary = pc.accentOnBg,
+            background = pc.bg, onBackground = pc.ink,
+            surface = pc.surface, onSurface = pc.ink,
+            surfaceVariant = pc.surface2, onSurfaceVariant = pc.ink2,
+            error = pc.error,
+        )
+    }
 
     CompositionLocalProvider(LocalPilottyColors provides pc) {
         MaterialTheme(

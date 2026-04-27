@@ -38,9 +38,12 @@ import com.pilotty.app.data.*
 import com.pilotty.app.ui.agent.AgentQueryBus
 import com.pilotty.app.ui.components.*
 import com.pilotty.app.ui.theme.LocalPilottyColors
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -72,6 +75,39 @@ class ChatViewModel : ViewModel() {
 
     private val _state = MutableStateFlow(ChatUi(messages = loadPersistedMessages()))
     val state: StateFlow<ChatUi> = _state.asStateFlow()
+
+    // 顶栏副标实时显示 VPN 状态: tunRunning 变化触发 instant 刷, 8s ticker 兜底节点切换
+    private val _vpnHint = MutableStateFlow("VPN 未启动")
+    val vpnHint: StateFlow<String> = _vpnHint.asStateFlow()
+
+    // 流式 job 句柄, 用于 cancel(). collect 取消会触发 PilottyRepository.chatStream 内部
+    // ChatStreamHandle.cancel() (#M26), Go ctx.cancel → SSE 断 → LLM token 不再白烧
+    private var streamJob: Job? = null
+
+    init {
+        viewModelScope.launch {
+            com.pilotty.app.PilottyCore.tunRunning.collect { refreshVpnHint(it) }
+        }
+        viewModelScope.launch {
+            while (true) {
+                delay(8_000)
+                refreshVpnHint(com.pilotty.app.PilottyCore.tunRunning.value)
+            }
+        }
+    }
+
+    private suspend fun refreshVpnHint(running: Boolean) {
+        if (!running) {
+            _vpnHint.value = "VPN 未启动"
+            return
+        }
+        runCatching { PilottyRepository.status() }
+            .onSuccess { s ->
+                _vpnHint.value = if (s.currentNode.isNotEmpty()) "已连接 · ${s.currentNode}"
+                else "VPN 已启动 · 未选节点"
+            }
+            .onFailure { _vpnHint.value = "VPN 已启动" }
+    }
 
     private fun loadPersistedMessages(): List<ChatMessage> =
         prefs?.state?.value?.map { ChatMessage(it.role, it.text, it.source, it.events) } ?: emptyList()
@@ -115,7 +151,8 @@ class ChatViewModel : ViewModel() {
             error = null,
             streamingPhase = "",
         )
-        viewModelScope.launch {
+        streamJob?.cancel()
+        streamJob = viewModelScope.launch {
             // 占位 assistant 气泡: text 空, 随 TextDelta 涌出
             var pending = ChatMessage(role = "assistant", text = "", source = "", events = emptyList())
             var placedPending = false
@@ -190,11 +227,23 @@ class ChatViewModel : ViewModel() {
                         }
                     }
                 }
+            } catch (e: CancellationException) {
+                // 用户主动 cancel: silent, 保留已收到的 delta
+                _state.value = _state.value.copy(sending = false, streamingPhase = "")
+                persist(_state.value.messages)
+                throw e
             } catch (e: Throwable) {
                 _state.value = _state.value.copy(sending = false, error = e.message, streamingPhase = "")
                 persist(_state.value.messages)
             }
         }
+    }
+
+    /** 流式中按 ⏹ 中断: 取消 streamJob → collect 终止 → callbackFlow.awaitClose → handle.cancel() (#M26 链路) */
+    fun cancel() {
+        streamJob?.cancel()
+        streamJob = null
+        _state.value = _state.value.copy(sending = false, streamingPhase = "", error = null)
     }
 
     fun clear() {
@@ -370,9 +419,13 @@ private fun formatDurationMs(ms: Long): String = when {
 }
 
 @Composable
-fun ChatScreen(vm: ChatViewModel = viewModel()) {
+fun ChatScreen(
+    onNavigateAgentTrace: () -> Unit = {},
+    vm: ChatViewModel = viewModel(),
+) {
     val pc = LocalPilottyColors.current
     val ui by vm.state.collectAsStateWithLifecycle()
+    val vpnHint by vm.vpnHint.collectAsStateWithLifecycle()
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     // /help 本地响应的文案, 透传给 VM
@@ -403,21 +456,37 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text("Agent", color = pc.ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.16).sp)
-                    if (ui.sending) LiveDot()
-                }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.weight(1f),
+            ) {
+                // Action Trace 入口: 跳 Settings → Agent → 最近活动 (复用已有 AgentActivitySection)
                 Text(
-                    "${com.pilotty.app.PilottyCore.llmModel()} · ${ui.messages.count { it.role == "user" }} msgs",
-                    color = pc.ink3,
-                    fontSize = 10.5.sp,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = 0.2.sp,
+                    "≡",
+                    color = pc.ink,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clickable { onNavigateAgentTrace() }
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
                 )
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text("Agent", color = pc.ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.16).sp)
+                        if (ui.sending) LiveDot()
+                    }
+                    Text(
+                        vpnHint,
+                        color = pc.ink3,
+                        fontSize = 10.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 0.2.sp,
+                    )
+                }
             }
             Surface(
                 color = pc.surface2,
@@ -445,6 +514,28 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
             verticalArrangement = Arrangement.spacedBy(14.dp),
             contentPadding = PaddingValues(vertical = 16.dp),
         ) {
+            // 空态 quick query 卡: 给用户起步, 三条 Pilotty 高频意图
+            if (ui.messages.isEmpty() && !ui.sending) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "试试这些",
+                            color = pc.ink3,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            letterSpacing = 1.2.sp,
+                        )
+                        listOf(
+                            "VPN 现在是什么状态？",
+                            "诊断网络为什么连不上",
+                            "切到延迟最低的节点",
+                        ).forEach { q ->
+                            QuickQueryCard(text = q) { vm.send(q, helpText) }
+                        }
+                    }
+                }
+            }
             items(ui.messages) { msg ->
                 val isUser = msg.role == "user"
                 if (isUser) {
@@ -549,12 +640,6 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
             }
         }
 
-        if (ui.sending) LinearProgressIndicator(
-            modifier = Modifier.fillMaxWidth(),
-            color = pc.accent,
-            trackColor = pc.surface3,
-        )
-
         HorizontalDivider(color = pc.hairline, thickness = 1.dp)
         Column(
             modifier = Modifier
@@ -598,26 +683,53 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                             )
                         }
                     }
+                    // 状态机: sending → ⏹ accent (可点 cancel); 有输入 → ↑ accent (send); 空 → 灰
+                    val canAct = ui.sending || input.isNotBlank()
                     Box(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(MaterialTheme.shapes.medium)
-                            .background(if (input.isNotBlank()) pc.accent else pc.surface2)
-                            .clickable(enabled = !ui.sending && input.isNotBlank()) {
-                                vm.send(input, helpText)
-                                input = ""
+                            .background(if (canAct) pc.accent else pc.surface2)
+                            .clickable(enabled = canAct) {
+                                if (ui.sending) {
+                                    vm.cancel()
+                                } else {
+                                    vm.send(input, helpText)
+                                    input = ""
+                                }
                             },
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            "↑",
-                            color = if (input.isNotBlank()) pc.accentOnBg else pc.ink3,
-                            fontSize = 16.sp,
+                            if (ui.sending) "■" else "↑",
+                            color = if (canAct) pc.accentOnBg else pc.ink3,
+                            fontSize = if (ui.sending) 13.sp else 16.sp,
                             fontWeight = FontWeight.Bold,
                         )
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun QuickQueryCard(text: String, onClick: () -> Unit) {
+    val pc = LocalPilottyColors.current
+    Surface(
+        color = pc.surface,
+        shape = MaterialTheme.shapes.large,
+        border = androidx.compose.foundation.BorderStroke(1.dp, pc.hairline),
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(text, color = pc.ink, fontSize = 14.sp, lineHeight = 20.sp)
+            Text("→", color = pc.ink3, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
     }
 }

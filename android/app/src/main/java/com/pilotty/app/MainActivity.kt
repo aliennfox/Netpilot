@@ -144,7 +144,8 @@ fun PilottyApp(
 
     // 子页面 (node_detail / agent_tools / logs / connections / qr) 不显示底部 nav
     val isSubPage = current.startsWith("node_detail") || current == "agent_tools" ||
-        current == "logs" || current == "connections" || current == "qr"
+        current == "logs" || current == "connections" || current == "qr" ||
+        current.startsWith("settings_")
 
     androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxSize()) {
         NavHost(
@@ -160,7 +161,9 @@ fun PilottyApp(
                     onNavigateLogs = { nav.navigate("logs") },
                 )
             }
-            composable("chat") { ChatScreen() }
+            composable("chat") {
+                ChatScreen(onNavigateAgentTrace = { nav.navigate("settings_agent") })
+            }
             composable("nodes") {
                 NodesScreen(
                     onNavigateSubs = { nav.navigate("subs") },
@@ -179,10 +182,33 @@ fun PilottyApp(
                     onNavigateLogs = { nav.navigate("logs") },
                     onNavigateConnections = { nav.navigate("connections") },
                     onNavigateAgentTools = { nav.navigate("agent_tools") },
+                    onNavigateAgent = { nav.navigate("settings_agent") },
+                    onNavigateVpnAdvanced = { nav.navigate("settings_vpn_advanced") },
+                    onNavigateNetwork = { nav.navigate("settings_network") },
+                    onNavigateBackup = { nav.navigate("settings_backup") },
+                    onNavigateSystem = { nav.navigate("settings_system") },
                 )
             }
             composable("agent_tools") {
                 com.pilotty.app.ui.settings.AgentToolsScreen(onBack = { nav.popBackStack() })
+            }
+            composable("settings_agent") {
+                com.pilotty.app.ui.settings.SettingsAgentScreen(
+                    onBack = { nav.popBackStack() },
+                    onNavigateAgentTools = { nav.navigate("agent_tools") },
+                )
+            }
+            composable("settings_vpn_advanced") {
+                com.pilotty.app.ui.settings.SettingsVpnAdvancedScreen(onBack = { nav.popBackStack() })
+            }
+            composable("settings_network") {
+                com.pilotty.app.ui.settings.SettingsNetworkScreen(onBack = { nav.popBackStack() })
+            }
+            composable("settings_backup") {
+                com.pilotty.app.ui.settings.SettingsBackupScreen(onBack = { nav.popBackStack() })
+            }
+            composable("settings_system") {
+                com.pilotty.app.ui.settings.SettingsSystemScreen(onBack = { nav.popBackStack() })
             }
             composable("logs") { LogsScreen(onBack = { nav.popBackStack() }) }
             composable("connections") { ConnectionsScreen(onBack = { nav.popBackStack() }) }
