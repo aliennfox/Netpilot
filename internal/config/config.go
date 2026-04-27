@@ -8,10 +8,11 @@ const (
 
 	// LLM
 	DefaultLLMBaseURL = "https://api.siliconflow.cn/v1"
-	// 2026-04-27 切 Qwen3-32B: V4 Flash 在测速→选最快节点的 2nd-turn tool_call 上反复卡死
-	// (reasoning model 把后续 tool_call 当 text 输出, stream 不结束). Qwen3-32B 默认开 thinking,
-	// 需在 request body 加 enable_thinking=false (见 llm_client.go) 才能稳定走 tool-use 路径.
-	DefaultLLMModel = "Qwen/Qwen3-32B"
+	// 2026-04-27 切 Qwen3.6-35B-A3B (用户指定): V4 Flash / Qwen3-32B 在 tool-use 多轮上
+	// 都被 thinking mode 吞 tool_call 卡住. Qwen3.6 是 2026/04 阿里新一代 MoE,35B 总参 / 3B
+	// 激活, 原生支持 thinking 与 non-thinking 切换 + OpenAI tool-use 格式. SiliconFlow
+	// dashboard 已上架 (文档站尚未同步). 仍走 enable_thinking=false 强制 non-thinking 路径.
+	DefaultLLMModel = "Qwen/Qwen3.6-35B-A3B"
 	// DefaultLLMTimeout Qwen3-32B 关 thinking 后首 token 一般 < 5s, 但留够 tool 长链路 buffer.
 	DefaultLLMTimeout = 180 // seconds
 	DefaultMaxIter    = 10
