@@ -289,12 +289,12 @@ fun SettingsVpnAdvancedScreen(onBack: () -> Unit) {
 }
 
 @Composable
-fun SettingsNetworkScreen(onBack: () -> Unit) {
+fun SettingsNetworkScreen(onBack: () -> Unit, onNavigateChat: () -> Unit = {}) {
     SubScreenScaffold(title = "节点与路由", onBack = onBack) {
         FailoverSection()
         SniffingIpv6Section()
         DNSConfigSection()
-        com.pilotty.app.ui.RulesSection()
+        com.pilotty.app.ui.RulesSection(onNavigateChat = onNavigateChat)
     }
 }
 

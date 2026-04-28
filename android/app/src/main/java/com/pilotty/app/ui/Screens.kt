@@ -1601,7 +1601,10 @@ class RulesViewModel : ViewModel() {
 }
 
 @Composable
-fun RulesSection(vm: RulesViewModel = viewModel()) {
+fun RulesSection(
+    vm: RulesViewModel = viewModel(),
+    onNavigateChat: () -> Unit = {},
+) {
     val pc = LocalPilottyColors.current
     val ui by vm.state.collectAsStateWithLifecycle()
     var addDialogOpen by remember { mutableStateOf(false) }
@@ -1717,6 +1720,42 @@ fun RulesSection(vm: RulesViewModel = viewModel()) {
                 variant = PilottyButtonVariant.Outline,
                 small = true,
             )
+        }
+        // M5 空态引导: 0 自定义规则时给两个出口 — 直接手动加 / 让 Agent 帮你写
+        // 写路由规则是高 friction (要懂 domain_suffix vs domain_keyword vs ip_cidr,
+        // 还要选 outbound), 默认空态什么都不显示等于让用户自己摸黑。
+        if (ui.rules.isEmpty()) {
+            PilottyCard(modifier = Modifier.fillMaxWidth(), soft = true) {
+                Column(
+                    Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("还没有自定义规则", color = pc.ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "上面 Templates 是预设, 这里是你自己加的精细规则。 例: \"netflix.com 走 proxy-group\" / \"github.com 直连\"。",
+                        color = pc.ink3,
+                        fontSize = 11.5.sp,
+                        lineHeight = 17.sp,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        PilottyButton(
+                            text = "→ 让 Agent 帮你写",
+                            onClick = {
+                                AgentQueryBus.post("帮我加一条路由规则")
+                                onNavigateChat()
+                            },
+                            variant = PilottyButtonVariant.Primary,
+                            small = true,
+                        )
+                        PilottyButton(
+                            text = "手动添加",
+                            onClick = { addDialogOpen = true },
+                            variant = PilottyButtonVariant.Ghost,
+                            small = true,
+                        )
+                    }
+                }
+            }
         }
         ui.rules.forEach { r ->
             PilottyCard(modifier = Modifier.fillMaxWidth(), soft = true) {

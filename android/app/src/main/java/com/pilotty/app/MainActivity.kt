@@ -202,7 +202,13 @@ fun PilottyApp(
                 com.pilotty.app.ui.settings.SettingsVpnAdvancedScreen(onBack = { nav.popBackStack() })
             }
             composable("settings_network") {
-                com.pilotty.app.ui.settings.SettingsNetworkScreen(onBack = { nav.popBackStack() })
+                com.pilotty.app.ui.settings.SettingsNetworkScreen(
+                    onBack = { nav.popBackStack() },
+                    onNavigateChat = {
+                        nav.popBackStack()
+                        nav.navigate("chat")
+                    },
+                )
             }
             composable("settings_backup") {
                 com.pilotty.app.ui.settings.SettingsBackupScreen(onBack = { nav.popBackStack() })
