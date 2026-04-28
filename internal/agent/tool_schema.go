@@ -61,11 +61,11 @@ var toolParameterSchemas = map[string]json.RawMessage{
 		"properties": {
 			"group": {
 				"type": "string",
-				"description": "代理分组名称，如 proxy-group"
+				"description": "代理分组 tag。 Pilotty 默认就是 \"proxy-group\" (小写连字符), 不是 \"PROXY\" / \"Proxy\" / \"代理\"。 不确定时先调 get_node_pool 看 type=Selector 的 tag, 再传"
 			},
 			"node": {
 				"type": "string",
-				"description": "目标节点名称"
+				"description": "目标节点 tag (与 get_node_pool 返回的节点 tag 完全一致, 大小写敏感)"
 			}
 		},
 		"required": ["group", "node"]
